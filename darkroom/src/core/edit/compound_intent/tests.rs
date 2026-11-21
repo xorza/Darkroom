@@ -67,7 +67,7 @@ fn a_definition_comes_and_goes_with_its_side_unless_placed() {
         })),
     )
     .unwrap();
-    assert_eq!(document.graphs.compound(id), Some(&compound));
+    assert_eq!(document.graphs.compound(id), Some(compound.as_ref()));
     assert_eq!(document.sides[&id], side);
     document.validate().unwrap();
     let with = document.clone();
@@ -106,7 +106,7 @@ fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores
     let a = PortId::new(1);
     let mut compound = Compound::new("inner", inputs(vec![input(1, "a"), input(2, "b")]));
     let inside = compound.graph.add(fixture.plain_node());
-    let inputs_node = compound.inputs_node();
+    let inputs_node = compound.graph.inputs_node();
     let inner_input = InputPort::new(inside, PortId::new(1));
     let inner_wire = WireKey::Data(DataWire {
         output: OutputPort::new(inputs_node, a),
@@ -213,7 +213,7 @@ fn a_rename_takes_a_free_name_and_undoes() {
         clean,
         Compound::new("Clean", Interface::default()),
     );
-    let name = |document: &Document, id| document.graphs.compound(id).unwrap().name.clone();
+    let name = |document: &Document, id| document.graphs.compound(id).unwrap().decl.name.clone();
     let rename = |document: &mut Document, id, to: &str| {
         commit(
             document,

@@ -1,4 +1,5 @@
-//! [`Compound`]: a graph with an interface, held by a document and placed as instances.
+//! [`Compound`]: a graph with an interface, held by a document and placed as instances; its
+//! [`CompoundDecl`], what its instances show, and the [`CompoundRef`] a set lends.
 //!
 //! # Decisions
 //!
@@ -28,13 +29,27 @@
 //!   Input nodes ([node groups](https://docs.blender.org/manual/en/latest/interface/controls/nodes/groups.html)).
 //!   A wire from any of them reads what the instance holds on that port. Refused: several
 //!   `Outputs` nodes, which would give one interface output two producers.
+//! - **A compound's declaration stands apart from its body**: [`CompoundDecl`] is what a scope
+//!   reads, its name, description and interface, and never its graph, so a graph of a set can
+//!   change while a scope over the set lives. As MaterialX, where a `nodedef` declares the ports
+//!   and an implementation stands behind it
+//!   ([node definitions](https://kwokcb.github.io/MaterialX_Learn/documents/node_definitions.html)).
+//!   A file still writes a compound as one value, its declaration's fields beside its graph.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::graph::Graph;
 use crate::graph::interface::Interface;
 use crate::graph::node::{Boundary, Node};
-use crate::identity::NodeId;
+
+/// What a compound's instances and boundary nodes show: its name, what it is for, and its
+/// interface. What a [`Scope`](crate::Scope) resolves a node of it to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompoundDecl {
+    pub name: String,
+    pub description: Option<String>,
+    pub interface: Interface,
+}
 
 /// A graph with an interface, held by a document; a node of it is an *instance*. One kind for
 /// every use: a compound used once behaves as a private one, as Blender's node groups, shared
@@ -47,15 +62,23 @@ use crate::identity::NodeId;
 /// An instance, an `Inputs` and an `Outputs` node each resolve to the ports the interface gives
 /// them ([`NodeDecl`](crate::NodeDecl)), with no body: the compile removes all three.
 ///
-/// Plain data. An instance's wiring names the interface's ports by id, so a host that sets
-/// another interface removes, in the same edit, each binding on an instance or a boundary node
-/// that names a port the new interface lacks or no longer admits.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Plain data, the value a document, a clip and a library file move whole. An instance's wiring
+/// names the interface's ports by id, so a host that sets another interface removes, in the same
+/// edit, each binding on an instance or a boundary node that names a port the new interface lacks
+/// or no longer admits.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(from = "CompoundRepr")]
 pub struct Compound {
-    pub name: String,
-    pub description: Option<String>,
-    pub interface: Interface,
+    pub decl: CompoundDecl,
     pub graph: Graph,
+}
+
+/// A compound as a [`GraphSet`](crate::GraphSet) holds it: its declaration and its graph,
+/// borrowed apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CompoundRef<'a> {
+    pub decl: &'a CompoundDecl,
+    pub graph: &'a Graph,
 }
 
 impl Compound {
@@ -65,36 +88,78 @@ impl Compound {
         graph.add(Node::from(Boundary::Inputs));
         graph.add(Node::from(Boundary::Outputs));
         Self {
-            name: name.into(),
-            description: None,
-            interface,
+            decl: CompoundDecl {
+                name: name.into(),
+                description: None,
+                interface,
+            },
             graph,
         }
     }
 
-    /// The `Inputs` nodes of this compound's graph, in node-id order.
-    pub fn inputs_nodes(&self) -> impl Iterator<Item = NodeId> {
-        self.graph.boundary_nodes(Boundary::Inputs)
+    /// This compound, borrowed as a set lends one.
+    pub const fn as_ref(&self) -> CompoundRef<'_> {
+        CompoundRef {
+            decl: &self.decl,
+            graph: &self.graph,
+        }
     }
+}
 
-    /// The `Inputs` node of least id: a new compound's one.
-    ///
-    /// # Panics
-    /// If the graph holds none, which a compound a host keeps never does.
-    pub fn inputs_node(&self) -> NodeId {
-        self.inputs_nodes()
-            .next()
-            .expect("a compound's graph holds an Inputs node")
+impl From<CompoundRef<'_>> for Compound {
+    fn from(compound: CompoundRef<'_>) -> Self {
+        Self {
+            decl: compound.decl.clone(),
+            graph: compound.graph.clone(),
+        }
     }
+}
 
-    /// The `Outputs` node of this compound's graph.
-    ///
-    /// # Panics
-    /// If the graph holds none, which a compound a host keeps never does.
-    pub fn outputs_node(&self) -> NodeId {
-        self.graph
-            .boundary_nodes(Boundary::Outputs)
-            .next()
-            .expect("a compound's graph holds an Outputs node")
+/// A compound as a file writes it: its declaration's fields, then its graph.
+#[derive(Deserialize)]
+struct CompoundRepr {
+    name: String,
+    description: Option<String>,
+    interface: Interface,
+    graph: Graph,
+}
+
+impl From<CompoundRepr> for Compound {
+    fn from(repr: CompoundRepr) -> Self {
+        Self {
+            decl: CompoundDecl {
+                name: repr.name,
+                description: repr.description,
+                interface: repr.interface,
+            },
+            graph: repr.graph,
+        }
+    }
+}
+
+/// [`CompoundRepr`] borrowed, so a write copies nothing.
+#[derive(Serialize)]
+struct CompoundReprRef<'a> {
+    name: &'a str,
+    description: &'a Option<String>,
+    interface: &'a Interface,
+    graph: &'a Graph,
+}
+
+impl Serialize for CompoundRef<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        CompoundReprRef {
+            name: &self.decl.name,
+            description: &self.decl.description,
+            interface: &self.decl.interface,
+            graph: self.graph,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl Serialize for Compound {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.as_ref().serialize(serializer)
     }
 }

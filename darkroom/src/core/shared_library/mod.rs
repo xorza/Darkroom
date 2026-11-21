@@ -34,7 +34,7 @@ pub(crate) mod scanner;
 use std::path::{Path, PathBuf};
 
 use common::fs;
-use scenarium::{CompoundDigest, CompoundId, Library, Manifest};
+use scenarium::{Compound, CompoundDigest, CompoundId, Library, Manifest};
 
 use crate::core::document::Document;
 use crate::core::document::compound_side::CompoundSide;
@@ -131,7 +131,7 @@ impl SharedLibrary {
             if !listed {
                 self.entries.push(LibraryEntry {
                     id,
-                    name: compound.name.clone(),
+                    name: compound.decl.name.clone(),
                     digest,
                     file,
                 });
@@ -213,11 +213,11 @@ impl SharedLibrary {
             .placed_first(entry.id)
             .into_iter()
             .map(|id| {
-                let compound = document
+                let compound: Compound = document
                     .graphs
                     .compound(id)
                     .expect("a placed compound is in its file")
-                    .clone();
+                    .into();
                 let side = document.sides.get(&id);
                 let view =
                     side.map_or_else(|| GraphView::new(&compound.graph), |side| side.view.clone());
@@ -251,7 +251,7 @@ pub(crate) fn published(
             .graphs
             .compound(placed)
             .expect("a placed compound is held")
-            .clone();
+            .into();
         let side = CompoundSide {
             through: None,
             synced: Some(document.graphs.digest(placed)),

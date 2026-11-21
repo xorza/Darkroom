@@ -7,6 +7,14 @@
 //! A column is addressed two ways over the same space: by one [`Idx`], and by a [`Span`] an
 //! owner holds when its entries are a packed run, which keeps a per-node input list out of a
 //! `Vec` per node.
+//!
+//! # Decisions
+//!
+//! - **An index's field is private**, built through [`Idx::from_idx`] alone, as rustc's
+//!   [`newtype_index`](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_index/macro.newtype_index.html)
+//!   and cranelift's [entity references](https://docs.rs/cranelift-entity/latest/cranelift_entity/)
+//!   keep theirs behind accessors. Refused: a niche for `Option<NodeIdx>`, which no column
+//!   needs.
 
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut, Range};

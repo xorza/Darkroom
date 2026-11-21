@@ -408,7 +408,7 @@ impl Document {
         let taken = |name: &str| {
             self.graphs
                 .compounds()
-                .any(|(_, compound)| compound.name == name)
+                .any(|(_, compound)| compound.decl.name == name)
         };
         if !taken(base) {
             return base.to_string();
@@ -629,7 +629,7 @@ impl Document {
         });
         for (compound, held) in graphs.compounds() {
             if let Entry::Vacant(side) = sides.entry(compound) {
-                side.insert(CompoundSide::new(&held.graph));
+                side.insert(CompoundSide::new(held.graph));
                 repairs.push(DocumentRepair::SideAdded { compound });
             }
         }
@@ -780,7 +780,7 @@ impl From<GraphSet> for Document {
         let main_view = GraphView::new(graphs.main());
         let sides = graphs
             .compounds()
-            .map(|(id, compound)| (id, CompoundSide::new(&compound.graph)))
+            .map(|(id, compound)| (id, CompoundSide::new(compound.graph)))
             .collect();
         Self {
             graphs,

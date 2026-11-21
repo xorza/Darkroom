@@ -16,17 +16,13 @@ use crate::graph::binding::Binding;
 use crate::graph::detached::{DetachedGhost, DetachedNode, DetachedNodeParts};
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{GhostBinding, GhostSource, GhostSubscription, GhostWiring};
-use crate::graph::manifest::Manifest;
+use crate::graph::load::{GraphLoad, Restore};
 use crate::graph::node::Node;
-use crate::graph::node_decl::NodeDecl;
-use crate::graph::reconciled::Repair;
 use crate::graph::scope::Scope;
 use crate::graph::subscription::Subscription;
 use crate::graph::wiring::Wiring;
 use crate::identity::FuncId;
 use crate::identity::{EventPort, InputPort, NodeId, OutputPort, PortId};
-use crate::library::Library;
-use crate::library::func_redirect::FuncRedirect;
 
 /// Where one old port of a node lands: on a new port, its wiring live, or on a ghost port.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -378,47 +374,6 @@ impl Graph {
         self.attach_ghost_node(record.remapped(ghost, remap, before, after));
     }
 
-    /// Move each node and ghost node of a func `library` redirects to the func its redirects end
-    /// at, in node-id order, its wiring through their remap; a ghost node's saved declaration, else
-    /// `manifest`, names the ports of the func it was. Report each.
-    pub(crate) fn redirect_all(
-        &mut self,
-        library: &Library,
-        manifest: &Manifest,
-        repairs: &mut Vec<Repair>,
-    ) {
-        let nodes = self.iter().map(|node| (node.node_id, node.func_id()));
-        let ghosts = self
-            .ghost_nodes()
-            .map(|(node_id, ghost)| (node_id, ghost.node.func_id()));
-        let mut redirected: Vec<(NodeId, &FuncRedirect)> = nodes
-            .chain(ghosts)
-            .filter_map(|(node_id, func)| Some((node_id, library.redirect(func?)?)))
-            .collect();
-        redirected.sort_unstable_by_key(|(node_id, _)| *node_id);
-        for (node_id, redirect) in redirected {
-            // A ghost node's func was missing at its save, so the file listed none for it: it
-            // holds what its func declared itself.
-            let before = self
-                .ghost_node(node_id)
-                .and_then(|ghost| ghost.saved.clone())
-                .or_else(|| manifest.func(redirect.from).cloned())
-                .unwrap_or_default();
-            let after = NodeDecl::Func(
-                library
-                    .by_id(redirect.to)
-                    .expect("a redirect ends at a registered func"),
-            )
-            .saved();
-            self.redirect(node_id, redirect.to, &redirect.remap, &before, &after);
-            repairs.push(Repair::Redirected {
-                node_id,
-                from: redirect.from,
-                to: redirect.to,
-            });
-        }
-    }
-
     /// The record `node_id`, a node or a ghost node, would be as `with`, its wiring moved
     /// through `remap`, read under `scope`: what the map names lands on the new ports, live
     /// where the new declaration takes it and a ghost where it does not; what the map does not
@@ -458,12 +413,16 @@ impl Graph {
             .remapped(with, remap, &before, &after)
         };
         trial.attach_node(record);
-        let mut scratch = Vec::new();
-        let refused = trial.refused_wiring(scope);
-        trial.ghost_refused(&refused, &mut scratch);
-        let mut admitted = trial.admitted_ghosts(scope);
-        admitted.retain_touching(node_id);
-        trial.restore(&admitted, &mut scratch);
+        // The trial's repairs describe a graph no one keeps: the record is what the replace
+        // reports.
+        let mut repairs = Vec::new();
+        let mut load = GraphLoad {
+            graph: &mut trial,
+            scope,
+            repairs: &mut repairs,
+        };
+        load.ghost_refused();
+        load.restore(Restore::Touching(node_id));
         trial
             .snapshot_node(node_id)
             .expect("the replaced node is in the trial")

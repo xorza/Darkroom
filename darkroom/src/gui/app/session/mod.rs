@@ -153,6 +153,7 @@ impl Session {
             .graphs
             .compound(id)
             .expect("an undo writes a graph the document holds")
+            .decl
             .name;
         requests.push_app(AppCommand::Warn(format!(
             "{verb} an edit in compound {name:?}, which no tab shows"

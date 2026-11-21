@@ -18,6 +18,10 @@
 //!   [`FuncBuilder::input`](crate::FuncBuilder::input) and an interface are the two places that
 //!   pair them. Refused: an `id` field that is nil until the port is numbered, a state a check
 //!   had to catch.
+//! - **A [`Numbered`] port reads as its port**, through `Deref`, at every site. A departure from
+//!   [C-DEREF](https://rust-lang.github.io/api-guidelines/predictability.html), "only smart
+//!   pointers implement `Deref`", for a pair that is its port with a number beside it. Refused:
+//!   `.port.` at each read.
 
 use std::ops::{Deref, DerefMut};
 

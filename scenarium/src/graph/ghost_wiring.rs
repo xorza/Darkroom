@@ -222,7 +222,8 @@ impl GhostWiring {
             .filter_map(|(port, ghost)| Some((*port, ghost.output()?)))
     }
 
-    /// The ghost wires that read `producer`'s outputs, by input.
+    /// The ghost wires that read `producer`'s outputs, by input. A scan: the ghost tables are
+    /// empty on a healthy document. Refused: a cache of a node's ghost ends per revision.
     pub fn wires_from(&self, producer: NodeId) -> impl Iterator<Item = (InputPort, &GhostBinding)> {
         self.bindings().filter(move |(_, ghost)| {
             ghost

@@ -6,6 +6,18 @@
 //! [`ExecEngine`](crate::exec::engine::ExecEngine). The [`DiskStore`] is pure blob I/O and knows
 //! nothing of the cache, so RAM eviction lives here, on the cache that owns both stores. Per-run
 //! results (errors, timings) are not here.
+//!
+//! # Decisions
+//!
+//! - **A belief about disk saves a read only where being wrong costs a recompute.** Refused:
+//!   trusting a blob under the stamp with no probe at the sweep, which saves one read per reused
+//!   frontier node per run and turns a blob deleted behind the engine into a node that fails with
+//!   `CacheLoadFailed`, its producers already cut; a belief that outlives the value, which saves a
+//!   probe for a node whose digest changed and so runs anyway. A failed write, the one state that
+//!   must outlive the value, is the slot's own.
+//! - **A load reads the blob's header again** inside its one blocking pass: a small read the page
+//!   cache serves, and the file as it is at the load. Refused: the probe's header kept for the
+//!   load, which would meet a blob replaced since the probe as a hash failure and delete it.
 
 pub(crate) mod cache_flush_report;
 pub(crate) mod error;
@@ -71,7 +83,10 @@ pub(crate) struct RuntimeCache {
     node_ram: Col<NodeIdx, RamUsage>,
     /// The first node of a run under each digest, while [`mark_leaders`](Self::mark_leaders)
     /// walks it. Scratch, kept only so the allocation survives; it holds one entry per node at
-    /// most.
+    /// most. hashbrown's default hasher, not SipHash: refused, a pass-through hasher for keys
+    /// "that already have hash-like quality", as rustc's
+    /// [`unhash`](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_data_structures/unhash/index.html),
+    /// which one insert per stamped node does not repay.
     leaders: HashMap<Digest, NodeIdx>,
     /// Each node's earlier node of this run under its digest, which it may take its values from:
     /// what [`mark_leaders`](Self::mark_leaders) answers and the sweep reads, aligned like the

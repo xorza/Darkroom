@@ -64,9 +64,9 @@ impl GraphSet {
             hasher.update(&(bytes.len() as u64).to_le_bytes());
             hasher.update(bytes);
         };
-        write(compound.name.as_bytes());
-        write(&encode(&compound.description));
-        write(&encode(compound.interface.ports()));
+        write(compound.decl.name.as_bytes());
+        write(&encode(&compound.decl.description));
+        write(&encode(compound.decl.interface.ports()));
         let graph = &compound.graph;
         for node in graph.iter() {
             write(&encode(&node.node_id));

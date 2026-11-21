@@ -30,7 +30,8 @@ use std::collections::BTreeMap;
 use std::mem;
 
 use hashbrown::HashMap;
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::data::data_type::DataType;
 use crate::data::data_type::type_ref::TypeRef;
@@ -38,7 +39,7 @@ use crate::decl::func::Func;
 use crate::decl::ports::error::PortList;
 use crate::decl::saved_decl::SavedDecl;
 use crate::graph::Graph;
-use crate::graph::compound::Compound;
+use crate::graph::compound::{Compound, CompoundDecl, CompoundRef};
 use crate::graph::dfs;
 use crate::graph::dfs::BackEdges;
 use crate::graph::error::{
@@ -49,13 +50,13 @@ use crate::graph::ghost_wiring::GhostSource;
 use crate::graph::graph_set::program_shape::ProgramShape;
 use crate::graph::graph_set::unknown_type::{InterfacePort, UnknownType};
 use crate::graph::interface::Interface;
+use crate::graph::load::{Before, GraphLoad, Refusal, Restore};
 use crate::graph::manifest::Manifest;
 use crate::graph::node::Node;
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::reconciled::{GraphSetReconciled, Repair};
 use crate::graph::scope::Scope;
 use crate::graph::type_names::TypeNames;
-use crate::graph::{Before, Detaching, RefusedWiring};
 use crate::identity::instance_path::InstancePath;
 use crate::identity::{CompoundId, FuncId, GraphId, NodeAddr, NodeId};
 use crate::library::{Library, UNKNOWN_TYPE};
@@ -64,17 +65,58 @@ use crate::library::{Library, UNKNOWN_TYPE};
 ///
 /// The fields are private, so each rule across graphs is a method here and no caller holds the
 /// main graph apart from the compounds it resolves against.
-#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// A compound's declaration and its graph sit in two maps of one key set, so a scope borrows the
+/// declarations while a graph changes: [`Self::insert_compound`] and [`Self::remove_compound`]
+/// write both, each a whole [`Compound`]. A file writes one map of whole compounds.
+#[derive(Clone, Default, Debug, Deserialize, PartialEq, Eq)]
+#[serde(from = "GraphSetRepr")]
 pub struct GraphSet {
     main: Graph,
-    /// A `BTreeMap`, so a walk in id order is the map's own, and decoded entry by entry, so a
-    /// document that repeats an id is refused rather than loaded with the last.
-    #[serde(deserialize_with = "crate::graph::serde::deserialize_compounds")]
-    compounds: BTreeMap<CompoundId, Compound>,
+    /// Each compound's declaration, by id. A `BTreeMap`, so a walk in id order is the map's own.
+    decls: BTreeMap<CompoundId, CompoundDecl>,
+    /// Each compound's graph, under the ids of `decls`.
+    bodies: BTreeMap<CompoundId, Graph>,
     /// The names files gave the types the library lacks, as [`TypeNames`] says: learned at a
     /// load and as a definition enters, written by the next save's manifest.
-    #[serde(skip)]
     type_names: TypeNames,
+}
+
+/// A set as a file holds it: the main graph, and each compound whole.
+#[derive(Deserialize)]
+struct GraphSetRepr {
+    main: Graph,
+    /// Decoded entry by entry, so a document that repeats an id is refused rather than loaded
+    /// with the last.
+    #[serde(deserialize_with = "crate::graph::serde::deserialize_compounds")]
+    compounds: BTreeMap<CompoundId, Compound>,
+}
+
+impl From<GraphSetRepr> for GraphSet {
+    fn from(repr: GraphSetRepr) -> Self {
+        let mut set = Self::from(repr.main);
+        for (id, Compound { decl, graph }) in repr.compounds {
+            set.decls.insert(id, decl);
+            set.bodies.insert(id, graph);
+        }
+        set
+    }
+}
+
+impl Serialize for GraphSet {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        /// The compounds as one map of whole values, borrowed.
+        struct Compounds<'a>(&'a GraphSet);
+        impl Serialize for Compounds<'_> {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.collect_map(self.0.compounds())
+            }
+        }
+        let mut set = serializer.serialize_struct("GraphSet", 2)?;
+        set.serialize_field("main", &self.main)?;
+        set.serialize_field("compounds", &Compounds(self))?;
+        set.end()
+    }
 }
 
 impl From<Graph> for GraphSet {
@@ -82,7 +124,8 @@ impl From<Graph> for GraphSet {
     fn from(main: Graph) -> Self {
         Self {
             main,
-            compounds: BTreeMap::new(),
+            decls: BTreeMap::new(),
+            bodies: BTreeMap::new(),
             type_names: TypeNames::default(),
         }
     }
@@ -96,12 +139,10 @@ impl GraphSet {
     pub fn graph(&self, graph: GraphId) -> &Graph {
         match graph {
             GraphId::Main => &self.main,
-            GraphId::Compound(id) => {
-                &self
-                    .compound(id)
-                    .expect("a named compound is in the set")
-                    .graph
-            }
+            GraphId::Compound(id) => self
+                .bodies
+                .get(&id)
+                .expect("a named compound is in the set"),
         }
     }
 
@@ -112,13 +153,10 @@ impl GraphSet {
     pub fn graph_mut(&mut self, graph: GraphId) -> &mut Graph {
         match graph {
             GraphId::Main => &mut self.main,
-            GraphId::Compound(id) => {
-                &mut self
-                    .compounds
-                    .get_mut(&id)
-                    .expect("a named compound is in the set")
-                    .graph
-            }
+            GraphId::Compound(id) => self
+                .bodies
+                .get_mut(&id)
+                .expect("a named compound is in the set"),
         }
     }
 
@@ -132,21 +170,35 @@ impl GraphSet {
         &mut self.main
     }
 
-    pub fn compound(&self, id: CompoundId) -> Option<&Compound> {
-        self.compounds.get(&id)
+    pub fn compound(&self, id: CompoundId) -> Option<CompoundRef<'_>> {
+        Some(CompoundRef {
+            decl: self.decls.get(&id)?,
+            graph: &self.bodies[&id],
+        })
+    }
+
+    /// Each compound's declaration, by id.
+    pub(super) const fn decls(&self) -> &BTreeMap<CompoundId, CompoundDecl> {
+        &self.decls
     }
 
     /// In id order.
-    pub fn compounds(&self) -> impl ExactSizeIterator<Item = (CompoundId, &Compound)> {
-        self.compounds.iter().map(|(id, compound)| (*id, compound))
+    pub fn compounds(&self) -> impl ExactSizeIterator<Item = (CompoundId, CompoundRef<'_>)> {
+        self.decls
+            .iter()
+            .zip(&self.bodies)
+            .map(|((id, decl), (body_id, graph))| {
+                debug_assert_eq!(id, body_id, "a compound's two halves share its id");
+                (*id, CompoundRef { decl, graph })
+            })
     }
 
     /// Every graph, the main graph first, then the compounds' in id order.
     pub fn graphs(&self) -> impl Iterator<Item = (GraphId, &Graph)> {
         [(GraphId::Main, &self.main)].into_iter().chain(
-            self.compounds
+            self.bodies
                 .iter()
-                .map(|(id, compound)| (GraphId::Compound(*id), &compound.graph)),
+                .map(|(id, graph)| (GraphId::Compound(*id), graph)),
         )
     }
 
@@ -154,11 +206,11 @@ impl GraphSet {
     /// If `id` is nil or already held: an add takes a fresh id.
     pub fn insert_compound(&mut self, id: CompoundId, compound: Compound) {
         assert!(!id.is_nil(), "cannot add a compound with a nil id");
-        let prev = self.compounds.insert(id, compound);
         assert!(
-            prev.is_none(),
+            !self.decls.contains_key(&id),
             "compound {id:?} already exists; adds must use a fresh id"
         );
+        self.put_compound(id, compound);
     }
 
     /// Take out the compound under `id`, or `None` if this set holds none.
@@ -170,13 +222,18 @@ impl GraphSet {
             self.uses(id).next().is_none(),
             "compound {id:?} is removed while placed"
         );
-        self.compounds.remove(&id)
+        let decl = self.decls.remove(&id)?;
+        let graph = self
+            .bodies
+            .remove(&id)
+            .expect("a declared compound has a graph");
+        Some(Compound { decl, graph })
     }
 
     /// Put `interface` on compound `id` and change no binding: what an interface write does once
     /// it has taken out what the new interface does not hold.
     pub(super) fn set_interface(&mut self, id: CompoundId, interface: Interface) {
-        self.compounds
+        self.decls
             .get_mut(&id)
             .expect("an interface edit's compound is in the set")
             .interface = interface;
@@ -189,7 +246,7 @@ impl GraphSet {
     /// If the set holds no compound `id`.
     pub fn rename_compound(&mut self, id: CompoundId, name: String) -> String {
         let held = self
-            .compounds
+            .decls
             .get_mut(&id)
             .expect("a renamed compound is in the set");
         mem::replace(&mut held.name, name)
@@ -199,7 +256,18 @@ impl GraphSet {
     /// and hand back the one it replaces. No check runs: what places it may no longer fit its
     /// ports, so the caller reconciles the set after, as a publish into a library file does.
     pub fn put_compound(&mut self, id: CompoundId, compound: Compound) -> Option<Compound> {
-        self.compounds.insert(id, compound)
+        let Compound { decl, graph } = compound;
+        let decl = self.decls.insert(id, decl);
+        let graph = self.bodies.insert(id, graph);
+        assert_eq!(
+            decl.is_some(),
+            graph.is_some(),
+            "a compound's two halves are held together"
+        );
+        Some(Compound {
+            decl: decl?,
+            graph: graph?,
+        })
     }
 
     /// Put `compound` in place of the definition held under `id`, its interface the same, and
@@ -210,14 +278,15 @@ impl GraphSet {
     /// If the set holds no compound `id`, or `compound`'s interface is not the held one's.
     pub fn replace_compound(&mut self, id: CompoundId, compound: Compound) -> Compound {
         let held = self
-            .compounds
-            .get_mut(&id)
+            .decls
+            .get(&id)
             .expect("a replaced compound is in the set");
         assert!(
-            held.interface == compound.interface,
+            held.interface == compound.decl.interface,
             "a replacement keeps the interface an interface edit set"
         );
-        mem::replace(held, compound)
+        self.put_compound(id, compound)
+            .expect("a replaced compound is in the set")
     }
 
     /// What the nodes of `graph` resolve against.
@@ -225,13 +294,7 @@ impl GraphSet {
     /// # Panics
     /// If `graph` names a compound this set does not hold.
     pub fn scope<'a>(&'a self, library: &'a Library, graph: GraphId) -> Scope<'a> {
-        let owner = match graph {
-            GraphId::Main => None,
-            GraphId::Compound(id) => {
-                Some(self.compound(id).expect("a scope's compound is in the set"))
-            }
-        };
-        Scope::new(library, &self.compounds, owner)
+        Scope::of_graph(library, &self.decls, graph)
     }
 
     /// The graph `path` ends in: each of its ids an instance in the graph the path before it ends
@@ -342,7 +405,7 @@ impl GraphSet {
             }
         };
         for &id in &walk.post_order {
-            let shape = shape_with(GraphId::Compound(id), &self.compounds[&id].graph, &shapes);
+            let shape = shape_with(GraphId::Compound(id), &self.bodies[&id], &shapes);
             shapes.insert(id, shape);
         }
         let main = shape_with(GraphId::Main, &self.main, &shapes);
@@ -436,7 +499,7 @@ impl GraphSet {
     /// Every type the set itself names, apart from what its nodes' funcs declare: each
     /// interface's ports, each ghost node's saved declaration and each ghost's saved ports.
     fn named_types(&self) -> impl Iterator<Item = DataType> {
-        let interfaces = self.compounds.values().flat_map(|compound| {
+        let interfaces = self.decls.values().flat_map(|compound| {
             let interface = &compound.interface;
             let inputs = interface.inputs().iter().map(|input| input.data_type);
             inputs.chain(interface.outputs().iter().map(|output| output.data_type))
@@ -503,30 +566,15 @@ impl GraphSet {
         self.learn_type_names(manifest.types(), library);
         let ids: Vec<GraphId> = self.graphs().map(|(graph, _)| graph).collect();
         let mut reports: BTreeMap<GraphId, Vec<Repair>> = BTreeMap::new();
-        let mut reattached: Vec<(GraphId, NodeId, GhostNode)> = Vec::new();
+        let mut reattached: BTreeMap<GraphId, BTreeMap<NodeId, GhostNode>> = BTreeMap::new();
 
         for &graph in &ids {
-            let report = reports.entry(graph).or_default();
-            self.graph_mut(graph).repair_structure(report);
-            self.graph_mut(graph)
-                .redirect_all(library, manifest, report);
-            let resolving = self
-                .graph(graph)
-                .resolving_ghost_nodes(self.scope(library, graph));
-            let ghosts = self.graph_mut(graph).reattach(&resolving, report);
-            reattached.extend(
-                resolving
-                    .iter()
-                    .zip(ghosts)
-                    .map(|(&node_id, ghost)| (graph, node_id, ghost)),
-            );
-            if matches!(graph, GraphId::Compound(_)) {
-                self.graph_mut(graph).add_missing_boundaries(report);
-            }
-            let unresolved = self
-                .graph(graph)
-                .unresolved(self.scope(library, graph), manifest);
-            self.graph_mut(graph).detach_into_ghosts(unresolved, report);
+            let mut load = self.load(library, graph, reports.entry(graph).or_default());
+            load.repair_structure();
+            load.redirect(manifest);
+            reattached.insert(graph, load.reattach());
+            load.add_missing_boundaries();
+            load.detach_unresolved(manifest);
         }
 
         let walk = self.walk();
@@ -546,56 +594,52 @@ impl GraphSet {
                     reason: DetachReason::Recursive,
                 })
                 .collect();
-            self.detach(library, manifest, graph, refused, &mut reports);
+            self.load(library, graph, reports.entry(graph).or_default())
+                .detach(manifest, refused);
         }
 
         let mut shapes = HashMap::with_capacity(walk.post_order.len());
         for &id in &walk.post_order {
             let graph = GraphId::Compound(id);
             let refused = over_bounds(self.graph(graph), &shapes);
-            self.detach(library, manifest, graph, refused, &mut reports);
+            self.load(library, graph, reports.entry(graph).or_default())
+                .detach(manifest, refused);
             shapes.insert(id, ProgramShape::of_graph(self.graph(graph), &shapes));
         }
         let refused = over_bounds(&self.main, &shapes);
-        self.detach(library, manifest, GraphId::Main, refused, &mut reports);
+        self.load(
+            library,
+            GraphId::Main,
+            reports.entry(GraphId::Main).or_default(),
+        )
+        .detach(manifest, refused);
 
         for &graph in &ids {
-            let refused: Vec<RefusedWiring> =
-                self.graph(graph).refused_wiring(self.scope(library, graph));
-            let report = reports.entry(graph).or_default();
-            self.graph_mut(graph).ghost_refused(&refused, report);
-            self.graph_mut(graph).drop_impossible_ghosts(report);
-            let admitted = self
-                .graph(graph)
-                .admitted_ghosts(self.scope(library, graph));
-            self.graph_mut(graph).restore(&admitted, report);
-
             // What each ghost node this load attached declared.
-            let returned: HashMap<NodeId, SavedDecl> = reattached
+            let returned: HashMap<NodeId, SavedDecl> = reattached[&graph]
                 .iter()
-                .filter(|(of, ..)| *of == graph)
-                .filter_map(|(_, node_id, ghost)| Some((*node_id, ghost.saved.clone()?)))
+                .filter_map(|(node_id, ghost)| Some((*node_id, ghost.saved.clone()?)))
                 .collect();
+            let mut load = self.load(library, graph, reports.entry(graph).or_default());
+            load.ghost_refused();
+            load.drop_impossible_ghosts();
+            load.restore(Restore::All);
             let before = Before {
                 manifest,
                 returned: &returned,
             };
-            let notes = self
-                .graph(graph)
-                .ghost_notes(self.scope(library, graph), before);
-            self.graph_mut(graph).note_ghosts(&notes, report);
-            let seeds =
-                self.graph(graph)
-                    .gained_defaults(self.scope(library, graph), before, &notes);
-            self.graph_mut(graph).seed_defaults(seeds, report);
+            let dropped = load.note_ghosts(before);
+            load.seed_defaults(before, &dropped);
         }
 
-        for (graph, node_id, before) in reattached {
-            if self.graph(graph).ghost_node(node_id) == Some(&before) {
-                reports
-                    .get_mut(&graph)
-                    .expect("a graph with a reattached ghost node has a report")
-                    .retain(|repair| !reattaches(repair, node_id));
+        for (graph, ghosts) in reattached {
+            for (node_id, before) in ghosts {
+                if self.graph(graph).ghost_node(node_id) == Some(&before) {
+                    reports
+                        .get_mut(&graph)
+                        .expect("a graph with a reattached ghost node has a report")
+                        .retain(|repair| !reattaches(repair, node_id));
+                }
             }
         }
 
@@ -609,25 +653,30 @@ impl GraphSet {
         report
     }
 
-    /// Make a ghost node of each node of `refused` in `graph`, each with what it declares.
-    fn detach(
-        &mut self,
-        library: &Library,
-        manifest: &Manifest,
+    /// `graph` under repair, beside the scope it resolves against: the one graph the load
+    /// changes, and the declarations it reads, borrowed apart.
+    ///
+    /// # Panics
+    /// If `graph` names a compound this set does not hold.
+    fn load<'a>(
+        &'a mut self,
+        library: &'a Library,
         graph: GraphId,
-        refused: Vec<Refusal>,
-        reports: &mut BTreeMap<GraphId, Vec<Repair>>,
-    ) {
-        let scope = self.scope(library, graph);
-        let detaching: Vec<Detaching> = refused
-            .into_iter()
-            .map(|Refusal { node_id, reason }| {
-                self.graph(graph)
-                    .detaching(scope, manifest, node_id, reason)
-            })
-            .collect();
-        self.graph_mut(graph)
-            .detach_into_ghosts(detaching, reports.entry(graph).or_default());
+        repairs: &'a mut Vec<Repair>,
+    ) -> GraphLoad<'a> {
+        let scope = Scope::of_graph(library, &self.decls, graph);
+        let graph = match graph {
+            GraphId::Main => &mut self.main,
+            GraphId::Compound(id) => self
+                .bodies
+                .get_mut(&id)
+                .expect("a named compound is in the set"),
+        };
+        GraphLoad {
+            graph,
+            scope,
+            repairs,
+        }
     }
 
     /// Each type an interface names that `library` does not register, in the order the
@@ -635,7 +684,8 @@ impl GraphSet {
     /// of each before its outputs.
     pub fn unknown_types(&self, library: &Library) -> Vec<UnknownType> {
         let mut unknown: Vec<UnknownType> = Vec::new();
-        for (compound, held) in self.compounds() {
+        for (compound, held) in &self.decls {
+            let compound = *compound;
             let ports = held
                 .interface
                 .inputs()
@@ -689,7 +739,7 @@ impl GraphSet {
             .into_iter()
             .flat_map(|compound| compound.graph.placed())
             .map(|(_, placed)| placed)
-            .filter(|placed| self.compounds.contains_key(placed))
+            .filter(|placed| self.decls.contains_key(placed))
     }
 
     /// A depth-first walk of what each compound places, from every compound in id order and
@@ -698,12 +748,11 @@ impl GraphSet {
     /// Removing the closing instances leaves no loop, and the id order makes the choice the same
     /// on every load.
     fn walk(&self) -> BackEdges<CompoundId, NodeAddr> {
-        dfs::back_edges(self.compounds.keys().copied(), |owner, next| {
+        dfs::back_edges(self.decls.keys().copied(), |owner, next| {
             next.extend(
-                self.compounds[&owner]
-                    .graph
+                self.bodies[&owner]
                     .placed()
-                    .filter(|(_, placed)| self.compounds.contains_key(placed))
+                    .filter(|(_, placed)| self.decls.contains_key(placed))
                     .map(|(node_id, placed)| {
                         (NodeAddr::new(GraphId::Compound(owner), node_id), placed)
                     }),
@@ -716,20 +765,10 @@ impl GraphSet {
     fn shapes(&self, post_order: &[CompoundId]) -> HashMap<CompoundId, ProgramShape> {
         let mut shapes = HashMap::with_capacity(post_order.len());
         for id in post_order {
-            shapes.insert(
-                *id,
-                ProgramShape::of_graph(&self.compounds[id].graph, &shapes),
-            );
+            shapes.insert(*id, ProgramShape::of_graph(&self.bodies[id], &shapes));
         }
         shapes
     }
-}
-
-/// A node a rule across graphs refuses, and which.
-#[derive(Clone, Copy, Debug)]
-struct Refusal {
-    node_id: NodeId,
-    reason: DetachReason,
 }
 
 /// Whether `repair` is one of the two an attach and a detach of the ghost node `node_id` report.

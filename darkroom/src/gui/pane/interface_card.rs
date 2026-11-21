@@ -60,6 +60,7 @@ pub(crate) fn show(ui: &mut Ui, card: InterfaceCard<'_>, out: &mut Requests) {
     let interface = &graphs
         .compound(compound)
         .expect("a card shows a compound the set holds")
+        .decl
         .interface;
     let mut edit = None;
     Panel::vstack()
@@ -481,6 +482,7 @@ mod tests {
             .graphs
             .compound(id)
             .unwrap()
+            .decl
             .interface;
         assert_eq!(
             held.inputs()
@@ -497,6 +499,7 @@ mod tests {
             .graphs
             .compound(id)
             .unwrap()
+            .decl
             .interface;
         assert_eq!(held.inputs().len(), 2);
 
@@ -507,6 +510,7 @@ mod tests {
                 .graphs
                 .compound(id)
                 .unwrap()
+                .decl
                 .interface
                 .trigger()
                 .cloned()

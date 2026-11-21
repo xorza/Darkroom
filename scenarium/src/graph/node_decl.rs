@@ -3,7 +3,7 @@
 use crate::decl::func::Func;
 use crate::decl::ports::{EventDecl, InputDecl, Numbered, OutputDecl, Ports};
 use crate::decl::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort};
-use crate::graph::compound::Compound;
+use crate::graph::compound::CompoundDecl;
 use crate::graph::node::Boundary;
 use crate::identity::{PortId, TriggerPort};
 
@@ -21,9 +21,12 @@ pub enum NodeDecl<'a> {
     /// A library func or a special node's built-in.
     Func(&'a Func),
     /// An instance of the compound.
-    Instance(&'a Compound),
+    Instance(&'a CompoundDecl),
     /// The boundary node on `side` of `owner`'s graph.
-    Boundary { side: Boundary, owner: &'a Compound },
+    Boundary {
+        side: Boundary,
+        owner: &'a CompoundDecl,
+    },
 }
 
 impl<'a> NodeDecl<'a> {

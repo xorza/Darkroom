@@ -66,7 +66,10 @@ pub struct Library {
     redirects: BTreeMap<FuncId, FuncRedirect>,
     /// The custom and enum types by name, then id: [`Self::data_types`].
     data_types: Vec<DataType>,
-    /// The codecs among `custom_types`, shared with each program compiled from this library.
+    /// The codecs among `custom_types`, shared with each program compiled from this library; a
+    /// second `Arc` of each, built once at the build. Refused: the names alone in the library
+    /// and each codec in this table alone, as a type's identity is its name and its codec
+    /// instance, and a test's edit in place takes the type back to a builder whole.
     codecs: Arc<Codecs>,
 }
 

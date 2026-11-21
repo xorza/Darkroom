@@ -62,6 +62,8 @@ pub(crate) struct ExecEvent {
 ///
 /// Everything here is `Copy` but the lambda, an `Arc`, so taking one off a declaration is a
 /// refcount bump and the library stays readable behind it — which is what `Clone` is for.
+/// Refused: a hot and a cold half, the constants in a side column: at the 65 536-node bound the
+/// columns are about 12 MiB, and no pass is bound by them.
 #[derive(Debug, Clone)]
 pub(crate) struct ExecNode {
     pub(crate) sink: bool,
@@ -187,7 +189,8 @@ impl CompiledGraph {
     /// to its new index through `carry`, one whose node this program dropped is
     /// dropped, and a node this program adds gets `fresh`.
     ///
-    /// A merge walk rather than a map: both id columns are sorted.
+    /// A merge walk rather than a map: both id columns are sorted, and a map would allocate for
+    /// a walk of microseconds per install.
     pub(crate) fn realign<T>(
         &self,
         prev: &Self,

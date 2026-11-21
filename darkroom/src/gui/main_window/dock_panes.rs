@@ -60,6 +60,7 @@ pub(crate) fn tab_label<'a>(
                 .graphs
                 .compound(id)
                 .expect("a compound's pane closes with it")
+                .decl
                 .name,
         ),
         TabRef::Preferences => TabLabel::Plain(PaneKind::Preferences.label()),
@@ -209,6 +210,7 @@ impl DockTabs for DockPanes<'_> {
             .graphs
             .compound(compound)
             .expect("a compound's pane closes with it")
+            .decl
             .name;
         let label = EditableLabel::new(name.as_str())
             .id(editor)

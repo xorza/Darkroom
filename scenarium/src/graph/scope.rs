@@ -2,11 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use crate::graph::compound::Compound;
+use crate::graph::compound::CompoundDecl;
 use crate::graph::error::Unresolved;
 use crate::graph::node::{BodySource, Node, NodeKind};
 use crate::graph::node_decl::NodeDecl;
-use crate::identity::CompoundId;
+use crate::identity::{CompoundId, GraphId};
 use crate::library::Library;
 
 /// What the nodes of one graph resolve against: the library's funcs, the set's compounds, and,
@@ -19,22 +19,31 @@ use crate::library::Library;
 #[derive(Clone, Copy, Debug)]
 pub struct Scope<'a> {
     library: &'a Library,
-    /// The set's compounds, by id.
-    compounds: &'a BTreeMap<CompoundId, Compound>,
+    /// The set's compound declarations, by id.
+    decls: &'a BTreeMap<CompoundId, CompoundDecl>,
     /// The compound whose graph this is: `None` for the main graph.
-    owner: Option<&'a Compound>,
+    owner: Option<&'a CompoundDecl>,
 }
 
 impl<'a> Scope<'a> {
-    /// The scope of the graph of `owner`, one of `compounds`, or of the main graph.
-    pub(crate) const fn new(
+    /// The scope of `graph`, the main graph or the graph of one of `decls`.
+    ///
+    /// # Panics
+    /// If `graph` names a compound `decls` does not hold.
+    pub(crate) fn of_graph(
         library: &'a Library,
-        compounds: &'a BTreeMap<CompoundId, Compound>,
-        owner: Option<&'a Compound>,
+        decls: &'a BTreeMap<CompoundId, CompoundDecl>,
+        graph: GraphId,
     ) -> Self {
+        let owner = match graph {
+            GraphId::Main => None,
+            GraphId::Compound(id) => {
+                Some(decls.get(&id).expect("a scope's compound is in the set"))
+            }
+        };
         Self {
             library,
-            compounds,
+            decls,
             owner,
         }
     }
@@ -44,7 +53,7 @@ impl<'a> Scope<'a> {
     }
 
     /// The compound whose graph this is, or `None` for the main graph.
-    pub const fn owner(&self) -> Option<&'a Compound> {
+    pub const fn owner(&self) -> Option<&'a CompoundDecl> {
         self.owner
     }
 
@@ -96,7 +105,7 @@ impl<'a> Scope<'a> {
                 ..
             } => Ok(NodeDecl::Func(special.func())),
             NodeKind::Instance { compound, .. } => self
-                .compounds
+                .decls
                 .get(&compound)
                 .map(NodeDecl::Instance)
                 .ok_or(Unresolved::MissingCompound),

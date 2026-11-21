@@ -98,7 +98,7 @@ impl Clip {
                     .graphs
                     .compound(id)
                     .expect("a copied instance places a held compound")
-                    .clone(),
+                    .into(),
                 view: document.view(GraphId::Compound(id)).clone(),
             })
             .collect();

@@ -53,7 +53,7 @@ impl PaletteRow {
                 let compound = sources.graphs.compound(id)?;
                 Some(PaletteEntry::Compound {
                     id,
-                    compound,
+                    compound: compound.decl,
                     used: sources.graphs.uses(id).next().is_some(),
                 })
             }

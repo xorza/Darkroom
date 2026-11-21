@@ -74,10 +74,10 @@ pub(crate) fn reconcile(
         }
     }
     for definition in carried {
-        definition.compound.clone_from(
-            set.compound(definition.id)
-                .expect("each carried definition is in the set"),
-        );
+        definition.compound = set
+            .compound(definition.id)
+            .expect("each carried definition is in the set")
+            .into();
     }
     set
 }

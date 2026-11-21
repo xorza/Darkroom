@@ -222,6 +222,7 @@ impl Report<'_> {
                     .graphs
                     .compound(compound)
                     .expect("the set holds each graph it lists")
+                    .decl
                     .name
                     .clone(),
             },
@@ -502,7 +503,7 @@ mod tests {
             })
             .unwrap();
         let mut compound = Compound::new("relay", interface);
-        let outputs = compound.outputs_node();
+        let outputs = compound.graph.outputs_node();
         let sink = NodeId::unique();
         compound.graph.insert(sink, Node::from(&probe));
         let id = CompoundId::from_u128(1);

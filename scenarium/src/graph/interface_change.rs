@@ -36,6 +36,7 @@ use crate::graph::ghost_wiring::{
 use crate::graph::graph_set::GraphSet;
 use crate::graph::interface::Interface;
 use crate::graph::node_decl::NodeTriggers;
+use crate::graph::scope::Scope;
 use crate::identity::{CompoundId, EventPort, GraphId, InputPort, OutputPort, TriggerPort};
 use crate::library::Library;
 
@@ -137,16 +138,20 @@ impl GraphSet {
         let before = self
             .compound(id)
             .expect("an interface edit's compound is in the set")
+            .decl
             .interface
             .clone();
-        let mut after = self.clone();
-        after.set_interface(id, to.clone());
+        // The declarations as the edit leaves them: no graph changes, so only they are copied.
+        let mut decls = self.decls().clone();
+        decls
+            .get_mut(&id)
+            .expect("an interface edit's compound is in the set")
+            .interface = to.clone();
         let mut graphs = BTreeMap::new();
-        for (graph, held) in after.graphs() {
+        for (graph, held) in self.graphs() {
             let mut change = WiringChange::default();
-            let scope = after.scope(library, graph);
+            let scope = Scope::of_graph(library, &decls, graph);
             let was = self.scope(library, graph);
-            let was_graph = self.graph(graph);
             // The name and type a port of a node the graph holds had, where the new interface no
             // longer gives it.
             let lost_input = |port: InputPort| {
@@ -159,7 +164,7 @@ impl GraphSet {
                     return None;
                 }
                 let input = was
-                    .decl(was_graph.find(port.node_id)?)
+                    .decl(held.find(port.node_id)?)
                     .ports()
                     .input(port.port)?;
                 Some(SavedPort {
@@ -177,7 +182,7 @@ impl GraphSet {
                     return None;
                 }
                 let output = was
-                    .decl(was_graph.find(port.node_id)?)
+                    .decl(held.find(port.node_id)?)
                     .ports()
                     .output(port.port)?;
                 Some(SavedPort {
@@ -193,9 +198,7 @@ impl GraphSet {
                 {
                     return None;
                 }
-                let old = was
-                    .decl(was_graph.find(event.node_id)?)
-                    .event(event.event)?;
+                let old = was.decl(held.find(event.node_id)?).event(event.event)?;
                 Some(SavedEvent {
                     name: old.name.clone(),
                 })
@@ -205,7 +208,7 @@ impl GraphSet {
                 if scope.decl(node).triggers().contains(trigger.trigger) {
                     return None;
                 }
-                let old = match was.decl(was_graph.find(trigger.node_id)?).triggers() {
+                let old = match was.decl(held.find(trigger.node_id)?).triggers() {
                     NodeTriggers::PerEvent(events) => {
                         events.iter().find(|event| event.id == trigger.trigger)?
                     }

@@ -162,7 +162,9 @@ impl ResolvedOutputs {
 /// planned schedule could carry the previous run's demand, or an executor read counts resolved
 /// against a different one — states the single [`reset_for_program`](Self::reset_for_program)
 /// rules out. The buffer cannot say *which* pass has run; [`validate`](Self::validate), asserted
-/// in debug after each pass, stands in for that.
+/// in debug after each pass, stands in for that. Refused: views `Planned` and `Resolved` over it,
+/// the [typestate](https://cliffle.com/blog/rust-typestate/) pattern, as the passes are three
+/// statements at one production site and the views would cost every fixture a constructor.
 #[derive(Debug, Default)]
 pub(crate) struct RunSchedule {
     /// Post-order DFS over the dependency graph (deps before consumers), seeded from the roots.

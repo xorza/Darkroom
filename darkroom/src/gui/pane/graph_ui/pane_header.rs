@@ -96,6 +96,7 @@ pub(crate) fn for_each_crumb<'a>(
         graphs
             .compound(id)
             .expect("a path names the compounds it passes")
+            .decl
             .name
             .as_str()
     };
@@ -942,7 +943,10 @@ mod tests {
 
         press(&mut h, "update");
         let document = h.session.open.document();
-        assert_eq!(document.graphs.compound(compound).unwrap().name, "Adjust");
+        assert_eq!(
+            document.graphs.compound(compound).unwrap().decl.name,
+            "Adjust"
+        );
         assert!(chip(&h, "update").is_none(), "in sync");
         assert!(chip(&h, "publish").is_none(), "in sync");
         press(&mut h, "follow");

@@ -31,7 +31,7 @@ fn a_scan_lists_each_shared_definition_once_per_digest() {
     let [id, hidden] = [1, 2].map(CompoundId::from_u128);
     let denoise = Compound::new("Denoise", Interface::default());
     let mut changed = denoise.clone();
-    changed.name = "Denoise, changed".to_string();
+    changed.decl.name = "Denoise, changed".to_string();
     let files = [
         ("a.darkroom", library_file(id, denoise.clone(), true)),
         ("b.darkroom", library_file(id, denoise, true)),
@@ -159,8 +159,8 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     let id = CompoundId::from_u128(1);
     let original = Compound::new("Denoise", inputs(&[1, 2]));
     let mut theirs = original.clone();
-    theirs.name = "Denoise, theirs".to_string();
-    theirs.interface = inputs(&[2]);
+    theirs.decl.name = "Denoise, theirs".to_string();
+    theirs.decl.interface = inputs(&[2]);
     let file = library_file(id, theirs.clone(), true);
     document::save(
         &file,
@@ -202,7 +202,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     let facts = open.drain_requests(&mut queue, &library);
     assert_eq!((facts.dropped, facts.ghosted), (0, 1));
     let updated = open.document();
-    assert_eq!(updated.graphs.compound(id), Some(&theirs));
+    assert_eq!(updated.graphs.compound(id), Some(theirs.as_ref()));
     assert!(updated.graphs.main().wiring().binding(port).is_none());
     assert_eq!(
         updated.graphs.main().ghost_wiring().binding(port),
@@ -233,9 +233,9 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
         .main_mut()
         .set_input_binding(held_port, Binding::Const(ConstValue::Int(9)));
     let mut ours = before;
-    let mut changed = ours.graphs.compound(id).unwrap().clone();
-    changed.name = "Denoise, ours".to_string();
-    changed.interface = inputs(&[1]);
+    let mut changed = Compound::from(ours.graphs.compound(id).unwrap());
+    changed.decl.name = "Denoise, ours".to_string();
+    changed.decl.interface = inputs(&[1]);
     ours.graphs.put_compound(id, changed.clone());
     let written = published(
         &file_with_instance,
@@ -244,7 +244,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
         id,
         &library,
     );
-    assert_eq!(written.graphs.compound(id), Some(&changed));
+    assert_eq!(written.graphs.compound(id), Some(changed.as_ref()));
     assert!(written.sides[&id].shared);
     assert_eq!(written.sides[&id].synced, Some(ours.graphs.digest(id)));
     assert!(
@@ -366,7 +366,7 @@ fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
     let [followed, still, mine] = [1, 2, 3].map(CompoundId::from_u128);
     let original = Compound::new("Denoise", inputs(&[1]));
     let mut theirs = original.clone();
-    theirs.name = "Denoise, theirs".to_string();
+    theirs.decl.name = "Denoise, theirs".to_string();
     let mut file = library_file(followed, theirs.clone(), true);
     for id in [still, mine] {
         insert_compound(&mut file, id, theirs.clone());
@@ -424,7 +424,9 @@ fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
     );
     // Every planner that adds a compound beside its edits of the graph refuses up front, so no
     // copy is left behind by edits the gate refuses.
-    let selection = [ItemId::Node(original.inputs_node())].into_iter().collect();
+    let selection = [ItemId::Node(original.graph.inputs_node())]
+        .into_iter()
+        .collect();
     assert!(matches!(
         collapse(&document, inside, &library, &selection),
         Some(Err(CollapseRefusal::ReadOnly {
@@ -432,7 +434,9 @@ fn a_followed_copy_is_read_only_and_a_scan_updates_it() {
         }))
     ));
     let select = GraphIntent::SetSelection {
-        to: [ItemId::Node(original.inputs_node())].into_iter().collect(),
+        to: [ItemId::Node(original.graph.inputs_node())]
+            .into_iter()
+            .collect(),
     };
     commit(&mut document, inside, select).unwrap();
     let mut steps = Vec::new();

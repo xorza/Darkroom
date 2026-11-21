@@ -59,7 +59,7 @@ pub use exec::report::node_status::NodeStatus;
 pub use exec::report::run_reporter::RunPhase;
 pub use graph::Graph;
 pub use graph::binding::Binding;
-pub use graph::compound::Compound;
+pub use graph::compound::{Compound, CompoundDecl, CompoundRef};
 pub use graph::detached::{DetachedGhost, DetachedNode, DetachedNodeParts};
 pub use graph::error::{
     BindRejection, DetachReason, DetachedNodeError, GhostSubscriptionRejection,

@@ -11,7 +11,7 @@
 //!   notes](https://blog.comfy.org/p/subgraph-official-release)). Refused: a copy by default, as
 //!   Nuke's Group, where ten copies of one pipeline are ten graphs to fix.
 
-use scenarium::{CompoundId, GraphId, NodeId, TypeNames};
+use scenarium::{Compound, CompoundId, GraphId, NodeId, TypeNames};
 
 use crate::core::document::Document;
 use crate::core::edit::compound_intent::{CompoundIntent, NewCompound};
@@ -33,8 +33,8 @@ impl MakeUnique {
     pub(crate) fn plan(document: &Document, graph: GraphId, instances: &[NodeId]) -> Option<Self> {
         let id = Self::placed(document, graph, instances)?;
         let original = document.graphs.compound(id)?;
-        let mut compound = original.clone();
-        compound.name = document.free_compound_name(&original.name);
+        let mut compound = Compound::from(original);
+        compound.decl.name = document.free_compound_name(&original.decl.name);
         let mut side = document.sides[&id].clone();
         side.through = None;
         Some(Self {
@@ -125,7 +125,7 @@ mod tests {
         assert_eq!(main.find(picked).unwrap().compound(), Some(copy));
         assert_eq!(main.find(kept).unwrap().compound(), Some(id));
         let made = document.graphs.compound(copy).unwrap();
-        assert_eq!(made.name, "Denoise 2");
+        assert_eq!(made.decl.name, "Denoise 2");
         assert!(
             made.graph.find(inside).is_some(),
             "the same nodes under the same ids"

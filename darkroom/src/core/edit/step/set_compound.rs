@@ -41,7 +41,7 @@ impl SetCompound {
                 .graphs
                 .compound(id)
                 .expect("a removed compound is in the set")
-                .clone(),
+                .into(),
             side: document.sides[&id].clone(),
             edit: EntryEdit::Removal,
         }

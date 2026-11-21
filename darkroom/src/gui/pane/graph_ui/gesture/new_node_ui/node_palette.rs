@@ -11,7 +11,7 @@ use palantir::{
 
 use glam::Vec2;
 use scenarium::{
-    Boundary, Compound, CompoundId, Func, GraphId, Library, Node, NodeId, Ports, SPECIAL_NODES,
+    Boundary, CompoundDecl, CompoundId, Func, GraphId, Library, Node, NodeId, Ports, SPECIAL_NODES,
     SpecialNode, Wiring,
 };
 
@@ -39,7 +39,7 @@ pub(super) enum PaletteEntry<'a> {
     /// Whether a node places it: an unused one is marked, as the library list marks it.
     Compound {
         id: CompoundId,
-        compound: &'a Compound,
+        compound: &'a CompoundDecl,
         used: bool,
     },
     /// A compound the library folder shares, which a pick copies in with those it places.
@@ -115,6 +115,7 @@ impl<'a> PaletteEntry<'a> {
                 .graphs
                 .compound(entry.id)
                 .expect("an entry names a compound of its file")
+                .decl
                 .interface
                 .ports(),
             PaletteEntry::Inputs => &NO_PORTS,

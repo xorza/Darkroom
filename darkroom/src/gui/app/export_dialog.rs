@@ -47,6 +47,7 @@ impl ExportDialog {
                 .graphs
                 .compound(compound)
                 .expect("an exported compound is held")
+                .decl
                 .name
                 .clone(),
             bundled: vec![false; paths.len()],

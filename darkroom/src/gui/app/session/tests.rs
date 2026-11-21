@@ -483,7 +483,7 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
     let id = CompoundId::from_u128(1);
     let mut compound = Compound::new("inner", Interface::default());
     let inside = compound.graph.add(fixture.plain_node());
-    let outputs = compound.outputs_node();
+    let outputs = compound.graph.outputs_node();
     insert_compound(&mut fixture.document, id, compound);
     let graph = GraphId::Compound(id);
     let fixture = fixture.with_tab(TabRef::Graph(graph));
@@ -511,7 +511,7 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
     test.frame();
     test.drain();
     let document = test.session.open.document();
-    let interface = &document.graphs.compound(id).unwrap().interface;
+    let interface = &document.graphs.compound(id).unwrap().decl.interface;
     assert_eq!(interface.outputs().len(), 1);
     let port = interface.outputs()[0].id;
     assert_eq!(
@@ -530,6 +530,7 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
             .graphs
             .compound(id)
             .unwrap()
+            .decl
             .interface
             .outputs()
             .is_empty()
@@ -551,7 +552,7 @@ fn an_outputs_nodes_lost_trigger_is_a_ghost_row() {
     let mut fixture = DocumentFixture::default();
     let id = CompoundId::from_u128(1);
     let mut compound = Compound::new("inner", Interface::default());
-    let outputs = compound.outputs_node();
+    let outputs = compound.graph.outputs_node();
     let lost = TriggerPort::new(outputs, TriggerPort::NODE);
     // Two ghosts on the one lost trigger, which shows once.
     for _ in 0..2 {
@@ -644,7 +645,7 @@ fn a_refused_edit_raises_its_status_line() {
     let mut fixture = DocumentFixture::default();
     let id = CompoundId::from_u128(1);
     let compound = Compound::new("inner", Interface::default());
-    let inputs = compound.inputs_node();
+    let inputs = compound.graph.inputs_node();
     insert_compound(&mut fixture.document, id, compound);
     let mut test = SessionHarness::new(fixture);
     test.requests.push_graph(
@@ -736,6 +737,7 @@ fn a_compounds_tab_renames_it_in_place() {
             .graphs
             .compound(id)
             .unwrap()
+            .decl
             .name
             .clone()
     };

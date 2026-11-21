@@ -20,8 +20,8 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, CompoundId, ConstValue, DataType, FileMode, GhostSource, Graph, GraphId, GraphSet,
-    InputPort, InputState, Library, Node, PortId,
+    Binding, Compound, CompoundId, ConstValue, DataType, FileMode, GhostSource, Graph, GraphId,
+    GraphSet, InputPort, InputState, Library, Node, PortId,
 };
 
 use common::fs;
@@ -98,11 +98,11 @@ pub(crate) fn exported(
     let mut graphs = GraphSet::default();
     let placed = document.graphs.placed_first(id);
     for &held in &placed {
-        let mut compound = document
+        let mut compound: Compound = document
             .graphs
             .compound(held)
             .expect("a placed compound is held")
-            .clone();
+            .into();
         strip(&mut compound.graph, library, bundled);
         graphs.insert_compound(held, compound);
     }

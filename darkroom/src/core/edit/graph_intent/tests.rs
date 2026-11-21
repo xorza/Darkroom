@@ -607,8 +607,8 @@ fn an_edit_inside_a_compound_passes_over_its_boundary_nodes() {
     let id = CompoundId::from_u128(1);
     let mut compound = Compound::new("inner", Interface::default());
     let inside = compound.graph.add(fixture.plain_node());
-    let inputs = compound.inputs_node();
-    let outputs = compound.outputs_node();
+    let inputs = compound.graph.inputs_node();
+    let outputs = compound.graph.outputs_node();
     insert_compound(&mut fixture.document, id, compound);
     let DocumentFixture {
         mut document,

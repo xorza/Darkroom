@@ -524,9 +524,9 @@ impl Compiler {
                             .graphs
                             .compound(compound)
                             .expect("an instance's compound is in the set");
-                        stack.extend(definition.inputs_nodes().map(|inputs| {
-                            (inside, EventPort::new(inputs, Interface::TRIGGER_EVENT))
-                        }));
+                        stack.extend(definition.graph.boundary_nodes(Boundary::Inputs).map(
+                            |inputs| (inside, EventPort::new(inputs, Interface::TRIGGER_EVENT)),
+                        ));
                     }
                     NodeKind::Boundary(Boundary::Outputs) => {
                         let instance = level

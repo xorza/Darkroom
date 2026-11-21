@@ -43,7 +43,9 @@ impl CustomType {
         self.codec.as_ref()
     }
 
-    /// Whether `other` declares this same type: the same name and the same codec instance.
+    /// Whether `other` declares this same type: the same name and the same codec instance. No
+    /// path registers one type from two instances, as `lens` registers `Image` once. Refused:
+    /// identity by the codec's `version()`, which two different codecs share.
     pub(crate) fn same_as(&self, other: &Self) -> bool {
         self.name == other.name
             && match (&self.codec, &other.codec) {

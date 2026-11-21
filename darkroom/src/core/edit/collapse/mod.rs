@@ -20,8 +20,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use glam::Vec2;
 use scenarium::{
-    Binding, Compound, CompoundId, GraphId, InputDecl, InputPort, Interface, Library, Node, NodeId,
-    Numbered, OutputDecl, OutputPort, PortId, Ports, TypeNames, Wiring,
+    Binding, Boundary, Compound, CompoundId, GraphId, InputDecl, InputPort, Interface, Library,
+    Node, NodeId, Numbered, OutputDecl, OutputPort, PortId, Ports, TypeNames, Wiring,
 };
 use thiserror::Error;
 
@@ -222,8 +222,8 @@ pub(crate) fn collapse(
 
     let id = CompoundId::unique();
     let compound = Compound::new(document.free_compound_name("Compound"), interface);
-    let inputs_node = compound.inputs_node();
-    let outputs_node = compound.outputs_node();
+    let inputs_node = compound.graph.inputs_node();
+    let outputs_node = compound.graph.outputs_node();
     let mut side = CompoundSide::new(&compound.graph);
     for (node_id, x) in [
         (inputs_node, min.x - BOUNDARY_GAP),
@@ -322,7 +322,7 @@ pub(crate) fn expand(
         .graphs
         .compound(compound_id)
         .expect("an instance's compound is in the set");
-    let outputs_node = definition.outputs_node();
+    let outputs_node = definition.graph.outputs_node();
     let items: BTreeSet<ItemId> = definition
         .graph
         .iter()
@@ -333,7 +333,7 @@ pub(crate) fn expand(
         return vec![GraphIntent::RemoveNode { node_id: instance }];
     }
     let mut fragment = Fragment::capture(document, inner, library, &items, IncomingWires::Keep);
-    for inputs_node in definition.inputs_nodes() {
+    for inputs_node in definition.graph.boundary_nodes(Boundary::Inputs) {
         fragment.rebind_from(inputs_node, |port: PortId| {
             held.wiring()
                 .binding(InputPort::new(instance, port))

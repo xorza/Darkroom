@@ -14,7 +14,7 @@ use crate::decl::ports::error::PortList;
 use crate::decl::ports::{InputDecl, Numbered, OutputDecl, Ports};
 use crate::decl::saved_decl::{SavedDecl, SavedPort};
 use crate::graph::binding::Binding;
-use crate::graph::compound::Compound;
+use crate::graph::compound::{Compound, CompoundDecl};
 use crate::graph::error::{
     DetachReason, GraphValidationError, PlacementRejection, SubscriptionRejection, Unresolved,
 };
@@ -379,11 +379,14 @@ fn a_compound_is_put_beside_or_in_place_of_one_held() {
     assert_eq!(set.put_compound(s(1), empty("first")), None);
     assert_eq!(
         set.put_compound(s(1), empty("second"))
-            .map(|held| held.name),
+            .map(|held| held.decl.name),
         Some("first".to_owned())
     );
-    assert_eq!(set.replace_compound(s(1), empty("third")).name, "second");
-    assert_eq!(set.compound(s(1)).unwrap().name, "third");
+    assert_eq!(
+        set.replace_compound(s(1), empty("third")).decl.name,
+        "second"
+    );
+    assert_eq!(set.compound(s(1)).unwrap().decl.name, "third");
 
     let before = set.clone();
     let retyped = Compound::new("fourth", adder_interface(DataType::Int, DataType::Int));
@@ -413,7 +416,7 @@ fn a_load_keeps_every_inputs_node_and_one_outputs_node() {
     two_inputs.graph.insert(n(3), Node::from(Boundary::Outputs));
     two_inputs.graph.insert(n(4), Node::from(Boundary::Outputs));
     let mut no_inputs = Compound::new("none", Interface::default());
-    no_inputs.graph.detach_node(no_inputs.inputs_node());
+    no_inputs.graph.detach_node(no_inputs.graph.inputs_node());
     let mut set = GraphSet::default();
     set.insert_compound(s(1), two_inputs);
     set.insert_compound(s(2), no_inputs);
@@ -450,11 +453,11 @@ fn a_load_keeps_every_inputs_node_and_one_outputs_node() {
         }]
     );
     let two = set.compound(s(1)).unwrap();
-    let mut inputs: Vec<NodeId> = two.inputs_nodes().collect();
+    let mut inputs: Vec<NodeId> = two.graph.boundary_nodes(Boundary::Inputs).collect();
     inputs.sort_unstable();
     assert_eq!(inputs, [n(1), n(2)]);
-    assert_eq!(two.inputs_node(), n(1));
-    assert_eq!(two.outputs_node(), n(3));
+    assert_eq!(two.graph.inputs_node(), n(1));
+    assert_eq!(two.graph.outputs_node(), n(3));
     assert_eq!(
         report.of(GraphId::Compound(s(1))),
         [Repair::GhostedNode {
@@ -462,7 +465,7 @@ fn a_load_keeps_every_inputs_node_and_one_outputs_node() {
             reason: DetachReason::ExtraOutputs,
         }]
     );
-    let added = set.compound(s(2)).unwrap().inputs_node();
+    let added = set.compound(s(2)).unwrap().graph.inputs_node();
     assert_eq!(
         report.of(GraphId::Compound(s(2))),
         [Repair::BoundaryAdded {
@@ -594,8 +597,8 @@ fn boundary_nodes_mirror_the_interface_under_the_one_admission_rule() {
         )],
     });
     let mut compound = Compound::new("mirror", interface);
-    let inputs = compound.inputs_node();
-    let outputs = compound.outputs_node();
+    let inputs = compound.graph.inputs_node();
+    let outputs = compound.graph.outputs_node();
     let graph = &mut compound.graph;
     graph.insert(n(1), node(&library, ANY_SINK));
     graph.insert(n(2), node(&library, SINK));
@@ -704,16 +707,27 @@ fn a_new_instance_takes_its_interface_defaults() {
 fn a_set_round_trips_and_a_repeated_compound_id_is_refused() {
     let mut set = GraphSet::default();
     set.insert_compound(s(1), Compound::new("one", inputs(vec![int_port(7)])));
-    let ron = SerdeFormat::Ron.serialize(&set).unwrap();
-    let back: GraphSet = SerdeFormat::Ron.deserialize(&ron).unwrap();
-    assert_eq!(back, set);
-    let interface = |set: &GraphSet| set.compound(s(1)).unwrap().interface.clone();
+    for format in SerdeFormat::ALL {
+        let bytes = format.serialize(&set).unwrap();
+        let back: GraphSet = format.deserialize(&bytes).unwrap();
+        assert_eq!(back, set, "{format:?}");
+    }
+    // A file writes a compound as one value, its declaration's fields before its graph.
+    let ron = String::from_utf8(SerdeFormat::Ron.serialize(&set).unwrap()).unwrap();
+    let field = |name: &str| ron.find(&format!("{name}:")).unwrap();
+    assert!(field("main") < field("compounds"));
+    assert!(field("compounds") < field("name"));
+    assert!(field("name") < field("description"));
+    assert!(field("description") < field("interface"));
+    assert!(ron.rfind("graph:").unwrap() > field("interface"));
+    let back: GraphSet = SerdeFormat::Ron.deserialize(ron.as_bytes()).unwrap();
+    let interface = |set: &GraphSet| set.compound(s(1)).unwrap().decl.interface.clone();
     assert_eq!(
         interface(&back).boundary_ports(Boundary::Inputs),
         interface(&set).boundary_ports(Boundary::Inputs)
     );
 
-    let one = BTreeMap::from([(s(1), set.compound(s(1)).unwrap().clone())]);
+    let one = BTreeMap::from([(s(1), set.compound(s(1)).unwrap())]);
     let text = String::from_utf8(SerdeFormat::Ron.serialize(&one).unwrap()).unwrap();
     let entry = text
         .trim()
@@ -745,7 +759,7 @@ fn a_const_only_input_takes_a_wire_from_a_const_only_interface_input_alone() {
         int_port(2),
     ]);
     let mut compound = Compound::new("configured", interface);
-    let inputs_node = compound.inputs_node();
+    let inputs_node = compound.graph.inputs_node();
     compound.graph.insert(n(1), node(&library, CONFIG_SINK));
     compound.graph.insert(n(2), node(&library, SRC));
     let mut set = GraphSet::default();
@@ -961,7 +975,7 @@ fn adder_interface(a_type: DataType, b_type: DataType) -> Interface {
 fn adder_set() -> (GraphSet, Library) {
     let library = library();
     let mut adder = Compound::new("adder", adder_interface(DataType::Int, DataType::Int));
-    let (inputs, outputs) = (adder.inputs_node(), adder.outputs_node());
+    let (inputs, outputs) = (adder.graph.inputs_node(), adder.graph.outputs_node());
     adder.graph.insert(n(13), node(&library, ADD));
     let inner = &mut adder.graph;
     inner.set_input_binding(
@@ -1021,7 +1035,7 @@ fn an_interface_reorder_and_rename_drop_nothing() {
     let change = set.plan_interface(s(1), reordered.clone(), &library, RefusedFate::Drop);
     assert!(change.refused_bindings().is_empty());
     set.write_interface(&change, ChangeSide::After);
-    assert_eq!(set.compound(s(1)).unwrap().interface, reordered);
+    assert_eq!(set.compound(s(1)).unwrap().decl.interface, reordered);
     for (graph, held) in before.graphs() {
         assert_eq!(set.graph(graph), held, "{graph:?} keeps every binding");
     }
@@ -1046,7 +1060,7 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
         outputs: vec![],
     });
     let adder = set.compound(s(1)).unwrap();
-    let (inputs, outputs) = (adder.inputs_node(), adder.outputs_node());
+    let (inputs, outputs) = (adder.graph.inputs_node(), adder.graph.outputs_node());
     let change = set.plan_interface(s(1), without.clone(), &library, RefusedFate::Drop);
     let inside = GraphId::Compound(s(1));
     let mut expected = vec![
@@ -1081,7 +1095,10 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
             .collect::<Vec<_>>()
     };
     assert_eq!(refused(&change), expected);
-    assert_eq!(change.before(), &before.compound(s(1)).unwrap().interface);
+    assert_eq!(
+        change.before(),
+        &before.compound(s(1)).unwrap().decl.interface
+    );
     assert_eq!(change.after(), &without);
 
     set.write_interface(&change, ChangeSide::After);
@@ -1135,7 +1152,7 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
     // live, and the set is one a compile takes.
     let back = set.plan_interface(
         s(1),
-        before.compound(s(1)).unwrap().interface.clone(),
+        before.compound(s(1)).unwrap().decl.interface.clone(),
         &library,
         RefusedFate::Ghost,
     );
@@ -1153,7 +1170,7 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
 #[test]
 fn an_interface_port_retyped_drops_only_what_the_new_type_refuses() {
     let (mut set, library) = adder_set();
-    let inputs = set.compound(s(1)).unwrap().inputs_node();
+    let inputs = set.compound(s(1)).unwrap().graph.inputs_node();
     let change = set.plan_interface(
         s(1),
         adder_interface(DataType::Int, DataType::String),
@@ -1235,9 +1252,11 @@ fn a_digest_names_the_definition_and_not_its_ids() {
             graph.insert(n(*id), held.clone());
         }
         Compound {
-            name: name.to_string(),
-            description: None,
-            interface: Interface::default(),
+            decl: CompoundDecl {
+                name: name.to_string(),
+                description: None,
+                interface: Interface::default(),
+            },
             graph,
         }
     };
@@ -1344,7 +1363,7 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
     relay.graph.insert(n(5), node(&library, TICKER));
     let passed = Subscription::new(
         EventPort::new(n(5), PortId::new(1)),
-        TriggerPort::new(relay.outputs_node(), OUT),
+        TriggerPort::new(relay.graph.outputs_node(), OUT),
     );
     relay.graph.subscribe(passed.event, passed.trigger);
     let mut set = GraphSet::default();
@@ -1542,7 +1561,7 @@ fn an_interface_edit_names_the_ports_it_removes_on_existing_ghosts() {
     })
     .unwrap();
     let mut relay = Compound::new("relay", interface);
-    let outputs = relay.outputs_node();
+    let outputs = relay.graph.outputs_node();
     relay.graph.insert(n(5), node(&library, TICKER));
     // Inside, the ticker declares no output 9 and no event 7: each ghost's far end is unknown.
     let fed = InputPort::new(outputs, RESULT);

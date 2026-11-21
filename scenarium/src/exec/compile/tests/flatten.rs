@@ -53,8 +53,8 @@ fn adder_interface() -> Interface {
 /// `a` wired straight through.
 fn adder(library: &Library) -> Compound {
     let mut compound = Compound::new("adder", adder_interface());
-    let inputs = compound.inputs_node();
-    let outputs = compound.outputs_node();
+    let inputs = compound.graph.inputs_node();
+    let outputs = compound.graph.outputs_node();
     let graph = &mut compound.graph;
     graph.insert(n(13), node(library, ADD));
     wire(graph, (n(13), FIRST), (inputs, A));
@@ -282,7 +282,7 @@ fn a_const_only_port_lowers_to_the_instances_constant() {
             outputs: vec![],
         }),
     );
-    let inputs = configured.inputs_node();
+    let inputs = configured.graph.inputs_node();
     configured.graph.insert(n(31), node(&library, CONFIG_SINK));
     wire(&mut configured.graph, (n(31), FIRST), (inputs, CONFIG));
     let mut doc = Doc {
@@ -306,9 +306,9 @@ fn a_const_only_port_lowers_to_the_instances_constant() {
 fn a_nested_node_is_named_by_its_path_and_reads_across_both_boundaries() {
     let mut doc = adder_doc();
     let adder = doc.graphs.compound(ADDER).unwrap();
-    let mut twice = Compound::new("twice", adder.interface.clone());
-    let inputs = twice.inputs_node();
-    let outputs = twice.outputs_node();
+    let mut twice = Compound::new("twice", adder.decl.interface.clone());
+    let inputs = twice.graph.inputs_node();
+    let outputs = twice.graph.outputs_node();
     twice.graph.insert(n(21), Node::instance(ADDER));
     wire(&mut twice.graph, (n(21), A), (inputs, A));
     wire(&mut twice.graph, (n(21), B), (inputs, B));
@@ -468,7 +468,7 @@ fn an_event_crosses_boundaries_on_the_interface() {
     };
     let (relay_id, outer_id) = (s(80), s(81));
     let mut relay = Compound::new("relay", events());
-    let (relay_in, relay_out) = (relay.inputs_node(), relay.outputs_node());
+    let (relay_in, relay_out) = (relay.graph.inputs_node(), relay.graph.outputs_node());
     relay.graph.insert(n(53), node(&library, TICKER));
     relay.graph.subscribe(
         EventPort::new(relay_in, IN),
@@ -479,7 +479,7 @@ fn an_event_crosses_boundaries_on_the_interface() {
         TriggerPort::new(relay_out, OUT),
     );
     let mut outer = Compound::new("outer", events());
-    let (outer_in, outer_out) = (outer.inputs_node(), outer.outputs_node());
+    let (outer_in, outer_out) = (outer.graph.inputs_node(), outer.graph.outputs_node());
     outer.graph.insert(n(61), Node::instance(relay_id));
     outer.graph.subscribe(EventPort::new(outer_in, IN), n(61));
     outer
@@ -537,8 +537,8 @@ async fn a_flattened_program_runs() {
         .clone();
 
     let mut compound = Compound::new("adder", adder_interface());
-    let inputs = compound.inputs_node();
-    let outputs = compound.outputs_node();
+    let inputs = compound.graph.inputs_node();
+    let outputs = compound.graph.outputs_node();
     let mut inner = Node::from(&sum);
     *inner.cache_mut().unwrap() = CacheMode::NEVER;
     compound.graph.insert(n(13), inner);

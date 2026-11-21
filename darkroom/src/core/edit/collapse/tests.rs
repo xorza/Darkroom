@@ -83,7 +83,7 @@ fn collapse_then_expand_gives_back_the_wiring_but_for_ids() {
     plan.queue(GraphId::Main, &mut queue);
     let _ = open.drain_requests(&mut queue, &library);
     let document = open.document();
-    let interface = &document.graphs.compound(id).unwrap().interface;
+    let interface = &document.graphs.compound(id).unwrap().decl.interface;
     assert_eq!(
         (interface.inputs().len(), interface.outputs().len()),
         (1, 1)

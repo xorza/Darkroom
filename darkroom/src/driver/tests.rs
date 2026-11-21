@@ -993,7 +993,7 @@ fn a_preview_inside_nested_compounds_publishes_under_its_path() {
         .iter()
         .filter(|node| {
             node.compound()
-                .is_some_and(|id| graphs.compound(id).unwrap().name == "Outer")
+                .is_some_and(|id| graphs.compound(id).unwrap().decl.name == "Outer")
         })
         .map(|node| node.node_id)
         .collect();

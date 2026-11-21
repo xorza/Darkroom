@@ -237,7 +237,12 @@ fn exposed_on_boundary(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Optio
         })?
         .node_id;
     let decl = graph_ctx.scope().decl(body.find(start.node_id)?);
-    let interface = &graph_ctx.document().graphs.compound(compound)?.interface;
+    let interface = &graph_ctx
+        .document()
+        .graphs
+        .compound(compound)?
+        .decl
+        .interface;
     let (edit, wire) = match start.kind {
         PortKind::Output => {
             let output = decl.ports().output(start.port)?;

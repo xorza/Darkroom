@@ -155,13 +155,13 @@ impl CompoundIntent {
                     return Ok(());
                 };
                 let wanted = to.trim();
-                if wanted.is_empty() || wanted == compound.name {
+                if wanted.is_empty() || wanted == compound.decl.name {
                     return Ok(());
                 }
                 UndoStep::CompoundName(SetCompoundName {
                     id,
                     name: Change {
-                        from: compound.name.clone(),
+                        from: compound.decl.name.clone(),
                         to: document.free_compound_name(wanted),
                     },
                 })
@@ -222,7 +222,7 @@ impl CompoundIntent {
                 }
                 let mut compound = definition.compound;
                 brought.enter(&mut compound, library);
-                let interface = compound.interface.clone();
+                let interface = compound.decl.interface.clone();
                 land(
                     UndoStep::Interface(Box::new(SetInterface::plan(
                         document,
@@ -239,7 +239,7 @@ impl CompoundIntent {
                     UndoStep::Definition(Box::new(SetDefinition {
                         id,
                         definition: Change {
-                            from: document.graphs.compound(id).expect("checked above").clone(),
+                            from: document.graphs.compound(id).expect("checked above").into(),
                             to: compound,
                         },
                         view: Change {

@@ -554,7 +554,7 @@ impl GraphIntent {
                         else {
                             return Ok(None);
                         };
-                        if held.interface != target.interface {
+                        if held.decl.interface != target.decl.interface {
                             return Err(refused.into());
                         }
                         let mut placed = node.clone();
