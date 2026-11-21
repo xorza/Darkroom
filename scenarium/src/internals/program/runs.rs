@@ -49,7 +49,7 @@ impl<'a> Runs<'a> {
             resolve: false,
             cancel: CancelToken::never(),
         };
-        let one_each = vec![1; runs.program().output_count as usize];
+        let one_each = vec![1; runs.program().output_types.len()];
         runs.set_readers(one_each);
         runs
     }
@@ -214,7 +214,7 @@ impl<'a> Runs<'a> {
     fn set_readers(&mut self, readers: Vec<u32>) {
         assert_eq!(
             readers.len(),
-            self.program().output_count as usize,
+            self.program().output_types.len(),
             "one reader count per output in the program's pool",
         );
         let demand = readers

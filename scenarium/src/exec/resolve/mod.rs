@@ -41,7 +41,7 @@ pub(crate) async fn sweep(
     cache.mark_leaders(program, schedule);
     // The sweep *accumulates* demand and readers, so it starts from zero rather than trusting
     // whoever opened the schedule.
-    schedule.outputs.reset(program.output_count as usize);
+    schedule.outputs.reset(program.output_types.len());
     schedule.promote_roots();
 
     // Reverse process order, so every consumer of a node has contributed its demand before the
@@ -76,8 +76,8 @@ pub(crate) async fn sweep(
             let promoted = schedule.states[leader].promote_to_run();
             debug_assert!(promoted, "a twin's leader is runnable");
             let (own, theirs) = (e_node.outputs, program[leader].outputs);
-            debug_assert_eq!(own.len, theirs.len, "equal digests mean equal arity");
-            for port in 0..own.len {
+            debug_assert_eq!(own.len(), theirs.len(), "equal digests mean equal arity");
+            for port in own.offsets() {
                 if !schedule.outputs.demand[own.nth(port)].is_skip() {
                     schedule.outputs.add_reader(theirs.nth(port));
                 }

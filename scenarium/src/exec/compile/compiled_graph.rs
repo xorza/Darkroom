@@ -20,6 +20,7 @@ use std::sync::Arc;
 use crate::containers::col::{Col, Span};
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
+use crate::data::data_type::DataType;
 use crate::exec::compile::consumer_cone::ConsumerCone;
 use crate::exec::idx::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx};
 use crate::graph::func::FuncBehavior;
@@ -112,9 +113,10 @@ pub struct CompiledGraph {
     pub(crate) events: Col<EventIdx, ExecEvent>,
     /// Every event's subscribers, one event's run after another.
     pub(crate) subscribers: Col<SubscriberIdx, NodeIdx>,
-    /// The output ports of every node, which each node's `outputs` run
-    /// addresses: the length of each per-run output column.
-    pub(crate) output_count: u32,
+    /// Each output port's declared type, every node's run after another, which each node's
+    /// `outputs` addresses: what a run holds a lambda's values to, and its length the length of
+    /// each per-run output column.
+    pub(crate) output_types: Col<OutputIdx, DataType>,
     /// The library's disk codecs when this was compiled, used by the cache to encode and decode
     /// this program's values.
     pub(crate) codecs: Arc<Codecs>,
@@ -146,12 +148,14 @@ impl CompiledGraph {
     }
 
     /// Each program node inside the instances `path` names, the nodes of nested instances
-    /// included, in id order.
+    /// included, in id order: one contiguous run of the sorted ids, as every id that begins with
+    /// the path sorts after the path and before any id past it.
     pub fn program_ids_within(&self, path: InstancePath) -> impl Iterator<Item = ProgramId> {
-        self.program_ids
-            .iter()
-            .copied()
-            .filter(move |program_id| program_id.ids().starts_with(path.ids()))
+        let ids = self.program_ids.iter().as_slice();
+        let prefix = path.ids();
+        let start = ids.partition_point(|id| id.ids() < prefix);
+        let len = ids[start..].partition_point(|id| id.ids().starts_with(prefix));
+        ids[start..start + len].iter().copied()
     }
 
     /// Whether any program node persists its value to disk, so a run of this program has a disk
@@ -208,6 +212,17 @@ impl CompiledGraph {
         }
     }
 
+    /// Each output `node_idx`'s inputs are wired to, in input order; a constant or an unbound
+    /// input is none.
+    pub(crate) fn wires(&self, node_idx: NodeIdx) -> impl Iterator<Item = OutputAddr> + '_ {
+        self.inputs[self[node_idx].inputs]
+            .iter()
+            .filter_map(|input| match input.binding {
+                ExecBinding::Wire(address) => Some(address),
+                ExecBinding::Const(_) | ExecBinding::None => None,
+            })
+    }
+
     pub(crate) fn output_idx(&self, address: OutputAddr) -> OutputIdx {
         self[address.node_idx].outputs.nth(address.port_idx)
     }
@@ -215,7 +230,7 @@ impl CompiledGraph {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
-    use crate::containers::col::Span;
+    use crate::containers::col::{Idx, Span};
     use crate::exec::compile::compiled_graph::{CompiledGraph, ExecNode};
     use crate::exec::idx::NodeIdx;
     use crate::graph::func::FuncBehavior;
@@ -255,7 +270,7 @@ pub(crate) mod internals {
                 self.program_ids.iter().last().is_none_or(|last| *last < id),
                 "a program's nodes are placed in ascending id order"
             );
-            let node_idx = NodeIdx(self.e_nodes.len() as u32);
+            let node_idx = NodeIdx::from_idx(self.e_nodes.len());
             self.program_ids.push(id);
             self.e_nodes.push(e_node);
             node_idx

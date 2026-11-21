@@ -297,7 +297,7 @@ impl RunSchedule {
             .reset(program.e_nodes.len(), NodeState::default());
         self.root_flags
             .reset(program.e_nodes.len(), RootFlags::default());
-        self.outputs.reset(program.output_count as usize);
+        self.outputs.reset(program.output_types.len());
     }
 
     /// The node whose values `node_idx` takes, where it is a [`NodeState::Twin`].
@@ -430,12 +430,12 @@ impl RunSchedule {
             (
                 ScheduleCol::OutputDemand,
                 self.outputs.demand.len(),
-                program.output_count as usize,
+                program.output_types.len(),
             ),
             (
                 ScheduleCol::OutputReaders,
                 self.outputs.readers.len(),
-                program.output_count as usize,
+                program.output_types.len(),
             ),
         ] {
             if len != expected {

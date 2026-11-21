@@ -252,7 +252,7 @@ impl ExecEngine {
         for (node_idx, e_node) in program.e_nodes.iter_indexed() {
             let program_id = program.program_ids[node_idx];
             if let Some(output_values) = self.cache[node_idx].output_values()
-                && output_values.len() != e_node.outputs.len as usize
+                && output_values.len() != e_node.outputs.len()
             {
                 return Err(InstallValidationError::OutputArity { program_id });
             }

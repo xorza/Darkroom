@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::containers::col::Idx;
+
 use crate::exec::compile::compiled_graph::ExecBinding;
 use crate::graph::identity::PortId;
 use crate::graph::manifest::Manifest;
@@ -24,7 +26,7 @@ fn a_wire_addresses_its_producer_range_when_the_consumer_precedes_it() {
     let &ExecBinding::Wire(address) = compiled.binding("sink", 0) else {
         panic!("the sink is bound to make_str");
     };
-    let slot = compiled.program.output_idx(address).0 as usize;
+    let slot = compiled.program.output_idx(address).idx();
     assert!(compiled.node("make_str").outputs.range().contains(&slot));
     assert!(!compiled.node("make_int").outputs.range().contains(&slot));
 }

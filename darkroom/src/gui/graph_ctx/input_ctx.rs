@@ -127,96 +127,12 @@ impl<'a> InputCtx<'a> {
     ///
     /// Owned: an enum's and an `Any`'s fallbacks are built here, not stored.
     pub(crate) fn default(self) -> Option<ConstValue> {
-        default_const_value(self.node.graph_ctx.library(), self.declared)
+        self.node.graph_ctx.library().default_const(self.declared)
     }
 
     /// Whether the input can hold a constant: [`Self::default`] is some, answered without
     /// building it, for a reader that asks every frame.
     pub(crate) fn takes_const(self) -> bool {
-        takes_const(self.node.graph_ctx.library(), self.declared)
-    }
-}
-
-/// See [`InputCtx::takes_const`]: the rule [`default_const_value`] follows, read off the port
-/// and the library alone.
-fn takes_const(library: &Library, input: &InputDecl) -> bool {
-    input.default_value.is_some()
-        || match input.data_type {
-            DataType::Enum(id) => library
-                .enum_type(id)
-                .is_some_and(|enum_type| !enum_type.variants().is_empty()),
-            DataType::Any => true,
-            data_type => data_type.default_value().is_some(),
-        }
-}
-
-/// See [`InputCtx::default`]. A free fn because the enum arm needs the
-/// library rather than anything on the port.
-fn default_const_value(library: &Library, input: &InputDecl) -> Option<ConstValue> {
-    input.default_value.clone().or_else(|| {
-        // `DataType::Enum(id)` doesn't carry its variants; the library's registry does.
-        match input.data_type {
-            DataType::Enum(id) => library
-                .enum_type(id)
-                .and_then(|enum_type| enum_type.variants().first())
-                .map(|first| ConstValue::Enum(first.clone())),
-            // An `Any` port has no kind to seed: an empty string opens the editor blank, and
-            // it infers the kind from the text typed (see `const_editor::parse_any`).
-            DataType::Any => Some(ConstValue::String(String::new())),
-            data_type => data_type.default_value(),
-        }
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use scenarium::{ConstValue, CustomTypeId, DataType, EnumId, EnumType, InputDecl, Library};
-
-    use crate::gui::graph_ctx::input_ctx::{default_const_value, takes_const};
-
-    /// A declared default wins; an enum without one takes its first registered variant, and an
-    /// unregistered one has none; `Any` starts blank; a scalar takes its type's zero; a custom
-    /// type without a default has no const at all.
-    #[test]
-    fn an_input_defaults_to_its_declared_value_else_its_types() {
-        let mut library = Library::default();
-        let mode = EnumId::from_u128(1);
-        library.register_enum(
-            mode,
-            EnumType::new("Mode", vec!["Fast".into(), "Fine".into()]),
-        );
-        let input = |data_type: DataType| InputDecl::optional("x", data_type);
-        let declared = InputDecl {
-            default_value: Some(ConstValue::Int(5)),
-            ..input(DataType::Int)
-        };
-        for (port, expected) in [
-            (declared, Some(ConstValue::Int(5))),
-            (
-                input(DataType::Enum(mode)),
-                Some(ConstValue::Enum("Fast".into())),
-            ),
-            (input(DataType::Enum(EnumId::from_u128(2))), None),
-            (
-                input(DataType::Any),
-                Some(ConstValue::String(String::new())),
-            ),
-            (input(DataType::Int), Some(ConstValue::Int(0))),
-            (input(DataType::Float), Some(ConstValue::Float(0.0))),
-            (input(DataType::Custom(CustomTypeId::from_u128(3))), None),
-        ] {
-            assert_eq!(
-                takes_const(&library, &port),
-                expected.is_some(),
-                "{:?} takes a const exactly when it has a default",
-                port.data_type
-            );
-            assert_eq!(
-                default_const_value(&library, &port),
-                expected,
-                "{:?}",
-                port.data_type
-            );
-        }
+        self.node.graph_ctx.library().takes_const(self.declared)
     }
 }

@@ -21,6 +21,16 @@ pub(super) fn validate(
     compiled: &CompiledGraph,
     library: &Library,
 ) -> Result<(), CompiledGraphValidationError> {
+    // The ids are the nodes' side index, which a lookup binary-searches.
+    assert_eq!(
+        compiled.program_ids.len(),
+        compiled.e_nodes.len(),
+        "a program id names each node"
+    );
+    assert!(
+        compiled.program_ids.is_strictly_ascending(),
+        "a program's ids are ascending, each once"
+    );
     for (program_id, e_node) in compiled.program_ids.iter().zip(compiled.e_nodes.iter()) {
         let func_id = e_node.func_ref.id();
         if func_id.is_nil() {
@@ -47,20 +57,20 @@ pub(super) fn validate(
             program_id: *program_id,
             pool,
         };
-        if e_node.inputs.len as usize != func.inputs().len() {
+        if e_node.inputs.len() != func.inputs().len() {
             return Err(arity(PortPool::Input));
         }
-        if e_node.outputs.len as usize != func.outputs().len() {
+        if e_node.outputs.len() != func.outputs().len() {
             return Err(arity(PortPool::Output));
         }
-        if e_node.events.len as usize != func.events().len() {
+        if e_node.events.len() != func.events().len() {
             return Err(arity(PortPool::Event));
         }
         let inputs = compiled
             .inputs
             .get_span(e_node.inputs)
             .ok_or_else(|| range(PortPool::Input))?;
-        if e_node.outputs.range().end > compiled.output_count as usize {
+        if e_node.outputs.range().end > compiled.output_types.len() {
             return Err(range(PortPool::Output));
         }
         let events = compiled
@@ -88,7 +98,7 @@ pub(super) fn validate(
 
         for e_input in inputs {
             if let ExecBinding::Wire(e_addr) = &e_input.binding {
-                // Unreachable while `Compiler::resolve` mints every address from a successful
+                // Unreachable while the lowering mints every address from a successful
                 // placement lookup; kept as the backstop.
                 let target_e_node = compiled.e_nodes.get(e_addr.node_idx).ok_or(
                     CompiledGraphValidationError::MissingBindingTarget {
@@ -96,7 +106,7 @@ pub(super) fn validate(
                         target: *e_addr,
                     },
                 )?;
-                if e_addr.port_idx >= target_e_node.outputs.len {
+                if !target_e_node.outputs.offsets().contains(&e_addr.port_idx) {
                     return Err(CompiledGraphValidationError::BindingOutputOutOfRange {
                         program_id: *program_id,
                         target: *e_addr,

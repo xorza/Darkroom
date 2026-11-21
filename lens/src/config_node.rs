@@ -12,6 +12,7 @@
 
 use std::fmt;
 use std::marker::PhantomData;
+use std::mem;
 use std::sync::Arc;
 
 use common::{FieldKind, FieldValue, Introspect};
@@ -100,14 +101,14 @@ impl<T: Introspect> FieldInputs<T> {
         }
     }
 
-    /// The `T` that `values`, one per field in declaration order, hold.
-    pub(crate) fn build(&self, values: &[DynamicValue]) -> Result<T, InvokeError> {
+    /// The `T` that `values`, one per field in declaration order, hold, each taken.
+    pub(crate) fn build(&self, values: &mut [DynamicValue]) -> Result<T, InvokeError> {
         debug_assert_eq!(values.len(), self.kinds.len());
         let values: Vec<FieldValue> = self
             .kinds
             .iter()
             .zip(values)
-            .map(|(kind, value)| field_value(kind, value))
+            .map(|(kind, value)| field_value(kind, mem::take(value)))
             .collect();
         T::from_fields(&values).map_err(InvokeError::external)
     }
@@ -176,8 +177,7 @@ fn register_field_enum(library: &mut Library, kind: &FieldKind) {
             variants,
         } => {
             let id = EnumId::literal(type_id);
-            let variants = variants.iter().map(|&variant| variant.to_owned()).collect();
-            library.register_enum(id, EnumType::new(*display_name, variants));
+            library.register_enum(id, EnumType::new(*display_name, variants.iter().copied()));
         }
         FieldKind::Option(inner) => register_field_enum(library, inner),
         _ => {}
@@ -198,12 +198,17 @@ fn const_value(value: &FieldValue) -> ConstValue {
     }
 }
 
-fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
+fn field_value(kind: &FieldKind, value: DynamicValue) -> FieldValue {
     match kind {
         FieldKind::Int(_) => FieldValue::Int(value.required_i64().into()),
         FieldKind::Float(_) => FieldValue::Float(value.required_f64()),
         FieldKind::Bool => FieldValue::Bool(value.required_bool()),
-        FieldKind::Str => FieldValue::Str(value.required_string().to_string()),
+        // Any other value is a misread, which `required_string` names.
+        FieldKind::Str => FieldValue::Str(
+            value
+                .into_string()
+                .unwrap_or_else(|other| other.required_string().to_owned()),
+        ),
         FieldKind::Enum { .. } => FieldValue::Enum(value.required_enum().to_string()),
         FieldKind::Option(_) if matches!(value, DynamicValue::Unbound) => FieldValue::Null,
         FieldKind::Option(_) if matches!(value.as_static(), Some(ConstValue::Null)) => {
@@ -286,21 +291,21 @@ mod tests {
         assert_eq!(
             field_value(
                 &FieldKind::Int(IntegerKind::Usize),
-                &DynamicValue::Static(ConstValue::Int(5))
+                DynamicValue::Static(ConstValue::Int(5))
             ),
             FieldValue::Int(IntegerValue::Signed(5))
         );
         assert_eq!(
             field_value(
                 &FieldKind::Option(&FieldKind::Int(IntegerKind::U32)),
-                &DynamicValue::Static(ConstValue::Int(7))
+                DynamicValue::Static(ConstValue::Int(7))
             ),
             FieldValue::Int(IntegerValue::Signed(7))
         );
         assert_eq!(
             field_value(
                 &FieldKind::Option(&FieldKind::Float(FloatKind::F64)),
-                &DynamicValue::Unbound
+                DynamicValue::Unbound
             ),
             FieldValue::Null
         );
@@ -309,6 +314,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "a required input holds Unbound, not a number")]
     fn rejects_incompatible_required_values() {
-        field_value(&FieldKind::Float(FloatKind::F64), &DynamicValue::Unbound);
+        field_value(&FieldKind::Float(FloatKind::F64), DynamicValue::Unbound);
     }
 }

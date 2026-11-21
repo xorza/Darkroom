@@ -1,6 +1,6 @@
 //! [`FloatSpan`]: a span of finite floats.
 
-use serde::{Deserialize, Deserializer, Serialize, de};
+use serde::{Deserialize, Serialize};
 
 use crate::graph::value_domain::span_error::SpanError;
 
@@ -9,7 +9,8 @@ use crate::graph::value_domain::span_error::SpanError;
 ///
 /// Its ends compare by their bits, as [`ConstValue`](crate::ConstValue) compares a float, so a
 /// declaration that holds one keeps its `Eq`.
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(try_from = "FloatSpanRepr")]
 pub struct FloatSpan {
     min: f64,
     max: Option<f64>,
@@ -86,9 +87,11 @@ impl FloatSpan {
         self.max
     }
 
-    /// Whether `value` lies in the span, its ends included; NaN lies in none.
+    /// Whether `value` lies in the span, its ends included; NaN and an infinity lie in none, as
+    /// the span holds finite floats alone.
     pub const fn contains(self, value: f64) -> bool {
-        value >= self.min
+        value.is_finite()
+            && value >= self.min
             && match self.max {
                 Some(max) => value <= max,
                 None => true,
@@ -112,24 +115,26 @@ impl FloatSpan {
         if value.is_nan() {
             return None;
         }
-        Some(((self.clamp(value) - self.min) / (max - self.min)).clamp(0.0, 1.0))
+        // In halves, so a span past half the range of `f64` measures no infinite length.
+        let along = self.clamp(value) / 2.0 - self.min / 2.0;
+        Some((along / (max / 2.0 - self.min / 2.0)).clamp(0.0, 1.0))
     }
 }
 
 /// What a file writes: the ends, which [`FloatSpan`]'s decode checks.
 #[derive(Deserialize)]
-struct Written {
+struct FloatSpanRepr {
     min: f64,
     max: Option<f64>,
 }
 
-impl<'de> Deserialize<'de> for FloatSpan {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let Written { min, max } = Written::deserialize(deserializer)?;
+impl TryFrom<FloatSpanRepr> for FloatSpan {
+    type Error = SpanError;
+
+    fn try_from(FloatSpanRepr { min, max }: FloatSpanRepr) -> Result<Self, SpanError> {
         match max {
             None => Self::at_least_checked(min),
             Some(max) => Self::between_checked(min, max),
         }
-        .map_err(de::Error::custom)
     }
 }

@@ -8,6 +8,8 @@ use std::sync::Arc;
 use super::*;
 use crate::async_lambda;
 use crate::data::const_value::ConstValue;
+use crate::data::data_type::DataType;
+use crate::exec::compile::compiled_graph::ExecBinding;
 use crate::graph::func::lambda::{FuncLambda, internals};
 use crate::graph::identity::{FuncId, NodeId};
 use crate::graph::node::{CacheMode, Keep};
@@ -69,7 +71,7 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
         counts: Col::from([0]),
     };
     assert!(
-        catch_unwind(AssertUnwindSafe(|| reads.consume(OutputIdx(0)))).is_err(),
+        catch_unwind(AssertUnwindSafe(|| reads.consume(OutputIdx::from_idx(0)))).is_err(),
         "a reader count cannot be consumed below zero"
     );
 }
@@ -189,7 +191,7 @@ async fn a_path_in_another_systems_form_fails_its_node_before_the_lambda_runs() 
     let source = prog
         .node()
         .const_input(ConstValue::FsPaths(vec![absolute.clone(), foreign.clone()]))
-        .outputs(1)
+        .output_types([DataType::Any])
         .lambda(async_lambda!(|Invocation {
                                    inputs, outputs, ..
                                }| {
@@ -289,13 +291,13 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
 /// held by its slot alone, though `reader`, the last node to run, read a clone of it.
 #[tokio::test]
 async fn an_invoke_lets_its_inputs_go_when_it_returns() {
-    use crate::internals::blob::Blob;
+    use crate::internals::blob::{BLOB_TYPE, Blob};
 
     let mut prog = ProgramBuilder::default();
     let source = prog
         .node()
         .cache(CacheMode::ALWAYS)
-        .outputs(1)
+        .output_types([DataType::Custom(BLOB_TYPE)])
         .lambda(async_lambda!(|Invocation { outputs, .. }| {
             outputs[0] = DynamicValue::Custom(Arc::new(Blob(vec![1, 2, 3])));
             Ok(())
@@ -367,6 +369,43 @@ async fn unbound_output_errors_only_when_demanded() {
         run.outputs(skipped).unwrap(),
         [DynamicValue::Unbound]
     ));
+}
+
+/// A lambda that writes a value its output's declared type does not hold fails, named against
+/// that output, and its readers are skipped as for any failure: a consumer reading the value as
+/// declared would have panicked, blamed for the producer's fault.
+#[tokio::test]
+async fn a_value_its_output_does_not_hold_fails_the_producer() {
+    use crate::internals::blob::BLOB_TYPE;
+
+    let mut prog = ProgramBuilder::default();
+    let liar = prog
+        .node()
+        .cache(CacheMode::ALWAYS)
+        .output_types([DataType::Custom(BLOB_TYPE), DataType::Float])
+        .lambda(async_lambda!(|Invocation { outputs, .. }| {
+            // An integer is a float's to read; it is no blob.
+            outputs[0] = DynamicValue::from(1i64);
+            outputs[1] = DynamicValue::from(2i64);
+            Ok(())
+        }))
+        .add();
+    let reader = prog
+        .node()
+        .cache(CacheMode::ALWAYS)
+        .input(liar.out(0))
+        .outputs(1)
+        .lambda(FuncLambda::stub())
+        .add();
+
+    let mut run = prog.runs().readers([1, 0, 0]);
+    run.go().await;
+
+    assert!(matches!(
+        run.error(liar),
+        Some(RunError::OutputType { outputs }) if outputs == &[0]
+    ));
+    assert!(matches!(run.error(reader), Some(RunError::SkippedUpstream)));
 }
 
 /// Retention after a run is the cache mode's call, not the reader count's. `Executor::run` does
@@ -642,24 +681,44 @@ async fn reconcile_keeps_lambda_state_until_the_implementation_changes() {
     let mut executor = Executor::default();
     let first = build(&[(1, 10), (2, 20)]);
     executor.reconcile(&CompiledGraph::default(), &first);
-    executor.nodes[NodeIdx(1)].state.set(17_u32);
-    executor.nodes[NodeIdx(1)].event_state.lock().set(23_u32);
+    executor.nodes[NodeIdx::from_idx(1)].state.set(17_u32);
+    executor.nodes[NodeIdx::from_idx(1)]
+        .event_state
+        .lock()
+        .set(23_u32);
 
     // Node 1 dropped and node 3 added: node 2 slides from index 1 to 0.
     let second = build(&[(2, 20), (3, 30)]);
     executor.reconcile(&first, &second);
-    assert_eq!(executor.nodes[NodeIdx(0)].state.get::<u32>(), Some(&17));
     assert_eq!(
-        executor.nodes[NodeIdx(0)].event_state.lock().get::<u32>(),
+        executor.nodes[NodeIdx::from_idx(0)].state.get::<u32>(),
+        Some(&17)
+    );
+    assert_eq!(
+        executor.nodes[NodeIdx::from_idx(0)]
+            .event_state
+            .lock()
+            .get::<u32>(),
         Some(&23)
     );
-    assert!(executor.nodes[NodeIdx(1)].state.is_none());
-    assert_eq!(executor.nodes[NodeIdx(1)].owner.id(), FuncId::from_u128(30));
+    assert!(executor.nodes[NodeIdx::from_idx(1)].state.is_none());
+    assert_eq!(
+        executor.nodes[NodeIdx::from_idx(1)].owner.id(),
+        FuncId::from_u128(30)
+    );
 
     // Node 2's func changes, so both of its states drop.
     let third = build(&[(2, 21), (3, 30)]);
     executor.reconcile(&second, &third);
-    assert!(executor.nodes[NodeIdx(0)].state.is_none());
-    assert!(executor.nodes[NodeIdx(0)].event_state.lock().is_none());
-    assert_eq!(executor.nodes[NodeIdx(0)].owner.id(), FuncId::from_u128(21));
+    assert!(executor.nodes[NodeIdx::from_idx(0)].state.is_none());
+    assert!(
+        executor.nodes[NodeIdx::from_idx(0)]
+            .event_state
+            .lock()
+            .is_none()
+    );
+    assert_eq!(
+        executor.nodes[NodeIdx::from_idx(0)].owner.id(),
+        FuncId::from_u128(21)
+    );
 }

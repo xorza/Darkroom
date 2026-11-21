@@ -1,12 +1,13 @@
 //! [`IntSpan`]: a span of integers.
 
-use serde::{Deserialize, Deserializer, Serialize, de};
+use serde::{Deserialize, Serialize};
 
 use crate::graph::value_domain::span_error::SpanError;
 
 /// A span of integers from a floor, with or without a ceiling: valid by construction, its floor
 /// below its ceiling.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "IntSpanRepr")]
 pub struct IntSpan {
     min: i64,
     max: Option<i64>,
@@ -73,17 +74,18 @@ impl IntSpan {
 
 /// What a file writes: the ends, which [`IntSpan`]'s decode checks.
 #[derive(Deserialize)]
-struct Written {
+struct IntSpanRepr {
     min: i64,
     max: Option<i64>,
 }
 
-impl<'de> Deserialize<'de> for IntSpan {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let Written { min, max } = Written::deserialize(deserializer)?;
+impl TryFrom<IntSpanRepr> for IntSpan {
+    type Error = SpanError;
+
+    fn try_from(IntSpanRepr { min, max }: IntSpanRepr) -> Result<Self, SpanError> {
         match max {
             None => Ok(Self::at_least(min)),
-            Some(max) => Self::between_checked(min, max).map_err(de::Error::custom),
+            Some(max) => Self::between_checked(min, max),
         }
     }
 }

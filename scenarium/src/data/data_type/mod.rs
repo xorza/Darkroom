@@ -81,16 +81,17 @@ pub enum DataType {
 }
 
 impl DataType {
-    pub const fn default_value(self) -> Option<ConstValue> {
+    /// The zero of a scalar or a path type: the half of
+    /// [`Library::type_default`](crate::Library::type_default) a type answers alone.
+    pub(crate) const fn default_value(self) -> Option<ConstValue> {
         Some(match self {
-            Self::Any => ConstValue::Null,
             Self::Float => ConstValue::Float(0.0),
             Self::Int => ConstValue::Int(0),
             Self::Bool => ConstValue::Bool(false),
             Self::String => ConstValue::String(String::new()),
             Self::File { mode, .. } if mode.holds_many() => ConstValue::FsPaths(Vec::new()),
             Self::Dir | Self::File { .. } => ConstValue::FsPath(String::new()),
-            Self::Custom(_) | Self::Enum(_) => return None,
+            Self::Any | Self::Custom(_) | Self::Enum(_) => return None,
         })
     }
 

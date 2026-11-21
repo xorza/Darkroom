@@ -69,7 +69,7 @@ impl Compiled {
     pub(crate) fn binding(&self, name: &str, input: usize) -> &ExecBinding {
         let e_node = self.node(name);
         assert!(
-            input < e_node.inputs.len as usize,
+            input < e_node.inputs.len(),
             "{name:?} declares no input {input}",
         );
         &self.program.inputs[e_node.inputs.nth(input as u32)].binding

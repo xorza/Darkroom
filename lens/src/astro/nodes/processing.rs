@@ -146,7 +146,7 @@ where
                             }| {
             fields = fields.clone(),
         } => {
-            let config = fields.build(&inputs[1..])?;
+            let config = fields.build(&mut inputs[1..])?;
             let value = mem::take(&mut inputs[0]);
             outputs[0] = runtime::run_frame_op(value, move |image| op(&config, image)).await?;
             Ok(())

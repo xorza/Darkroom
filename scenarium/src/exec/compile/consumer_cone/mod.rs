@@ -2,7 +2,7 @@
 
 use crate::containers::col::Idx;
 use crate::containers::idx_set::IdxSet;
-use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding};
+use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::idx::NodeIdx;
 
 /// What a set of seed nodes reaches downstream: every node that reads a seed's
@@ -67,11 +67,9 @@ impl ConsumerCone {
         let node_count = program.e_nodes.len();
         starts.clear();
         starts.resize(node_count + 1, 0);
-        for e_node in &program.e_nodes {
-            for input in &program.inputs[e_node.inputs] {
-                if let ExecBinding::Wire(address) = &input.binding {
-                    starts[address.node_idx.idx() + 1] += 1;
-                }
+        for (node_idx, _) in program.e_nodes.iter_indexed() {
+            for address in program.wires(node_idx) {
+                starts[address.node_idx.idx() + 1] += 1;
             }
         }
         for at in 0..node_count {
@@ -79,16 +77,14 @@ impl ConsumerCone {
         }
 
         readers.clear();
-        readers.resize(starts[node_count] as usize, NodeIdx(0));
+        readers.resize(starts[node_count] as usize, NodeIdx::default());
         filled.clear();
         filled.extend_from_slice(starts);
-        for (node_idx, e_node) in program.e_nodes.iter_indexed() {
-            for input in &program.inputs[e_node.inputs] {
-                if let ExecBinding::Wire(address) = &input.binding {
-                    let at = &mut filled[address.node_idx.idx()];
-                    readers[*at as usize] = node_idx;
-                    *at += 1;
-                }
+        for (node_idx, _) in program.e_nodes.iter_indexed() {
+            for address in program.wires(node_idx) {
+                let at = &mut filled[address.node_idx.idx()];
+                readers[*at as usize] = node_idx;
+                *at += 1;
             }
         }
     }

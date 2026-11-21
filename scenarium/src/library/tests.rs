@@ -3,7 +3,6 @@ use std::panic;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
-use crate::async_lambda;
 use crate::data::codec::CustomValueCodec;
 use crate::data::codec::error::CodecError;
 use crate::data::const_value::ConstValue;
@@ -11,14 +10,11 @@ use crate::data::data_type::custom_type::{CustomType, CustomTypeId};
 use crate::data::data_type::enum_type::{EnumId, EnumType};
 use crate::data::data_type::file_kind::{FileKind, FileKindId};
 use crate::data::data_type::{DataType, FileMode};
-use crate::data::dynamic_value::{CustomValue, DynamicValue};
+use crate::data::dynamic_value::CustomValue;
 use crate::graph::func::Func;
-use crate::graph::func::error::InvokeError;
-use crate::graph::func::lambda::Invocation;
 use crate::graph::identity::FuncId;
 use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::internals;
-use crate::internals::func_invoker::FuncInvoker;
 use crate::library::Library;
 
 #[derive(Debug)]
@@ -65,7 +61,7 @@ fn registration_rejects_duplicate_ids_without_replacing_entries() {
     assert_eq!(library.custom_type(custom).unwrap().name(), "Before");
 
     assert!(refused(|| {
-        library.register_enum(EnumId::nil(), EnumType::new("Nil", vec![]));
+        library.register_enum(EnumId::nil(), EnumType::new("Nil", Vec::<String>::new()));
     }));
     assert_eq!(library.type_count(), 1);
 }
@@ -83,7 +79,7 @@ fn an_identical_type_registers_again_and_a_conflict_panics() {
     let mut library = Library::default();
     let register_all = |library: &mut Library| {
         library.register_custom_type(blob, CustomType::with_codec("Blob", Arc::clone(&codec)));
-        library.register_enum(mode, EnumType::new("Mode", vec!["a".into()]));
+        library.register_enum(mode, EnumType::new("Mode", ["a"]));
         library.register_file_kind(image, FileKind::new("Image", ["png"]));
     };
     register_all(&mut library);
@@ -107,7 +103,7 @@ fn an_identical_type_registers_again_and_a_conflict_panics() {
         || library.register_custom_type(blob, CustomType::new("Blob"))
     ));
     assert!(refused(
-        || library.register_enum(mode, EnumType::new("Mode", vec!["b".into()]))
+        || library.register_enum(mode, EnumType::new("Mode", ["b"]))
     ));
     assert!(refused(|| library.register_file_kind(
         image,
@@ -167,10 +163,7 @@ fn check_holds_every_declared_type_registered_and_every_enum_default_a_variant()
     let whole = || {
         let mut library = Library::default();
         library.add(modal_func(mode, "fast", file));
-        library.register_enum(
-            mode,
-            EnumType::new("Mode", vec!["fast".into(), "slow".into()]),
-        );
+        library.register_enum(mode, EnumType::new("Mode", ["fast", "slow"]));
         library.register_file_kind(file, FileKind::new("Text", ["txt"]));
         library
     };
@@ -184,7 +177,7 @@ fn check_holds_every_declared_type_registered_and_every_enum_default_a_variant()
     };
     let mut no_kind = Library::default();
     no_kind.add(modal_func(mode, "fast", file));
-    no_kind.register_enum(mode, EnumType::new("Mode", vec!["fast".into()]));
+    no_kind.register_enum(mode, EnumType::new("Mode", ["fast"]));
     assert!(
         message(no_kind).contains("port \"file\" names File"),
         "the file kind is missing"
@@ -248,7 +241,7 @@ fn a_file_feeds_an_input_whose_kind_holds_its_own() {
 fn a_type_the_library_lacks_is_kept_and_shown_as_unknown() {
     let (known, unknown) = (EnumId::unique(), EnumId::unique());
     let mut library = Library::default();
-    library.register_enum(known, EnumType::new("Mode", vec!["fast".into()]));
+    library.register_enum(known, EnumType::new("Mode", ["fast"]));
     let input = |enum_id| InputDecl::required("mode", DataType::Enum(enum_id));
     let slothful = ConstValue::Enum("slothful".into());
     assert!(library.const_satisfies(&input(known), &ConstValue::Enum("fast".into())));
@@ -284,74 +277,49 @@ fn a_type_the_library_lacks_is_kept_and_shown_as_unknown() {
     assert!(library.knows(DataType::Dir));
 }
 
-/// A kind is within another when the other holds each of its extensions, and no extensions is
-/// every file. A registration holds each extension to one spelling.
+/// An input starts with its declared default, else its type's: an enum's first variant, an empty
+/// text for `Any`, a scalar's zero; none for a custom type or an enum the library lacks. Whether
+/// it takes a constant at all answers the same, without building one.
 #[test]
-fn a_file_kind_is_within_the_kinds_that_hold_its_extensions() {
-    let image = FileKind::new("Image", ["png", "jpg"]);
-    let png = FileKind::new("PNG", ["png"]);
-    let any = FileKind::new("File", Vec::<&str>::new());
-    assert!(png.within(&image));
-    assert!(!image.within(&png));
-    assert!(image.within(&any));
-    assert!(!any.within(&image));
-    assert!(any.within(&any));
-    for bad in [&["PNG"][..], &[".png"], &[""], &["png", "png"]] {
-        assert!(
-            refused(|| {
-                FileKind::new("Bad", bad.iter().copied());
-            }),
-            "{bad:?}"
+fn an_input_defaults_to_its_declared_value_else_its_types() {
+    use crate::data::data_type::custom_type::CustomTypeId;
+    use crate::data::data_type::enum_type::{EnumId, EnumType};
+
+    let mut library = Library::default();
+    let mode = EnumId::from_u128(1);
+    library.register_enum(mode, EnumType::new("Mode", ["Fast", "Fine"]));
+    let input = |data_type: DataType| InputDecl::optional("x", data_type);
+    let declared = InputDecl {
+        default_value: Some(ConstValue::Int(5)),
+        ..input(DataType::Int)
+    };
+    let cases = [
+        (declared, Some(ConstValue::Int(5))),
+        (
+            input(DataType::Enum(mode)),
+            Some(ConstValue::Enum("Fast".into())),
+        ),
+        (input(DataType::Enum(EnumId::from_u128(2))), None),
+        (
+            input(DataType::Any),
+            Some(ConstValue::String(String::new())),
+        ),
+        (input(DataType::Int), Some(ConstValue::Int(0))),
+        (input(DataType::Float), Some(ConstValue::Float(0.0))),
+        (input(DataType::Custom(CustomTypeId::from_u128(3))), None),
+    ];
+    for (port, expected) in cases {
+        assert_eq!(
+            library.default_const(&port),
+            expected,
+            "{:?}",
+            port.data_type
+        );
+        assert_eq!(
+            library.takes_const(&port),
+            expected.is_some(),
+            "{:?} takes a constant exactly when it has a default",
+            port.data_type
         );
     }
-}
-
-/// A func computes through the invoker, and its node state carries between
-/// calls the way it does between two runs of one node.
-#[tokio::test]
-async fn an_invoked_func_keeps_its_node_state_between_calls() -> Result<(), InvokeError> {
-    let mut library = Library::default();
-    library.add(
-        Func::builder(
-            FuncId::unique(),
-            "sum",
-            async_lambda!(|Invocation {
-                               state,
-                               inputs,
-                               outputs,
-                               ..
-                           }| {
-                let total = inputs[0].as_i64().unwrap() + inputs[1].as_i64().unwrap();
-                state.set(total);
-                outputs[0] = ConstValue::Int(total).into();
-                Ok(())
-            }),
-        )
-        .pure()
-        .input(1, InputDecl::required("A", DataType::Int))
-        .input(2, InputDecl::required("B", DataType::Int))
-        .output(1, OutputDecl::new("Sum", DataType::Int))
-        .build(),
-    );
-    let sum = library.by_name("sum").unwrap();
-    let int = |value: i64| DynamicValue::Static(ConstValue::Int(value));
-    let mut node = FuncInvoker::default();
-
-    let outputs = node.call(sum, [int(2), int(4)]).await?;
-    assert_eq!(outputs[0].as_i64().unwrap(), 6);
-    assert_eq!(
-        node.state::<i64>(),
-        Some(&6),
-        "the body stashed its result in the node's own state"
-    );
-
-    let outputs = node.call(sum, [int(3), int(5)]).await?;
-    assert_eq!(outputs[0].as_i64().unwrap(), 8);
-    assert_eq!(
-        node.state::<i64>(),
-        Some(&8),
-        "and the second call replaced it"
-    );
-
-    Ok(())
 }

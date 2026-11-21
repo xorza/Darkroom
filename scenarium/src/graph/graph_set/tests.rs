@@ -879,7 +879,7 @@ fn a_file_names_the_types_its_ports_name_and_a_load_without_them_keeps_the_names
     let nameless = CustomTypeId::from_u128(79);
     let mut with = library();
     with.register_custom_type(star, CustomType::new("Star List"));
-    with.register_enum(mode, EnumType::new("Mode", vec!["a".into()]));
+    with.register_enum(mode, EnumType::new("Mode", ["a"]));
     let port =
         |id: u32, data_type| Numbered::new(PortId::new(id), InputDecl::required("x", data_type));
     let mut set = GraphSet::default();

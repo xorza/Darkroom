@@ -365,7 +365,7 @@ fn every_editor_fills_its_column() {
     let library = Library::default();
     let wide = "a picker label wider than the floor";
     let picker = ValueDomain::Variants(vec![
-        ValueVariant::new("wide", ConstValue::Int(0)).display(wide),
+        ValueVariant::new(wide, ConstValue::Int(0)),
         ValueVariant::new("narrow", ConstValue::Int(1)),
     ]);
     let ids = ["picker", "float", "text", "empty"].map(WidgetId::from_hash);

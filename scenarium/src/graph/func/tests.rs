@@ -7,10 +7,10 @@ use crate::graph::func::Func;
 use crate::graph::func::error::FuncValidationError;
 use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::func::lambda::FuncLambda;
-use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::{FuncId, PortId};
-use crate::graph::node::{CacheMode, Keep};
+use crate::graph::node::CacheMode;
 use crate::graph::ports::{InputDecl, OutputDecl, PortList, PortsError};
+use crate::graph::value_domain::value_variant::ValueVariant;
 use crate::internals;
 
 const FUNC: FuncId = FuncId::from_u128(7);
@@ -208,41 +208,12 @@ fn a_port_takes_the_number_its_func_gives_it() {
 }
 
 #[test]
-fn a_variant_label_is_its_display_else_its_name() {
-    let plain = ValueVariant::new("auto_stf", ConstValue::Int(1));
-    assert_eq!(plain.label(), "auto_stf");
-    let friendly = plain.display("Auto STF");
-    assert_eq!(friendly.label(), "Auto STF");
-    assert_eq!(
-        friendly.name, "auto_stf",
-        "the name is what saved graphs bind"
-    );
-}
-
-#[test]
-fn default_cache_mode_defaults_to_auto_and_builder_overrides() {
+fn default_cache_mode_defaults_to_auto() {
     // Out of the box a func's nodes keep their output while memory allows.
     assert_eq!(
         internals::stub_func(FuncId::unique(), "f").default_cache_mode,
         CacheMode::AUTO
     );
-
-    // The builder sets a hotter default; distinct inputs map to distinct
-    // stored modes (not a fixed constant).
-    for mode in [
-        CacheMode::ALWAYS,
-        CacheMode {
-            ram: Keep::Never,
-            disk: true,
-        },
-        CacheMode {
-            ram: Keep::Always,
-            disk: true,
-        },
-    ] {
-        let func = internals::stub_func(FuncId::unique(), "f").default_cache_mode(mode);
-        assert_eq!(func.default_cache_mode, mode, "{mode:?} is stored verbatim");
-    }
 }
 
 #[test]

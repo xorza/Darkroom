@@ -102,7 +102,7 @@ impl ConstEditor<'_> {
                 ui,
                 DropdownOptions {
                     options: value_variants,
-                    label: ValueVariant::label,
+                    label: |variant: &ValueVariant| variant.label.as_str(),
                     current,
                 },
             )?;

@@ -40,6 +40,10 @@ pub enum RunError {
     CacheLoadFailed,
     #[error("demanded outputs {outputs:?} were left unbound")]
     OutputsNotProduced { outputs: Vec<usize> },
+    /// A lambda wrote a value its output's declared type does not hold: the producer's fault,
+    /// reported against it, where a consumer reading the value as declared would panic.
+    #[error("outputs {outputs:?} hold values their declared types do not")]
+    OutputType { outputs: Vec<usize> },
     /// A path input holds a [`PathForm::Foreign`](crate::data::path_form::PathForm::Foreign) path,
     /// as a document saved on another system can. Refused before the lambda runs: this system
     /// would read it as something else, as Windows reads `/data/a.fit` on the current drive.

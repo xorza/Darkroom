@@ -1,4 +1,5 @@
 use super::*;
+use crate::containers::col::Idx;
 
 /// A program of `ids`, nothing but identities — enough for the pairing the
 /// engine establishes at install.
@@ -27,16 +28,20 @@ fn install_carries_slots_across_a_shifted_index_space() {
     let mut engine = ExecEngine::default();
     engine.install(program(&[ProgramId::from(NodeId::from_u128(1)), surviving]));
     // Index 1 before the recompile: ids place in ascending order.
-    engine.executor.nodes[NodeIdx(1)].state.set(17_u32);
+    engine.executor.nodes[NodeIdx::from_idx(1)]
+        .state
+        .set(17_u32);
 
     // Node 1 is dropped, so the survivor slides to index 0.
     engine.install(program(&[surviving, ProgramId::from(NodeId::from_u128(3))]));
 
     assert_eq!(
-        engine.executor.nodes[NodeIdx(0)].state.get::<u32>(),
+        engine.executor.nodes[NodeIdx::from_idx(0)]
+            .state
+            .get::<u32>(),
         Some(&17)
     );
-    assert!(engine.executor.nodes[NodeIdx(1)].state.is_none());
+    assert!(engine.executor.nodes[NodeIdx::from_idx(1)].state.is_none());
     engine.validate().unwrap();
 }
 

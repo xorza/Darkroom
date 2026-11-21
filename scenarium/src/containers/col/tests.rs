@@ -1,11 +1,15 @@
-use crate::containers::col::{Col, Span};
-use crate::exec::idx::NodeIdx;
+use crate::containers::col::{Col, Idx, Span};
+
+idx_type! {
+    /// The tests' own index space, so the leaf's tests reach nothing above it.
+    struct TestIdx, "a test index"
+}
 
 /// `iter_indexed` is what lets a walk carry the index without reconstructing it
 /// from a counter, so it must agree with indexing on every entry.
 #[test]
 fn iter_indexed_pairs_each_entry_with_the_index_that_addresses_it() {
-    let mut col = Col::<NodeIdx, _>::default();
+    let mut col = Col::<TestIdx, _>::default();
     for value in ["a", "b", "c"] {
         col.push(value);
     }
@@ -13,16 +17,24 @@ fn iter_indexed_pairs_each_entry_with_the_index_that_addresses_it() {
     let pairs: Vec<_> = col.iter_indexed().collect();
     assert_eq!(
         pairs,
-        [(NodeIdx(0), &"a"), (NodeIdx(1), &"b"), (NodeIdx(2), &"c")]
+        [
+            (TestIdx::from_idx(0), &"a"),
+            (TestIdx::from_idx(1), &"b"),
+            (TestIdx::from_idx(2), &"c")
+        ]
     );
     for (node_idx, value) in pairs {
         assert_eq!(col[node_idx], *value, "the pair addresses its own entry");
     }
 
-    assert_eq!(col.get(NodeIdx(2)), Some(&"c"));
-    assert_eq!(col.get(NodeIdx(3)), None, "one past the last entry");
+    assert_eq!(col.get(TestIdx::from_idx(2)), Some(&"c"));
+    assert_eq!(
+        col.get(TestIdx::from_idx(3)),
+        None,
+        "one past the last entry"
+    );
     assert!(
-        Col::<NodeIdx, &str>::default()
+        Col::<TestIdx, &str>::default()
             .iter_indexed()
             .next()
             .is_none()
@@ -34,7 +46,7 @@ fn iter_indexed_pairs_each_entry_with_the_index_that_addresses_it() {
 /// index inside it, the checked form — must name the same entries.
 #[test]
 fn append_hands_back_the_run_it_packed_and_every_address_into_it_agrees() {
-    let mut col = Col::<NodeIdx, _>::default();
+    let mut col = Col::<TestIdx, _>::default();
 
     let first = col.append([10, 20]);
     let empty = col.append([]);
@@ -53,14 +65,14 @@ fn append_hands_back_the_run_it_packed_and_every_address_into_it_agrees() {
     assert_eq!(col[second], [30]);
 
     // The run's own offsets, and the scalar index each names.
-    assert_eq!(first.nth(0), NodeIdx(0));
-    assert_eq!(first.nth(1), NodeIdx(1));
-    assert_eq!(second.nth(0), NodeIdx(2));
+    assert_eq!(first.nth(0), TestIdx::from_idx(0));
+    assert_eq!(first.nth(1), TestIdx::from_idx(1));
+    assert_eq!(second.nth(0), TestIdx::from_idx(2));
     assert_eq!(col[first.nth(1)], 20, "an offset addresses its entry");
 
     assert_eq!(col.get_span(second), Some(&[30][..]));
     assert_eq!(
-        col.get_span(Span::<NodeIdx>::default()),
+        col.get_span(Span::<TestIdx>::default()),
         Some(&[][..]),
         "an empty run is in range even in an empty column"
     );
@@ -74,8 +86,8 @@ fn append_hands_back_the_run_it_packed_and_every_address_into_it_agrees() {
 /// `reset_with` refills every entry from `fill` without growing.
 #[test]
 fn a_column_refilled_from_another_keeps_its_buffer() {
-    let source: Col<NodeIdx, u32> = [1, 2, 3].into();
-    let mut dest = Col::<NodeIdx, u32>::with_capacity(8);
+    let source: Col<TestIdx, u32> = [1, 2, 3].into();
+    let mut dest = Col::<TestIdx, u32>::with_capacity(8);
     dest.extend([9, 9, 9, 9, 9]);
 
     dest.clone_from(&source);
@@ -97,11 +109,37 @@ fn a_column_refilled_from_another_keeps_its_buffer() {
 /// program its spans came from disagree.
 #[test]
 fn a_span_past_the_end_is_none_rather_than_a_panic() {
-    let mut long = Col::<NodeIdx, _>::default();
+    let mut long = Col::<TestIdx, _>::default();
     let run = long.append([1, 2, 3]);
-    let mut short = Col::<NodeIdx, _>::default();
+    let mut short = Col::<TestIdx, _>::default();
     short.append([1, 2]);
 
     assert_eq!(long.get_span(run), Some(&[1, 2, 3][..]));
     assert_eq!(short.get_span(run), None);
+}
+
+/// A strictly ascending column finds each of its entries by binary search and nothing else, and a
+/// reset refills it at the length asked, whatever it held.
+#[test]
+fn a_sorted_column_finds_its_entries_and_a_reset_refills_it() {
+    let mut col = Col::<TestIdx, i32>::from([2, 5, 9]);
+    assert!(col.is_strictly_ascending());
+    assert_eq!(col.search_sorted(&2), Some(TestIdx::from_idx(0)));
+    assert_eq!(col.search_sorted(&9), Some(TestIdx::from_idx(2)));
+    assert_eq!(col.search_sorted(&4), None);
+    assert!(Col::<TestIdx, i32>::default().is_strictly_ascending());
+    assert!(
+        !Col::<TestIdx, i32>::from([2, 2]).is_strictly_ascending(),
+        "a repeat"
+    );
+    assert!(!Col::<TestIdx, i32>::from([3, 2]).is_strictly_ascending());
+
+    col.reset(2, 7);
+    assert_eq!(col.iter().copied().collect::<Vec<_>>(), [7, 7]);
+    col.reset(0, 1);
+    assert!(col.is_empty());
+
+    let span = Span::<TestIdx>::new(4, 3);
+    assert_eq!((span.len(), span.offsets()), (3, 0..3));
+    assert_eq!(span.nth(2), TestIdx::from_idx(6));
 }

@@ -1,3 +1,4 @@
+use crate::data::data_type::DataType;
 use crate::data::dynamic_value::DynamicValue;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::disk_store::error::StoreResult;
@@ -289,6 +290,20 @@ impl RuntimeSlot {
             unreachable!("set to Resident just above");
         };
         &mut snapshot.values
+    }
+
+    /// Each output, by position, whose value `types`, the outputs' declared types, does not hold.
+    pub(crate) fn mistyped_outputs(&self, types: &[DataType]) -> Vec<usize> {
+        let ValueState::Resident { snapshot, .. } = &self.value else {
+            panic!("a node's output must be resident immediately after invocation");
+        };
+        debug_assert_eq!(snapshot.values.len(), types.len());
+        types
+            .iter()
+            .zip(&snapshot.values)
+            .enumerate()
+            .filter_map(|(output, (data_type, value))| (!value.fits(*data_type)).then_some(output))
+            .collect()
     }
 
     pub(crate) fn unbound_demanded_outputs(&self, demand: &[OutputDemand]) -> Vec<usize> {

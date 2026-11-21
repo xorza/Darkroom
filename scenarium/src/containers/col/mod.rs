@@ -27,12 +27,13 @@ pub(crate) trait Idx: Copy {
 /// Declare one dense index space: a `u32` newtype and its [`Idx`] impl.
 ///
 /// `$what` names the space in the bound check; doc comments pass through, so what a space
-/// *means* lives at the declaration.
+/// *means* lives at the declaration. The field is private: an index is built through
+/// [`Idx::from_idx`] alone, the route that checks the bound.
 macro_rules! idx_type {
     ($(#[$meta:meta])* $vis:vis struct $name:ident, $what:literal) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        $vis struct $name($vis u32);
+        $vis struct $name(u32);
 
         impl $crate::containers::col::Idx for $name {
             fn idx(self) -> usize {
@@ -58,8 +59,8 @@ pub(crate) use idx_type;
 /// that space.
 #[derive(Debug)]
 pub(crate) struct Span<I> {
-    pub(crate) start: u32,
-    pub(crate) len: u32,
+    start: u32,
+    len: u32,
     space: PhantomData<I>,
 }
 
@@ -71,6 +72,16 @@ impl<I> Span<I> {
             len,
             space: PhantomData,
         }
+    }
+
+    /// How many entries the run holds.
+    pub(crate) const fn len(self) -> usize {
+        self.len as usize
+    }
+
+    /// Each offset into the run, as [`Self::nth`] takes it: a node's port numbers.
+    pub(crate) const fn offsets(self) -> Range<u32> {
+        0..self.len
     }
 
     pub(crate) const fn is_empty(self) -> bool {
@@ -271,6 +282,15 @@ impl<I: Idx, T> Col<I, T> {
         T: Ord,
     {
         self.values.binary_search(value).ok().map(I::from_idx)
+    }
+
+    /// Whether each entry is above the one before: what [`Self::search_sorted`] needs, and each
+    /// key once.
+    pub(crate) fn is_strictly_ascending(&self) -> bool
+    where
+        T: Ord,
+    {
+        self.values.is_sorted_by(|before, after| before < after)
     }
 
     /// Entries paired with the index they sit at.

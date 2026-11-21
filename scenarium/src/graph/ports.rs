@@ -29,11 +29,11 @@ use crate::data::const_value::ConstValue;
 use crate::data::data_type::enum_type::EnumId;
 use crate::data::data_type::{DataType, Strictness};
 use crate::graph::binding::Binding;
-use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::{InputPort, NodeId, PortId};
 use crate::graph::value_domain::ValueDomain;
 use crate::graph::value_domain::float_span::FloatSpan;
 use crate::graph::value_domain::int_span::IntSpan;
+use crate::graph::value_domain::value_variant::ValueVariant;
 use crate::graph::wiring::Wiring;
 
 /// A port's declaration under its id: the item a declaration's lists of ports hold.
@@ -76,9 +76,7 @@ pub struct InputDecl {
     /// node reads as configuration.
     pub const_only: bool,
     pub default_value: Option<ConstValue>,
-    /// The constants the input admits past what its type holds. A file that states none holds
-    /// an input of no domain.
-    #[serde(default)]
+    /// The constants the input admits past what its type holds.
     pub domain: ValueDomain,
 }
 

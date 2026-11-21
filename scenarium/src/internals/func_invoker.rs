@@ -62,3 +62,68 @@ impl FuncInvoker {
         &mut self.ctx
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::async_lambda;
+    use crate::data::const_value::ConstValue;
+    use crate::data::data_type::DataType;
+    use crate::data::dynamic_value::DynamicValue;
+    use crate::graph::func::Func;
+    use crate::graph::func::error::InvokeError;
+    use crate::graph::func::lambda::Invocation;
+    use crate::graph::identity::FuncId;
+    use crate::graph::ports::{InputDecl, OutputDecl};
+    use crate::internals::func_invoker::FuncInvoker;
+    use crate::library::Library;
+
+    /// A func computes through the invoker, and its node state carries between
+    /// calls the way it does between two runs of one node.
+    #[tokio::test]
+    async fn an_invoked_func_keeps_its_node_state_between_calls() -> Result<(), InvokeError> {
+        let mut library = Library::default();
+        library.add(
+            Func::builder(
+                FuncId::unique(),
+                "sum",
+                async_lambda!(|Invocation {
+                                   state,
+                                   inputs,
+                                   outputs,
+                                   ..
+                               }| {
+                    let total = inputs[0].as_i64().unwrap() + inputs[1].as_i64().unwrap();
+                    state.set(total);
+                    outputs[0] = ConstValue::Int(total).into();
+                    Ok(())
+                }),
+            )
+            .pure()
+            .input(1, InputDecl::required("A", DataType::Int))
+            .input(2, InputDecl::required("B", DataType::Int))
+            .output(1, OutputDecl::new("Sum", DataType::Int))
+            .build(),
+        );
+        let sum = library.by_name("sum").unwrap();
+        let int = |value: i64| DynamicValue::Static(ConstValue::Int(value));
+        let mut node = FuncInvoker::default();
+
+        let outputs = node.call(sum, [int(2), int(4)]).await?;
+        assert_eq!(outputs[0].as_i64().unwrap(), 6);
+        assert_eq!(
+            node.state::<i64>(),
+            Some(&6),
+            "the body stashed its result in the node's own state"
+        );
+
+        let outputs = node.call(sum, [int(3), int(5)]).await?;
+        assert_eq!(outputs[0].as_i64().unwrap(), 8);
+        assert_eq!(
+            node.state::<i64>(),
+            Some(&8),
+            "and the second call replaced it"
+        );
+
+        Ok(())
+    }
+}

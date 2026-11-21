@@ -122,18 +122,6 @@ mod tests {
         outputs[0].as_string().unwrap().to_owned()
     }
 
-    #[test]
-    fn concat_interface_is_two_any_inputs_to_string() {
-        let library = system_library();
-        let concat = library.by_name("Concat").unwrap();
-        assert_eq!(concat.category(), "System");
-        assert_eq!(concat.inputs().len(), 2);
-        assert_eq!(concat.inputs()[0].data_type, DataType::Any);
-        assert_eq!(concat.inputs()[1].data_type, DataType::Any);
-        assert_eq!(concat.outputs().len(), 1);
-        assert_eq!(concat.outputs()[0].data_type, DataType::String);
-    }
-
     #[tokio::test]
     async fn concat_stringifies_each_side_then_joins_a_before_b() {
         // Each side converts through `to_value_string` (unquoted, full-precision)

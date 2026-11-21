@@ -390,7 +390,7 @@ impl PortRow<'_> {
                             }
                         }
                         None => {
-                            if let Some(seed) = data_type.default_value()
+                            if let Some(seed) = library.type_default(data_type)
                                 && Link::new(wid("set_default"), "set").show(ui, theme)
                             {
                                 edit = Some(PortEdit::Default {

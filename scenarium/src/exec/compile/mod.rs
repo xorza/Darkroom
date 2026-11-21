@@ -64,7 +64,8 @@ use std::sync::Arc;
 use common::ErrorChain;
 use hashbrown::{HashMap, HashSet};
 
-use crate::containers::col::{Col, Idx, Span};
+use crate::containers::col::{Col, Idx};
+use crate::data::const_value::ConstValue;
 use crate::exec::compile::compiled_graph::{
     CompiledGraph, ExecBinding, ExecEvent, ExecInput, ExecNode,
 };
@@ -145,6 +146,8 @@ struct PortTotals {
     inputs: usize,
     outputs: usize,
     events: usize,
+    /// The authored subscriptions: a capacity hint for the flattened ones, which a trigger that
+    /// crosses a boundary fans out and a disabled subscriber drops, so it is no count to assert.
     subscribers: usize,
 }
 
@@ -153,8 +156,9 @@ struct PortTotals {
 ///
 /// The buffers are kept between compiles for their capacity alone: each is refilled before it is
 /// read, so a compile observes nothing of the last one. Hosts keep one per compile site, and what
-/// a compile then allocates is exactly the artifact: five columns, each sized from the placement
-/// and filled once.
+/// a compile then allocates is the artifact: its columns, each sized from the placement and filled
+/// once, but the subscriber pool, sized from the authored subscriptions, which a trigger that
+/// crosses a boundary can outgrow; and the event list each node appends.
 ///
 /// The [`CompiledGraph`] cannot be reused, since the engine, its runtime cache, and the GUI hold
 /// handles to the previous one while the next compile runs — so it is always fresh and can be
@@ -185,6 +189,25 @@ pub struct Compiler {
     /// The events it followed, by the program id of their node, so a loop through boundaries
     /// ends.
     event_seen: HashSet<(ProgramId, PortId)>,
+}
+
+/// What a binding lowers to, its constant borrowed from the document until the program takes it.
+#[derive(Debug, Clone, Copy)]
+enum Lowered<'a> {
+    None,
+    Const(&'a ConstValue),
+    Wire(OutputAddr),
+}
+
+impl Lowered<'_> {
+    /// The program's binding, its constant copied in.
+    fn into_binding(self) -> ExecBinding {
+        match self {
+            Self::None => ExecBinding::None,
+            Self::Const(value) => ExecBinding::Const(value.clone()),
+            Self::Wire(address) => ExecBinding::Wire(address),
+        }
+    }
 }
 
 /// What a compile reads: the set and the library its nodes resolve against.
@@ -234,7 +257,7 @@ impl Compiler {
             program_ids: Col::with_capacity(self.placed.len()),
             e_nodes: Col::with_capacity(self.placed.len()),
             inputs: Col::with_capacity(totals.inputs),
-            output_count: 0,
+            output_types: Col::with_capacity(totals.outputs),
             events: Col::with_capacity(totals.events),
             subscribers: Col::with_capacity(totals.subscribers),
             codecs: Arc::clone(source.library.codecs()),
@@ -275,20 +298,21 @@ impl Compiler {
                     ExecInput {
                         required: func_input.required,
                         fs_path: func_input.data_type.is_path(),
-                        binding: self.lower(
-                            source,
-                            level,
-                            graph
-                                .wiring()
-                                .binding(InputPort::new(node_id, func_input.id)),
-                        ),
+                        binding: self
+                            .lower(
+                                source,
+                                level,
+                                graph
+                                    .wiring()
+                                    .binding(InputPort::new(node_id, func_input.id)),
+                            )
+                            .into_binding(),
                     }
                 }));
 
-            let output_count =
-                u32::try_from(func.outputs().len()).expect("a func's output count fits in u32");
-            let node_outputs = Span::new(compiled.output_count, output_count);
-            compiled.output_count += output_count;
+            let node_outputs = compiled
+                .output_types
+                .append(func.outputs().iter().map(|output| output.data_type));
 
             // Each event lands with the nodes it triggers, across any boundary between, resolved
             // through the placement, which already covers nodes the walk has not reached.
@@ -339,7 +363,7 @@ impl Compiler {
         // The placement counted these from the same declarations the walk read, so a mismatch is
         // the two disagreeing about the library.
         debug_assert_eq!(compiled.inputs.len(), totals.inputs);
-        debug_assert_eq!(compiled.output_count as usize, totals.outputs);
+        debug_assert_eq!(compiled.output_types.len(), totals.outputs);
         debug_assert_eq!(compiled.events.len(), totals.events);
 
         compiled
@@ -424,7 +448,11 @@ impl Compiler {
             u32::try_from(totals.outputs).is_ok(),
             "program output count must fit in u32"
         );
-        placed.sort_unstable_by_key(|placed| placed.program_id);
+        #[expect(
+            clippy::unnecessary_sort_by,
+            reason = "a key is 129 bytes, which a by-key sort copies twice a comparison"
+        )]
+        placed.sort_unstable_by(|left, right| left.program_id.cmp(&right.program_id));
         totals
     }
 
@@ -440,7 +468,7 @@ impl Compiler {
             let outputs = self.outputs_nodes[&instance.compound];
             let graph = source.graphs.graph(instance.inside.graph);
             for (_, binding) in graph.wiring().bindings_on(outputs) {
-                if let ExecBinding::Wire(addr) = self.lower(source, instance.inside, Some(binding))
+                if let Lowered::Wire(addr) = self.lower(source, instance.inside, Some(binding))
                     && self.placed[addr.node_idx.idx()]
                         .program_id
                         .ids()
@@ -540,7 +568,7 @@ impl Compiler {
     fn idx(&self, program_id: ProgramId) -> NodeIdx {
         let pos = self
             .placed
-            .binary_search_by_key(&program_id, |placed| placed.program_id)
+            .binary_search_by(|placed| placed.program_id.cmp(&program_id))
             .expect("the placement covers every program node");
         NodeIdx::from_idx(pos)
     }
@@ -556,17 +584,17 @@ impl Compiler {
     /// func's output, a constant or nothing. A passthrough costs nothing, and output demand
     /// prunes across the boundary as anywhere else. As Unreal expands each macro instance "into a
     /// unique set of nodes during compilation".
-    fn lower(
+    fn lower<'s>(
         &self,
-        source: Source<'_>,
+        source: Source<'s>,
         mut level: Level,
-        binding: Option<&Binding>,
-    ) -> ExecBinding {
+        binding: Option<&'s Binding>,
+    ) -> Lowered<'s> {
         let mut binding = binding;
         loop {
             let source_port = match binding {
-                None => return ExecBinding::None,
-                Some(Binding::Const(value)) => return ExecBinding::Const(value.clone()),
+                None => return Lowered::None,
+                Some(Binding::Const(value)) => return Lowered::Const(value),
                 Some(Binding::Wire(source_port)) => *source_port,
             };
             let producer = source
@@ -581,7 +609,7 @@ impl Compiler {
                         .ports()
                         .output_idx(source_port.port)
                         .expect("an admitted wire reads an output its producer declares");
-                    return ExecBinding::Wire(OutputAddr {
+                    return Lowered::Wire(OutputAddr {
                         node_idx: self.idx(level.program_id(source_port.node_id)),
                         port_idx: u32::try_from(port_idx).expect("a func's outputs fit in u32"),
                     });

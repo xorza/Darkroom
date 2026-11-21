@@ -125,7 +125,7 @@ fn labelled(
                 e_node.sink,
                 e_node.disabled,
                 e_node.cache,
-                e_node.outputs.len,
+                e_node.outputs.len(),
             )];
             lines.extend(
                 compiled.inputs[e_node.inputs]

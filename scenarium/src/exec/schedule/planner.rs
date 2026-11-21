@@ -4,7 +4,7 @@
 //! nothing.
 
 use crate::containers::idx_set::IdxSet;
-use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding};
+use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::error::ExecResult;
 use crate::exec::idx::NodeIdx;
 use crate::exec::schedule::{NodeState, RunSchedule};
@@ -109,11 +109,11 @@ impl Planner {
             self.entered.insert(node_idx);
             self.stack.push(Visit::Done(node_idx));
 
-            for e_input in &program.inputs[e_node.inputs] {
-                if let ExecBinding::Wire(addr) = &e_input.binding {
-                    self.stack.push(Visit::Discover(addr.node_idx));
-                }
-            }
+            self.stack.extend(
+                program
+                    .wires(node_idx)
+                    .map(|address| Visit::Discover(address.node_idx)),
+            );
         }
     }
 }

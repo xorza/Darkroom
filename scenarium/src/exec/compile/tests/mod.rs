@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use super::*;
-use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
 use crate::exec::compile::error::{CompiledGraphValidationError, PortPool};
 use crate::graph::Graph;
@@ -35,7 +34,7 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
 
     // The artifact check catches a subscriber index that names no node. The walk cannot mint one
     // (every index comes out of the placement), so it is corrupted here by hand.
-    let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
+    let past_the_end = NodeIdx::from_idx(compiled.program.e_nodes.len());
     let events = compiled.node("ticker").events;
     let subscriber = compiled.program.events[events][0].subscribers.nth(0);
     compiled.program.subscribers[subscriber] = past_the_end;
@@ -67,7 +66,7 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
 
     // One past the last node: the address names no node at all.
     let mut compiled = g.compile();
-    let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
+    let past_the_end = NodeIdx::from_idx(compiled.program.e_nodes.len());
     let input = bound_input(&compiled);
     compiled.program.inputs[input].binding = ExecBinding::Wire(OutputAddr {
         node_idx: past_the_end,
@@ -88,7 +87,7 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
     let ExecBinding::Wire(address) = compiled.program.inputs[input].binding else {
         unreachable!("bound_input selected a bind")
     };
-    let port_idx = compiled.program[address.node_idx].outputs.len;
+    let port_idx = compiled.program[address.node_idx].outputs.offsets().end;
     compiled.program.inputs[input].binding = ExecBinding::Wire(OutputAddr {
         node_idx: address.node_idx,
         port_idx,
@@ -215,7 +214,7 @@ fn summary(compiled: &CompiledGraph, authored: &[ProgramId]) -> Vec<String> {
                 input.required, input.fs_path
             ));
         }
-        out.push(format!("  outputs {}", e_node.outputs.len));
+        out.push(format!("  outputs {}", e_node.outputs.len()));
         for event in &compiled.events[e_node.events] {
             let subscribers: Vec<_> = compiled.subscribers[event.subscribers]
                 .iter()
@@ -292,7 +291,7 @@ fn recompiling_one_graph_does_not_accumulate_in_the_reused_buffers() {
 
     assert_eq!(summary(&second, &authored), first_summary);
     assert_eq!(second.inputs.len(), first.inputs.len());
-    assert_eq!(second.output_count, first.output_count);
+    assert!(second.output_types.iter().eq(first.output_types.iter()));
 }
 
 /// A producer declaring one output of `out_ty` and a consumer declaring one required input of
@@ -337,7 +336,7 @@ fn places_one_node_per_authored_node_in_id_order() {
     for (pos, node_id) in expected.iter().enumerate() {
         assert_eq!(
             compiled.program.node(*node_id).unwrap(),
-            NodeIdx(pos as u32)
+            NodeIdx::from_idx(pos)
         );
     }
 }
@@ -351,14 +350,19 @@ fn packs_one_port_run_per_node_from_its_declaration() {
 
     let producer = compiled.node("producer");
     let consumer = compiled.node("consumer");
-    assert_eq!((producer.outputs.len, producer.inputs.len), (1, 0));
-    assert_eq!((consumer.outputs.len, consumer.inputs.len), (0, 1));
+    assert_eq!((producer.outputs.len(), producer.inputs.len()), (1, 0));
+    assert_eq!((consumer.outputs.len(), consumer.inputs.len()), (0, 1));
     assert_eq!(
-        compiled.program.output_count, 1,
+        compiled.program.output_types.len(),
+        1,
         "one output port across both nodes"
     );
     assert_eq!(compiled.program.inputs.len(), 1);
-    assert_eq!(producer.outputs.start, 0, "the only run starts the pool");
+    assert_eq!(
+        producer.outputs.range().start,
+        0,
+        "the only run starts the pool"
+    );
 }
 
 /// A wire is interned to the producer's dense address as the walk resolves it —
@@ -385,7 +389,7 @@ fn interns_a_wire_to_the_producers_dense_address() {
     // the id sort placed it.
     assert_eq!(
         compiled.program.output_idx(address).idx(),
-        compiled.node("producer").outputs.start as usize,
+        compiled.node("producer").outputs.range().start,
     );
     assert!(
         compiled.program.inputs[compiled.node("consumer").inputs.nth(0)].required,
@@ -488,7 +492,7 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
     g.subscribe("emitter", 1, "subscriber");
 
     let compiled = g.compile();
-    assert_eq!(compiled.node("emitter").events.len, 2);
+    assert_eq!(compiled.node("emitter").events.len(), 2);
     assert!(
         compiled.subscribers("emitter", 0).is_empty(),
         "the unsubscribed port carries no subscriber"
@@ -548,4 +552,38 @@ fn drops_subscriptions_that_cannot_fire() {
         0,
         "a disabled subscriber receives nothing"
     );
+}
+
+/// The program nodes inside a path are one run of the sorted ids: each begins with the path,
+/// nested instances' nodes included, and none past it; the main graph's path holds them all.
+#[test]
+fn the_nodes_within_a_path_are_the_ids_that_begin_with_it() {
+    use crate::graph::identity::NodeId;
+    use crate::graph::instance_path::InstancePath;
+    use crate::graph::program_id::ProgramId;
+
+    let n = NodeId::from_u128;
+    let id = |ids: &[u128]| ProgramId::new(&ids.iter().copied().map(n).collect::<Vec<_>>());
+    let all = [
+        id(&[1]),
+        id(&[2, 5]),
+        id(&[2, 6]),
+        id(&[2, 7, 8]),
+        id(&[3, 4]),
+        id(&[9]),
+    ];
+    let program = CompiledGraph::bare(all);
+    let within = |path: &[u128]| {
+        let path = InstancePath::new(&path.iter().copied().map(n).collect::<Vec<_>>());
+        program.program_ids_within(path).collect::<Vec<_>>()
+    };
+    assert_eq!(within(&[]), all);
+    assert_eq!(within(&[2]), [id(&[2, 5]), id(&[2, 6]), id(&[2, 7, 8])]);
+    assert_eq!(within(&[2, 7]), [id(&[2, 7, 8])]);
+    assert_eq!(
+        within(&[7]),
+        [],
+        "an instance nested elsewhere is no path of its own"
+    );
+    assert_eq!(within(&[4]), []);
 }

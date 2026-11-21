@@ -110,9 +110,9 @@ impl ConstValue {
     }
 
     /// The literal's canonical text, rendered on demand: unquoted and full-precision, the form an
-    /// editor shows and parses back, as against [`Display`], which quotes strings and rounds
-    /// floats. A renderer rather than a `String` so a per-frame reader writes into a buffer it
-    /// already holds.
+    /// editor shows and parses back; the one text of a constant, as no rounding may show a nonzero
+    /// value as zero. A renderer rather than a `String` so a per-frame reader writes into a buffer
+    /// it already holds.
     pub const fn value_text(&self) -> ValueText<'_> {
         ValueText(self)
     }
@@ -145,21 +145,6 @@ impl Display for ValueText<'_> {
                 }
                 Ok(())
             }
-        }
-    }
-}
-
-impl Display for ConstValue {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Null => write!(f, "null"),
-            Self::Float(value) => write!(f, "{value:.4}"),
-            Self::Int(value) => write!(f, "{value}"),
-            Self::Bool(value) => write!(f, "{value}"),
-            Self::String(value) => write!(f, "\"{value}\""),
-            Self::FsPath(path) => write!(f, "\"{path}\""),
-            Self::FsPaths(paths) => write!(f, "{} paths", paths.len()),
-            Self::Enum(variant) => write!(f, "{variant}"),
         }
     }
 }
@@ -274,18 +259,5 @@ mod tests {
         let mut buf = String::from("> ");
         write!(buf, "{}", ConstValue::Int(7).value_text()).unwrap();
         assert_eq!(buf, "> 7");
-        assert_eq!(format!("{}", ConstValue::Float(1.5)), "1.5000");
-        assert_eq!(format!("{}", ConstValue::String("hi".into())), "\"hi\"");
-        assert_eq!(
-            format!("{}", ConstValue::FsPath("a.fit".into())),
-            "\"a.fit\""
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                ConstValue::FsPaths(vec!["a.fit".into(), "b.fit".into()])
-            ),
-            "2 paths"
-        );
     }
 }

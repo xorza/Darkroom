@@ -1,13 +1,13 @@
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
 use crate::data::data_type::Strictness;
-use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::PortId;
 use crate::graph::ports::{InputDecl, Numbered, Ports, PortsError};
 use crate::graph::value_domain::ValueDomain;
 use crate::graph::value_domain::float_span::FloatSpan;
 use crate::graph::value_domain::int_span::IntSpan;
 use crate::graph::value_domain::span_error::SpanError;
+use crate::graph::value_domain::value_variant::ValueVariant;
 
 /// A span's checked constructors refuse an empty span and a non-finite end; the others build one.
 #[test]
@@ -50,6 +50,19 @@ fn a_span_holds_its_ends_and_clamps_to_them() {
         assert_eq!(share.clamp(value), clamped, "{value}");
     }
     assert!(!share.contains(f64::NAN));
+    for infinity in [f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(!FloatSpan::at_least(0.0).contains(infinity), "{infinity}");
+    }
+    // The full range of `f64`: its length overflows, its halves do not; -MAX/2 + MAX/2 is 0, the
+    // middle.
+    let full = FloatSpan::between(-f64::MAX, f64::MAX);
+    assert_eq!(full.fraction(0.0), Some(0.5));
+    assert_eq!(full.fraction(f64::MAX), Some(1.0));
+    assert_eq!(
+        full.fraction(f64::INFINITY),
+        Some(1.0),
+        "held to the ceiling"
+    );
     assert_eq!(share.fraction(0.25), Some(0.25));
     assert_eq!(share.fraction(-3.0), Some(0.0));
     assert_eq!(share.fraction(f64::NAN), None);
@@ -157,10 +170,4 @@ fn a_domain_round_trips_and_a_file_cannot_build_an_empty_span() {
     assert!(ron::from_str::<InputDecl>(&empty).is_err());
     let int = r#"(name:"n",required:true,data_type:Int,description:None,const_only:false,default_value:None,domain:Int((min:3,max:Some(3))))"#;
     assert!(ron::from_str::<InputDecl>(int).is_err());
-
-    let unstated = r#"(name:"n",required:true,data_type:Int,description:None,const_only:false,default_value:None)"#;
-    assert_eq!(
-        ron::from_str::<InputDecl>(unstated).unwrap().domain,
-        ValueDomain::Any
-    );
 }

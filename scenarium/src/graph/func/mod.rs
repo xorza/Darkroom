@@ -4,7 +4,6 @@ pub(crate) mod func_builder;
 pub(crate) mod lambda;
 mod macros;
 pub(crate) mod signature;
-pub(crate) mod value_variant;
 
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_builder::FuncBuilder;

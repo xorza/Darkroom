@@ -207,3 +207,34 @@ fn strictness_changes_the_scalar_and_enum_arms_and_nothing_else() {
         );
     }
 }
+
+/// An output holds what a read of it as declared takes: the scalar class, a constant of its kind,
+/// a custom value of its type, a null only as `Any`, and nothing written as nothing yet.
+#[test]
+fn an_output_holds_what_a_read_of_it_as_declared_takes() {
+    use std::sync::Arc;
+
+    use crate::data::dynamic_value::DynamicValue;
+    use crate::internals::blob::{BLOB_TYPE, Blob};
+
+    let blob = DynamicValue::Custom(Arc::new(Blob(Vec::new())));
+    let int = DynamicValue::from(1i64);
+    let text = DynamicValue::Static(ConstValue::String("t".into()));
+    let null = DynamicValue::Static(ConstValue::Null);
+    let cases = [
+        (DataType::Float, &int, true),
+        (DataType::Float, &text, false),
+        (DataType::String, &text, true),
+        (DataType::Custom(BLOB_TYPE), &blob, true),
+        (DataType::Custom(BLOB_TYPE), &int, false),
+        (DataType::Custom(CustomTypeId::from_u128(9)), &blob, false),
+        (DataType::Int, &blob, false),
+        (DataType::Any, &blob, true),
+        (DataType::Any, &null, true),
+        (DataType::Int, &null, false),
+        (DataType::Int, &DynamicValue::Unbound, true),
+    ];
+    for (data_type, value, held) in cases {
+        assert_eq!(value.fits(data_type), held, "{data_type:?} of {value}");
+    }
+}

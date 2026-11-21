@@ -2,6 +2,7 @@ use super::*;
 
 use common::{TempFile, fs};
 
+use crate::containers::col::Idx;
 use crate::data::data_type::DataType;
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::cache::runtime_slot::{OutputSnapshot, Stamp};
@@ -45,7 +46,7 @@ impl Digests {
         let mut cache = RuntimeCache::default();
         cache.install_for_test(program);
         for idx in 0..program.e_nodes.len() {
-            let node_idx = NodeIdx(idx as u32);
+            let node_idx = NodeIdx::from_idx(idx);
             cache.prepare_node_blocking(program, node_idx);
             cache.stamp_digest(program, &running(program), node_idx);
         }
@@ -570,7 +571,7 @@ fn cycle_yields_none() {
     // since the node it names does not exist until the line after.
     let mut p = ProgramBuilder::default();
     let forward = ExecBinding::Wire(OutputAddr {
-        node_idx: NodeIdx(1),
+        node_idx: NodeIdx::from_idx(1),
         port_idx: 0,
     });
     let a = pure(&mut p, 10, 1).input(forward).add();

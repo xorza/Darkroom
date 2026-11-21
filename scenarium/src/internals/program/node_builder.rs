@@ -1,6 +1,5 @@
 //! [`NodeBuilder`]: one node of a hand-built program, under construction.
 
-use crate::containers::col::Span;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
 use crate::exec::compile::compiled_graph::{ExecBinding, ExecEvent, ExecInput, ExecNode};
@@ -162,7 +161,6 @@ impl<'a> NodeBuilder<'a> {
         // Keyed to the node's id, not its position: a func id that moved with the position would
         // read as a changed implementation across a reinstall and drop the node's state.
         let func_id = func_id.unwrap_or_else(|| FuncId::from_u128(program_id.node_id().as_u128()));
-        let output_count = u32::try_from(outputs.len()).expect("a fixture's outputs fit in u32");
         let ports = Ports {
             inputs: Vec::new(),
             outputs: outputs
@@ -173,8 +171,10 @@ impl<'a> NodeBuilder<'a> {
         };
         e_node.func_ref = FuncRef::new(func_id, FuncSignature::of(&ports, &[]));
         e_node.inputs = owner.program.inputs.append(inputs);
-        e_node.outputs = Span::new(owner.program.output_count, output_count);
-        owner.program.output_count += output_count;
+        e_node.outputs = owner
+            .program
+            .output_types
+            .append(ports.outputs.iter().map(|output| output.data_type));
         e_node.events = owner.program.events.append(events);
         let node_idx = owner.program.push(program_id, e_node);
         let placed = Placed {

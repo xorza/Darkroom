@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::custom_type::CustomTypeId;
+use crate::data::data_type::{DataType, Strictness};
 use crate::data::ram_usage::RamUsage;
 
 /// A value of a type the library registered, carried between nodes behind an `Arc`. `Any` as a
@@ -95,6 +96,42 @@ impl DynamicValue {
         match self {
             Self::Custom(data) => data.downcast_ref::<T>(),
             _ => None,
+        }
+    }
+
+    /// Whether a lambda may leave this value on an output declared `data_type`: what a
+    /// consumer's read of it as declared takes. A scalar of the coercion class, a constant of the
+    /// kind, a custom value of the type, anything for `Any`; nothing written, which a demand check
+    /// catches apart. An enum's variant is not checked: a run holds no registry. A method of the
+    /// value, as the type knows nothing of a run's values.
+    pub(crate) fn fits(&self, data_type: DataType) -> bool {
+        match self {
+            Self::Unbound => true,
+            Self::Static(ConstValue::Null) => data_type == DataType::Any,
+            Self::Static(value) => {
+                data_type.accepts_const(value, Strictness::Authored, |_, _| true)
+            }
+            Self::Custom(value) => match data_type {
+                DataType::Any => true,
+                DataType::Custom(id) => value.custom_type_id() == id,
+                _ => false,
+            },
+        }
+    }
+
+    /// The text of a `String` value, taken rather than cloned; `self` back for any other.
+    pub fn into_string(self) -> Result<String, Self> {
+        match self {
+            Self::Static(ConstValue::String(value)) => Ok(value),
+            other => Err(other),
+        }
+    }
+
+    /// The paths of a path-list value, taken rather than cloned; `self` back for any other.
+    pub fn into_fs_paths(self) -> Result<Vec<String>, Self> {
+        match self {
+            Self::Static(ConstValue::FsPaths(paths)) => Ok(paths),
+            other => Err(other),
         }
     }
 
@@ -212,7 +249,7 @@ impl Display for DynamicValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unbound => write!(f, "-"),
-            Self::Static(value) => write!(f, "{value}"),
+            Self::Static(value) => write!(f, "{}", value.value_text()),
             Self::Custom(data) => write!(f, "{data}"),
         }
     }
@@ -314,6 +351,31 @@ mod tests {
             DynamicValue::from_custom(Tag("z")).to_value_string(),
             "tag:z"
         );
+        // The owning reads take their kind and hand any other back whole.
+        assert_eq!(
+            DynamicValue::Static(ConstValue::String("s".into()))
+                .into_string()
+                .ok(),
+            Some("s".to_owned())
+        );
+        let paths = vec!["a".to_owned(), "b".to_owned()];
+        assert_eq!(
+            DynamicValue::Static(ConstValue::FsPaths(paths.clone()))
+                .into_fs_paths()
+                .ok(),
+            Some(paths)
+        );
+        assert!(matches!(
+            DynamicValue::from(2i64).into_string(),
+            Err(DynamicValue::Static(ConstValue::Int(2)))
+        ));
+        assert!(matches!(
+            DynamicValue::Static(ConstValue::FsPath("a".into())).into_fs_paths(),
+            Err(DynamicValue::Static(ConstValue::FsPath(path))) if path == "a"
+        ));
+        // A small float reads whole, never rounded to a zero it is not.
+        assert_eq!(DynamicValue::from(0.00004f64).to_string(), "0.00004");
+        assert_eq!(DynamicValue::Unbound.to_string(), "-");
     }
 
     /// Each required read returns a value of its declared kind, a scalar

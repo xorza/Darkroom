@@ -142,7 +142,7 @@ impl TestEngine {
         self.run(RunSeeds::sinks()).await
     }
 
-    /// The general form. Panics if the run is refused (a seed naming no node, a cycle);
+    /// The general form. Panics if the run is refused, as for a seed naming no node;
     /// [`try_run`](Self::try_run) is for a test whose subject that is.
     pub(crate) async fn run(&mut self, seeds: RunSeeds) -> RunOutcome {
         self.try_run(seeds).await.expect("the run completes")
@@ -263,8 +263,7 @@ impl TestEngine {
         self.try_plan(seeds).await.expect("the fixture graph plans")
     }
 
-    /// [`plan`](Self::plan), surfacing the refusal a cycle or a bad seed
-    /// raises.
+    /// [`plan`](Self::plan), surfacing the refusal a bad seed raises.
     pub(crate) async fn try_plan(&mut self, seeds: RunSeeds) -> ExecResult<PlanOutcome> {
         self.engine.prepare_exec(&seeds).await?;
         Ok(PlanOutcome::snapshot(&self.graph, &self.engine))

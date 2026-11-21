@@ -81,3 +81,30 @@ impl FileKind {
                     .all(|extension| other.extensions.contains(extension)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::panic;
+
+    use crate::data::data_type::file_kind::FileKind;
+
+    /// A kind is within another when the other holds each of its extensions, and no extensions is
+    /// every file. A registration holds each extension to one spelling.
+    #[test]
+    fn a_file_kind_is_within_the_kinds_that_hold_its_extensions() {
+        let image = FileKind::new("Image", ["png", "jpg"]);
+        let png = FileKind::new("PNG", ["png"]);
+        let any = FileKind::new("File", Vec::<&str>::new());
+        assert!(png.within(&image));
+        assert!(!image.within(&png));
+        assert!(image.within(&any));
+        assert!(!any.within(&image));
+        assert!(any.within(&any));
+        for bad in [&["PNG"][..], &[".png"], &[""], &["png", "png"]] {
+            assert!(
+                panic::catch_unwind(|| FileKind::new("Bad", bad.iter().copied())).is_err(),
+                "{bad:?}"
+            );
+        }
+    }
+}

@@ -14,14 +14,15 @@
 pub(crate) mod float_span;
 pub(crate) mod int_span;
 pub(crate) mod span_error;
+pub(crate) mod value_variant;
 
 use serde::{Deserialize, Serialize};
 
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
-use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::value_domain::float_span::FloatSpan;
 use crate::graph::value_domain::int_span::IntSpan;
+use crate::graph::value_domain::value_variant::ValueVariant;
 
 /// The constants an input admits, past what its type holds.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

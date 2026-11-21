@@ -570,6 +570,10 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
   rejection, which the enum keeps beside its key; two lists of pairs would only move the match.
 - **Not taken: a caller's scratch for the loop check.** A wire drag asks it for the one or two
   ports under the pointer a frame, and each answer is a walk of the wires into one node.
+- **Not taken: the flattened subscriber count, asserted.** A trigger that crosses a boundary fans
+  out inside and a disabled subscriber drops, so only the walk knows the count; the authored
+  subscriptions stay a capacity hint, and the compile's doc names the pool as the one that can
+  grow.
 - **Not taken: the probe's header kept for the load (`RuntimeCache.probed`).** The load reads
   the header again inside its one blocking closure: a small read the page cache serves, no hop of
   its own, and it holds the file as it is at the load, where a kept header would meet a blob
@@ -598,11 +602,10 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
 
 Each batch leaves the build and the tests green. Whoever addresses an item deletes it.
 
-## Batch 7 — declarations and the leaf types
+## Batch 7 — the declaration types
 
-Files: `library/`, `graph/func/`, `graph/ports.rs`, `graph/node_decl.rs`, `graph/value_domain/`,
-`data/`, `containers/`, `exec/idx.rs`, `exec/compile/`, `exec/executor/mod.rs`, `builtin/`, the
-`lens` and `darkroom` callers.
+Files: `library/`, `graph/func/`, `graph/ports.rs`, `graph/node_decl.rs`, `builtin/`, the `lens`
+and `darkroom` callers.
 
 - [ ] `library/mod.rs:44-55,75-150` — one type to register into and to read. Target:
   `LibraryBuilder` and a `Library` with no mutators; fragment fns return or take a builder.
@@ -619,57 +622,7 @@ Files: `library/`, `graph/func/`, `graph/ports.rs`, `graph/node_decl.rs`, `graph
   `EventDecl::description`.
 - [ ] `Func::into_builder`, `FuncBuilder::validate`, `Library::by_name`, `Library::type_count`,
   `Library::custom_type` — test-only on the published surface. Target: under `internals`.
-- [ ] `data/dynamic_value.rs:115-193`, `executor/mod.rs:664-671` — a lambda that writes
-  `Static(Int)` to an output declared `Custom(Image)` panics in its consumer, blamed on the
-  consumer. Target: `output_types`, `DataType::holds`, `RunError::OutputType` naming the producer.
-- [ ] `graph/func/value_variant.rs:7-37` — `name` is read only as `display`'s fallback and the one
-  production constructor always sets `display`. Target: `{ label, value }`.
-- [ ] `data/const_value.rs:152-165` — B13. Target: no `Display`; `DynamicValue`'s goes through
-  `ValueText`.
-- [ ] `graph/value_domain/float_span.rs:90-116` — B12. Target: `contains` requires a finite value;
-  `fraction` computes in halves. Tests: ±∞, the full-range span.
-- [ ] `graph/ports.rs:81`, `value_domain/tests.rs:161-165` — `#[serde(default)]` on a field every
-  save writes, and a test decoding a file without it: a legacy deserializer. Target: both gone.
-- [ ] `value_domain/int_span.rs:74-89`, `float_span.rs:119-135` — two hand-written `Deserialize`
-  impls. Target: `#[serde(try_from)]`.
-- [ ] `data/data_type/mod.rs:84-95`, `darkroom/src/gui/graph_ctx/input_ctx.rs:141-169`,
-  `gui/pane/interface_card.rs:393` — "the constant a port starts with" answered twice, `Any` as
-  `Null` in one and `""` in the other. Target: `Library::default_const`.
-- [ ] `data/data_type/enum_type.rs:20-25` — `EnumType::new` checks nothing where `FileKind::new`
-  asserts each entry non-empty and unique. Target: the same asserts.
-- [ ] `dynamic_value.rs:221-225`, `lens/src/astro/nodes/stacking.rs:63`,
-  `lens/src/config_node.rs:207` — a lambda that needs a string or a path list owned clones what
-  the executor already cloned for it: `DynamicValue` has borrowed reads for eight kinds and one
-  owning read. Target: `into_string`, `into_fs_paths`. The clone per invoke stays: the program is
-  immutable and a lambda may take its inputs.
-- [ ] `containers/col/mod.rs:31-64`, `consumer_cone/mod.rs:82`, `compiled_graph.rs:258`;
-  `executor/mod.rs:496,649`, `validate.rs:50,53,56,99` — an index built three ways; `span.len as
-  usize` at six sites. Target: the private field, `Span::len`.
-- [ ] `exec/compile/validate.rs:24` — `program_ids` zipped with `e_nodes`, so a length mismatch
-  truncates, and `search_sorted`'s order is never checked. Target: both asserted.
-- [ ] `containers/col/tests.rs:2`, `idx_set/tests.rs:2` — the leaf's tests import `exec::idx`.
-  Target: a local `idx_type!`.
-- [ ] `exec/compile/mod.rs:381,336-338` — `totals.subscribers` counts authored subscriptions, not
-  the flattened ones, and is the one total with no assert. Target: the flattened count, asserted.
-- [ ] `exec/compile/mod.rs:421,536,437,151-157` — a sort that copies two 129-byte keys a
-  comparison; a lowered constant cloned and thrown away; a doc that says a compile allocates
-  "exactly the artifact". Target: `sort_unstable_by`; no clone; the doc lists what it allocates.
-- [ ] `compiled_graph.rs:150-155` — `program_ids_within` filters every id for one contiguous run.
-  Target: two `partition_point`s.
-- [ ] `planner.rs:112-116`, `consumer_cone/mod.rs:70-92`, `schedule/mod.rs:461-462`,
-  `executor/mod.rs:733-737`, `validate.rs:89-90` — "each wire into a node" written out six times.
-  Target: `CompiledGraph::wires(node_idx) -> impl Iterator<Item = OutputAddr>`.
-- [ ] `builtin/worker_events_library/mod.rs:17,90-97` — `FuncId::from_u128` and a hand-written
-  boxed lambda beside `FuncId::literal` and `async_lambda!` everywhere else. Target: the two forms
-  the rest use.
-- [ ] `containers/unique.rs:6-8`, `compile/validate.rs:91`, `internals/program/mod.rs:87-88`,
-  `internals/engine.rs:143,264-265` — comments naming what is gone ("a single id",
-  `Compiler::resolve`, "a dependency cycle"). Target: trimmed.
-- [ ] `library/tests.rs:295-363`, `func/tests.rs:221-259`, `system_library.rs:125-135` — tests of
-  `FileKind`, `FuncInvoker` and `AnyState` in the library's file; tests that a setter stored its
-  argument. Target: moved beside their type; the setter tests deleted.
-- [ ] Untested: `LibraryBuilder::merge`, `data_types` order, `Col::search_sorted` and `reset`,
-  `unique::extend`, an `IdxSet` of length 0, `Divide` by zero. Target: a case each.
+- [ ] Untested: `LibraryBuilder::merge`, `data_types` order. Target: a case each.
 
 ## Batch 8 — the layers
 

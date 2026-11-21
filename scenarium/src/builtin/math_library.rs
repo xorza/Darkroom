@@ -441,6 +441,12 @@ mod tests {
         let divide = invoke("Divide", &[float(7.0), float(3.0)]).await.unwrap();
         assert_eq!(divide[0].as_f64(), Some(7.0 / 3.0));
         assert_eq!(divide[1].as_f64(), Some(1.0));
+        // By zero, IEEE 754's answers: ±∞ for the quotient, NaN for the remainder and for 0 / 0.
+        let by_zero = invoke("Divide", &[float(-7.0), float(0.0)]).await.unwrap();
+        assert_eq!(by_zero[0].as_f64(), Some(f64::NEG_INFINITY));
+        assert!(by_zero[1].as_f64().unwrap().is_nan());
+        let zero_by_zero = invoke("Divide", &[float(0.0), float(0.0)]).await.unwrap();
+        assert!(zero_by_zero[0].as_f64().unwrap().is_nan());
 
         // One input at which the seven functions all differ, so a func wired
         // to another's kernel fails its row.

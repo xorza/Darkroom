@@ -84,8 +84,8 @@ impl ProgramBuilder {
         &mut self.program
     }
 
-    /// Plan `seeds` over the program, surfacing the planner's refusal (a dependency cycle, or a
-    /// seed the program does not hold).
+    /// Plan `seeds` over the program, surfacing the planner's refusal: a seed the program does not
+    /// hold.
     pub(crate) fn try_plan(&self, seeds: &RunSeeds) -> ExecResult<RunSchedule> {
         let mut schedule = RunSchedule::default();
         Planner::default().plan(&self.program, seeds, &mut schedule)?;

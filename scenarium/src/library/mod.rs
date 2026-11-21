@@ -338,6 +338,48 @@ impl Library {
         }
     }
 
+    /// The constant a port of `data_type` starts with where its declaration states none: an
+    /// enum's first variant, an empty text for `Any`, which an editor reads the kind off as it is
+    /// typed, a scalar's zero, an empty path. `None` for a custom type, which has no constant, and
+    /// for an enum the library lacks or that holds no variant.
+    pub fn type_default(&self, data_type: DataType) -> Option<ConstValue> {
+        match data_type {
+            DataType::Enum(id) => self
+                .enum_type(id)?
+                .variants()
+                .first()
+                .map(|first| ConstValue::Enum(first.clone())),
+            DataType::Any => Some(ConstValue::String(String::new())),
+            data_type => data_type.default_value(),
+        }
+    }
+
+    /// Whether [`Self::type_default`] is some, answered without building it, for a reader that
+    /// asks every frame.
+    pub fn has_type_default(&self, data_type: DataType) -> bool {
+        match data_type {
+            DataType::Enum(id) => self
+                .enum_type(id)
+                .is_some_and(|enum_type| !enum_type.variants().is_empty()),
+            DataType::Any => true,
+            data_type => data_type.default_value().is_some(),
+        }
+    }
+
+    /// The constant `input` starts with: its declared default, else its type's.
+    pub fn default_const(&self, input: &InputDecl) -> Option<ConstValue> {
+        input
+            .default_value
+            .clone()
+            .or_else(|| self.type_default(input.data_type))
+    }
+
+    /// Whether `input` can hold a constant: [`Self::default_const`] is some, answered without
+    /// building it.
+    pub fn takes_const(&self, input: &InputDecl) -> bool {
+        input.default_value.is_some() || self.has_type_default(input.data_type)
+    }
+
     /// Whether an authored `Const` literal `value` may sit on `input`: the `Const` half of
     /// [`Graph::admit`](crate::Graph::admit), [`Self::admit_wire`] the `Wire` half. The
     /// registry contributes only the enum arm, a variant *name*, which a constant of an enum the

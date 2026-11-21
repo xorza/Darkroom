@@ -31,7 +31,7 @@ pub(crate) trait Preset: IntrospectEnum + Copy + 'static {
             .iter()
             .zip(Self::LABELS)
             .map(|(&variant, &label)| {
-                ValueVariant::new(variant, ConstValue::Enum(variant.to_owned())).display(label)
+                ValueVariant::new(label, ConstValue::Enum(variant.to_owned()))
             })
             .collect();
         InputDecl::required(name, config_data_type::<Self::Knobs>())

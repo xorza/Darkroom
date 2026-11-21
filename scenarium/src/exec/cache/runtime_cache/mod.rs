@@ -340,7 +340,7 @@ impl RuntimeCache {
         address: OutputAddr,
         read: OutputRead,
     ) -> Option<DynamicValue> {
-        let arity = program[address.node_idx].outputs.len as usize;
+        let arity = program[address.node_idx].outputs.len();
         let slot = &mut self.slots[address.node_idx];
         debug_assert!(
             slot.output_values()
@@ -825,7 +825,7 @@ impl RuntimeCache {
             // A snapshot of a different length cannot describe this node's outputs, whatever its
             // digest says: a func that grows an output keeps its id, so the stale
             // `produced_under` still equals the stale stamp.
-            let retained = resident_len == e_node.outputs.len as usize
+            let retained = resident_len == e_node.outputs.len()
                 && e_node.cache.caches_in_ram()
                 && e_node.behavior == FuncBehavior::Pure
                 && self.is_resident_cur(node_idx);

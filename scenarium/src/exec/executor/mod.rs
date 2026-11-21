@@ -41,7 +41,7 @@ use crate::exec::cache::disk_store::error::StoreResult;
 use crate::exec::cache::runtime_cache::{Restamp, ReuseOutcome, RuntimeCache};
 use crate::exec::cache::runtime_slot::{OutputRead, Stamp};
 use crate::exec::cache::stamp_job::error::StampError;
-use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding};
+use crate::exec::compile::compiled_graph::CompiledGraph;
 use crate::exec::error::RunError;
 use crate::exec::executor::node_runtime::NodeRuntime;
 use crate::exec::schedule::{Delivery, NodeState, RunSchedule};
@@ -527,9 +527,9 @@ impl ExecFrame<'_, '_> {
             .twin_of(node_idx)
             .expect("a twin names its leader");
         let failed = self.node_outcomes[leader].error().is_some();
-        let output_count = program[node_idx].outputs.len;
+        let output_ports = program[node_idx].outputs.offsets();
         debug_assert!(self.scratch.is_empty(), "a turn leaves the scratch empty");
-        for port_idx in 0..output_count {
+        for port_idx in output_ports {
             if demand[port_idx as usize].is_skip() {
                 self.scratch.push(DynamicValue::Unbound);
                 continue;
@@ -702,10 +702,19 @@ impl ExecFrame<'_, '_> {
         // stands on its own, even mid-cancel.
         let result = match result {
             Ok(()) if self.ctx.cancel.is_cancelled() => Err(RunError::Cancelled),
-            Ok(()) => match self.cache[node_idx].unbound_demanded_outputs(demand) {
-                outputs if outputs.is_empty() => Ok(()),
-                outputs => Err(RunError::OutputsNotProduced { outputs }),
-            },
+            Ok(()) => {
+                let slot = &self.cache[node_idx];
+                let unbound = slot.unbound_demanded_outputs(demand);
+                if unbound.is_empty() {
+                    let types = &self.program.output_types[self.program[node_idx].outputs];
+                    match slot.mistyped_outputs(types) {
+                        outputs if outputs.is_empty() => Ok(()),
+                        outputs => Err(RunError::OutputType { outputs }),
+                    }
+                } else {
+                    Err(RunError::OutputsNotProduced { outputs: unbound })
+                }
+            }
             other => other,
         };
         let cancelled = matches!(&result, Err(RunError::Cancelled));
@@ -787,12 +796,9 @@ impl ExecFrame<'_, '_> {
 
     /// Whether any node this one binds an input to already failed or was skipped for an error.
     fn has_errored_dependency(&self, node_idx: NodeIdx) -> bool {
-        let program = self.program;
-        program.inputs[program[node_idx].inputs]
-            .iter()
-            .any(|input| {
-                matches!(&input.binding, ExecBinding::Wire(addr) if self.node_outcomes[addr.node_idx].error().is_some())
-            })
+        self.program
+            .wires(node_idx)
+            .any(|address| self.node_outcomes[address.node_idx].error().is_some())
     }
 
     /// Hand the run's outcome the events a freshly initialized event source arms — only
@@ -888,7 +894,7 @@ impl ExecFrame<'_, '_> {
             .twin_of(node_idx)
             .expect("a twin names its leader");
         let own = program[node_idx].outputs;
-        for port_idx in 0..own.len {
+        for port_idx in own.offsets() {
             if !self.schedule.outputs.demand[own.nth(port_idx)].is_skip() {
                 self.complete_planned_read(OutputAddr {
                     node_idx: leader,

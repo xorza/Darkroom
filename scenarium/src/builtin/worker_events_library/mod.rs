@@ -1,11 +1,12 @@
 use std::future;
 use std::time::Duration;
 
+use crate::async_lambda;
 use crate::data::data_type::DataType;
 use crate::graph::func::Func;
 use crate::graph::func::error::{InvokeError, InvokeResult};
 use crate::graph::func::event::EventLambda;
-use crate::graph::func::lambda::{FuncLambda, Invocation};
+use crate::graph::func::lambda::Invocation;
 use crate::graph::identity::FuncId;
 use crate::graph::ports::{InputDecl, OutputDecl};
 use crate::graph::value_domain::float_span::FloatSpan;
@@ -14,7 +15,7 @@ use crate::runtime::shared_any_state::SharedAnyState;
 use tokio::time;
 use tokio::time::Instant;
 
-pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x714dbc9a_ac0a_428b_90ee_eb13c1652c9e);
+pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::literal("714dbc9a-ac0a-428b-90ee-eb13c1652c9e");
 
 #[derive(Debug)]
 struct FpsEventState {
@@ -87,51 +88,47 @@ pub fn worker_events_library() -> Library {
         Func::builder(
             FRAME_EVENT_FUNC_ID,
             "Frame Event",
-            FuncLambda::new(
-                move |Invocation {
-                          event_state,
-                          inputs,
-                          outputs,
-                          ..
-                      }| {
-                    Box::pin(async move {
-                        let frequency = inputs[0].required_f64();
-                        let period = fps_period(frequency)?;
-                        let now = Instant::now();
+            async_lambda!(move |Invocation {
+                                    event_state,
+                                    inputs,
+                                    outputs,
+                                    ..
+                                }| {
+                let frequency = inputs[0].required_f64();
+                let period = fps_period(frequency)?;
+                let now = Instant::now();
 
-                        let delta;
-                        let frame_no;
-                        {
-                            let mut event_state = event_state.lock();
-                            if let Some(prev) = event_state.get_mut::<FpsEventState>() {
-                                delta = prev.last_exec.elapsed().as_secs_f64();
-                                frame_no = prev.frame_no;
-                                prev.period = period;
-                                prev.last_exec = now;
-                                // `last_fps_emit` is stamped by `wait_for_fps_event` alone: here
-                                // too, every execution would restart the countdown and a
-                                // subscriber re-reading this source faster than the period would
-                                // postpone the event indefinitely.
-                                prev.frame_no += 1;
-                            } else {
-                                delta = period.map_or(0.0, |period| period.as_secs_f64());
-                                frame_no = 1;
-                                event_state.set(FpsEventState {
-                                    period,
-                                    last_exec: now,
-                                    last_fps_emit: now,
-                                    frame_no: 2,
-                                });
-                            }
-                        }
+                let delta;
+                let frame_no;
+                {
+                    let mut event_state = event_state.lock();
+                    if let Some(prev) = event_state.get_mut::<FpsEventState>() {
+                        delta = prev.last_exec.elapsed().as_secs_f64();
+                        frame_no = prev.frame_no;
+                        prev.period = period;
+                        prev.last_exec = now;
+                        // `last_fps_emit` is stamped by `wait_for_fps_event` alone: here
+                        // too, every execution would restart the countdown and a
+                        // subscriber re-reading this source faster than the period would
+                        // postpone the event indefinitely.
+                        prev.frame_no += 1;
+                    } else {
+                        delta = period.map_or(0.0, |period| period.as_secs_f64());
+                        frame_no = 1;
+                        event_state.set(FpsEventState {
+                            period,
+                            last_exec: now,
+                            last_fps_emit: now,
+                            frame_no: 2,
+                        });
+                    }
+                }
 
-                        outputs[0] = delta.into();
-                        outputs[1] = frame_no.into();
+                outputs[0] = delta.into();
+                outputs[1] = frame_no.into();
 
-                        Ok(())
-                    })
-                },
-            ),
+                Ok(())
+            }),
         )
         .description("Emits a recurring frame tick, carrying the elapsed time and frame count.")
         .category("System")

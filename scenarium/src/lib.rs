@@ -50,7 +50,6 @@ pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
 pub use graph::func::event::{EventFires, EventLambda};
 pub use graph::func::func_builder::FuncBuilder;
 pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand};
-pub use graph::func::value_variant::ValueVariant;
 pub use graph::func::{Func, FuncBehavior, FuncEvent};
 pub use graph::ghost_node::GhostNode;
 pub use graph::ghost_wiring::{
@@ -84,6 +83,7 @@ pub use graph::value_domain::ValueDomain;
 pub use graph::value_domain::float_span::FloatSpan;
 pub use graph::value_domain::int_span::IntSpan;
 pub use graph::value_domain::span_error::SpanError;
+pub use graph::value_domain::value_variant::ValueVariant;
 pub use graph::wiring::Wiring;
 pub use library::Library;
 pub use library::func_redirect::{FuncRedirect, MAX_REDIRECTS};

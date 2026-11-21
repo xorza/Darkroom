@@ -1,6 +1,7 @@
 //! The structural pass over the [`RunSchedule`](crate::exec::schedule::RunSchedule),
 //! over bare programs, and the queries a planned schedule answers.
 
+use crate::containers::col::Idx;
 use crate::exec::program_event::ProgramEvent;
 use crate::graph::program_id::ProgramId;
 
@@ -23,10 +24,13 @@ fn reader_overflow_trips_the_debug_invariant() {
 
     let mut outputs = ResolvedOutputs::default();
     outputs.reset(1);
-    outputs.readers[OutputIdx(0)] = u32::MAX;
+    outputs.readers[OutputIdx::from_idx(0)] = u32::MAX;
 
     assert!(
-        catch_unwind(AssertUnwindSafe(|| outputs.add_reader(OutputIdx(0)))).is_err(),
+        catch_unwind(AssertUnwindSafe(
+            || outputs.add_reader(OutputIdx::from_idx(0))
+        ))
+        .is_err(),
         "a graph cannot have more readers than the counter represents"
     );
 }
@@ -44,7 +48,7 @@ fn planning_resets_the_output_half_to_the_programs_pool() {
     let mut schedule = RunSchedule::default();
     // A stale resolution from an earlier, differently shaped run.
     schedule.outputs.reset(1);
-    schedule.outputs.add_reader(OutputIdx(0));
+    schedule.outputs.add_reader(OutputIdx::from_idx(0));
 
     planner
         .plan(prog.program(), &RunSeeds::sinks(), &mut schedule)
@@ -125,7 +129,7 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
 
     // The validator reports corruption rather than faulting on it: a binding
     // target past the last node must not index `seen_in_order` out of range.
-    let past_the_end = NodeIdx(prog.program_mut().e_nodes.len() as u32);
+    let past_the_end = NodeIdx::from_idx(prog.program_mut().e_nodes.len());
     let b_input = prog.program()[b.node_idx].inputs.nth(0);
     prog.program_mut().inputs[b_input].binding = ExecBinding::Wire(OutputAddr {
         node_idx: past_the_end,
@@ -306,9 +310,9 @@ fn a_dependency_cycle_is_a_broken_contract() {
     // A binds B, B binds A (A sink) — the planner must stop, not loop.
     // The forward reference is spelled by index, since the node it names
     // does not exist until the line after.
-    let at = |node_idx: u32| {
+    let at = |node_idx: usize| {
         ExecBinding::Wire(OutputAddr {
-            node_idx: NodeIdx(node_idx),
+            node_idx: NodeIdx::from_idx(node_idx),
             port_idx: 0,
         })
     };

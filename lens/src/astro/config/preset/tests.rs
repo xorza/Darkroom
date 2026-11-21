@@ -30,9 +30,12 @@ fn each_input_offers_its_variants_under_their_labels() {
             .variants()
             .iter()
             .map(|variant| {
-                let label = P::LABELS[P::VARIANTS.iter().position(|v| *v == variant.name).unwrap()];
-                assert_eq!(variant.label(), label);
-                (variant.name.clone(), label)
+                let ConstValue::Enum(name) = &variant.value else {
+                    panic!("a preset picks a variant of its enum");
+                };
+                let label = P::LABELS[P::VARIANTS.iter().position(|v| v == name).unwrap()];
+                assert_eq!(variant.label, label);
+                (name.clone(), label)
             })
             .collect()
     }

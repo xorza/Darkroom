@@ -1,5 +1,7 @@
 //! Light-frame calibration, registration, and stacking node.
 
+use std::mem;
+
 use lumos::{
     AlignStackConfig, CalibratedLights, CalibrationMasters, IngestConfig, LinearImage,
     QualityPlanes, Reference,
@@ -60,7 +62,9 @@ pub(crate) fn register(library: &mut Library) {
                 debug_assert_eq!(inputs.len(), 6);
                 debug_assert_eq!(outputs.len(), 3);
 
-                let lights = inputs[0].required_fs_paths().to_vec();
+                let lights = mem::take(&mut inputs[0])
+                    .into_fs_paths()
+                    .unwrap_or_else(|other| other.required_fs_paths().to_vec());
                 let masters_value = inputs[1].clone();
                 let mut stack = CombineMethodChoice::resolve(&inputs[4]);
                 stack.quality = quality;
