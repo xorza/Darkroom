@@ -4,6 +4,7 @@
 )]
 
 use super::*;
+use crate::star_detection::centroid::circular_aperture::CircularAperture;
 
 /// A lone star found by detection on an estimated sky and measured with the default config, as the
 /// pipeline runs it before the FWHM is known: one candidate at the nearest pixel, a converged
@@ -21,15 +22,9 @@ fn a_detected_star_measures_as_on_its_true_sky() {
     const SKY: f32 = 0.1;
     const SEED_FWHM: f32 = 4.0;
     // A noiseless frame thresholds at its noise floor, 1e-4 of the sky: the σ = 3 star stays above
-    // 4 · 1e-5 out to r = 3 · √(2 ln(0.8 / 4e-5)) = 13.3 px, a footprint of π · 13.3² ≈ 560 px —
-    // past the default 500.
-    let config = StarDetectionConfig {
-        extraction: ExtractionConfig {
-            max_area: 1000,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    // 4 · 1e-5 out to r = 3 · √(2 ln(0.8 / 4e-5)) = 13.3 px, a footprint of π · 13.3² ≈ 560 px,
+    // which no area bound drops.
+    let config = StarDetectionConfig::default();
     let radius = measure_grid::stamp_radius(SEED_FWHM);
     let window_sigma = f64::from(0.8 * fwhm::to_sigma(SEED_FWHM));
     for (x, y, sigma) in [(64.3, 64.7, 2.5f32), (64.0, 64.0, 3.0), (64.6, 63.8, 3.0)] {
@@ -119,28 +114,41 @@ fn a_detected_star_measures_as_on_its_true_sky() {
             f64::from(reference.eccentricity).libm_powi(2),
         );
 
-        // Each pixel holds the profile's mean over it, so the stamp's pixels together hold its
-        // integral over the stamp's span, `σ·√(π/2)·(erf(b/σ√2) − erf(a/σ√2))` per axis from `a`
-        // to `b` about the centre. Each sample takes three f32 roundings of at most ε · (A + sky)
-        // — the mean scaled, the add onto the sky and the subtraction from it — so the 225 of
-        // them move the sum by at most 225 · 3ε · 0.9.
-        let centre = star.pos.round();
-        let span = |c: f64, x0: f64| -> f64 {
+        // Each pixel holds the profile's mean over it, `A·m(x)·m(y)` with
+        // `m(c) = σ·√(π/2)·(erf((c + ½ − x₀)/σ√2) − erf((c − ½ − x₀)/σ√2))` per axis; the
+        // aperture, a circle of 1.75 · 4 = 7 px about the measured centre, wholly in the stamp,
+        // weighs each by its area inside. Each sample takes three f32 roundings of at most
+        // ε · (A + sky) — the mean scaled, the add onto the sky and the subtraction from it — so
+        // the 225 of them move the sum by at most 225 · 3ε · 0.9.
+        let aperture = CircularAperture {
+            centre: reference.pos,
+            radius: MeasureGrid::new(SEED_FWHM).aperture,
+        };
+        let mean = |c: f64, x0: f64| -> f64 {
             let scale = 1.0 / (2.0 * sigma_sq).sqrt();
-            let (low, high) = (c - radius as f64 - 0.5 - x0, c + radius as f64 + 0.5 - x0);
+            let (low, high) = (c - 0.5 - x0, c + 0.5 - x0);
             (std::f64::consts::PI * sigma_sq / 2.0).sqrt()
                 * ((high * scale).libm_erf() - (low * scale).libm_erf())
         };
-        let expected = AMPLITUDE * span(centre.x, truth.x) * span(centre.y, truth.y);
+        let centre = reference.pos.round();
+        let reach = radius as i32;
+        let expected: f64 = (-reach..=reach)
+            .flat_map(|dy| (-reach..=reach).map(move |dx| (dx, dy)))
+            .map(|(dx, dy)| {
+                let (x, y) = (centre.x + f64::from(dx), centre.y + f64::from(dy));
+                aperture.overlap(x, y) * AMPLITUDE * mean(x, truth.x) * mean(y, truth.y)
+            })
+            .sum();
         let rounding = npix as f64 * 3.0 * f64::from(f32::EPSILON) * (AMPLITUDE + f64::from(SKY));
         assert!(
             (f64::from(reference.flux) - expected).abs() <= rounding,
             "σ {sigma} at {truth}: flux {} vs {expected}",
             reference.flux
         );
-        // With no annulus the SNR divides by the map's noise over the stamp, 0.01 on the true
-        // sky, times √npix.
-        let snr = f64::from(reference.flux) / (0.01 * (npix as f64).sqrt());
+        // With no annulus the SNR divides by the map's noise over the aperture, 0.01 on the true
+        // sky, times the square root of its area, π·7².
+        let area = std::f64::consts::PI * aperture.radius * aperture.radius;
+        let snr = f64::from(reference.flux) / (0.01 * area.sqrt());
         assert!(
             (f64::from(reference.snr) - snr).abs() <= 1e-6 * snr,
             "σ {sigma} at {truth}: SNR {} vs {snr}",

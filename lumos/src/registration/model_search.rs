@@ -16,7 +16,7 @@ use crate::registration::point_pairs::PointPairs;
 use crate::registration::ransac::{RansacEstimator, RansacResult};
 use crate::registration::transform::TransformType;
 use crate::registration::transform::linear_model::LinearModel;
-use crate::registration::transform_model::TransformModel;
+use crate::registration::transform_model::{ModelChoice, TransformModel};
 
 /// The models `Auto` chooses among with no SIP correction, from the fewest degrees of freedom to
 /// the most; under one, [`LinearModel::AUTO`].
@@ -42,7 +42,7 @@ pub(super) struct ModelSearch<'a> {
     /// The matcher's floor of pairs, which a fit is held to as well.
     pub(super) min_matches: usize,
     /// The caller's RMS gate, which `Auto` prefers a model inside of.
-    pub(super) max_rms_error: f64,
+    pub(super) max_rms_error_px: f64,
 }
 
 impl ModelSearch<'_> {
@@ -58,49 +58,72 @@ impl ModelSearch<'_> {
             origin: config.reference_point.unwrap_or(origin),
         };
         match model {
-            TransformModel::Auto { sip: config } => self.select_by_gric(config.map(sip)),
-            TransformModel::Fixed(transform) => {
+            TransformModel::Plain(ModelChoice::Auto) => self.select_by_gric(None),
+            TransformModel::WithSip(ModelChoice::Auto, config) => {
+                self.select_by_gric(Some(sip(config)))
+            }
+            TransformModel::Plain(ModelChoice::Fixed(transform)) => {
                 Ok(self.estimate_and_refine(FitModel::Plain(transform))?)
             }
-            TransformModel::FixedWithSip(linear, config) => {
+            TransformModel::WithSip(ModelChoice::Fixed(linear), config) => {
                 Ok(self.estimate_and_refine(FitModel::WithSip(linear, sip(config)))?)
             }
         }
     }
 
     /// `Auto` model selection by the geometric robust information criterion (Torr 1998): every
-    /// model of [`AUTO_MODELS`] is fitted — up to an affine map with a SIP correction — and the
-    /// one of lowest
+    /// model of [`AUTO_MODELS`] is fitted, and with a SIP correction asked for every model of
+    /// [`LinearModel::AUTO`] with it too — so a frame too sparse for the correction registers by a
+    /// plain model, where the correction's parameters cost what they buy — and the one of lowest
     ///
-    /// `GRIC = Σ min(zᵢ²/ŝ², λ₃·(r − d)) + λ₂·k`
+    /// `GRIC = Σ min(zᵢ², λ₃·(r − d)) + λ₂·k`
     ///
-    /// wins, ties to the simpler, among the models whose RMS meets the caller's `max_rms_error` —
+    /// wins, ties to the simpler, among the models whose RMS meets the caller's `max_rms_error_px` —
     /// a model the caller will refuse cannot be the answer while another passes — or among all
     /// when none does, for `register` to refuse. The sum runs over the union of every fitted
     /// model's pairs, each model's residual on each in units of the pair's σ, so a pair a model
-    /// cannot follow costs it the cap rather than leaving its RMS unmeasured; `ŝ` is the most
-    /// general fitted model's robust scale, the noise estimate all are judged by. A pair of 2-D
+    /// cannot follow costs it the cap rather than leaving its RMS unmeasured; `zᵢ` is that residual
+    /// over the pair's σ raised by the most general fitted model's excess variance, the noise
+    /// estimate all are judged by. A pair of 2-D
     /// points is `r = 4` numbers and every candidate a 2-D map, `d = 2`, so the cap is
     /// `λ₃·(r − d)` = 4 at Torr's `λ₃ = 2`, Torr's `λ₁·d·n` is the same for every candidate and
     /// drops out, and each parameter costs `λ₂ = ln(r·n)`, with `k` the transform's parameters
     /// and the SIP correction's.
     ///
-    /// Every model's failure reaches the caller, as
+    /// The candidates are fitted from the fewest parameters to the most, RANSAC run once a
+    /// transform type and its hypothesis serving the plain model and the corrected one alike. Every
+    /// model's failure reaches the caller, as
     /// [`EveryModelFailed`](RegistrationError::EveryModelFailed), when none of them fit at all.
     /// The models fail independently — RANSAC estimates the model it was given — so no single
     /// error stands in for the others.
     fn select_by_gric(&self, sip: Option<SipModel>) -> Result<FinalFit, RegistrationError> {
         let mut fitted: Vec<(FitModel, FinalFit)> = Vec::new();
         let mut failures: Vec<FailedModel> = Vec::new();
-        let candidates: ArrayVec<FitModel, 4> = match sip {
-            None => AUTO_MODELS.into_iter().map(FitModel::Plain).collect(),
-            Some(sip) => LinearModel::AUTO
-                .into_iter()
-                .map(|linear| FitModel::WithSip(linear, sip))
-                .collect(),
-        };
+        let mut candidates: ArrayVec<FitModel, 7> =
+            AUTO_MODELS.into_iter().map(FitModel::Plain).collect();
+        if let Some(sip) = sip {
+            candidates.extend(
+                LinearModel::AUTO
+                    .into_iter()
+                    .map(|linear| FitModel::WithSip(linear, sip)),
+            );
+        }
+        // Stable: of equal counts, the plain model first.
+        candidates.sort_by_key(|model| model.parameter_count());
+        let mut hypotheses: ArrayVec<(TransformType, Result<RansacResult, ModelFailure>), 4> =
+            ArrayVec::new();
         for model in candidates {
-            match self.estimate_and_refine(model) {
+            let transform_type = model.transform_type();
+            let hypothesis = if let Some((_, hypothesis)) =
+                hypotheses.iter().find(|(seen, _)| *seen == transform_type)
+            {
+                hypothesis.clone()
+            } else {
+                let hypothesis = self.hypothesis(transform_type);
+                hypotheses.push((transform_type, hypothesis.clone()));
+                hypothesis
+            };
+            match hypothesis.and_then(|hypothesis| self.refine(model, &hypothesis)) {
                 Ok(fit) => fitted.push((model, fit)),
                 Err(error) => {
                     tracing::debug!(
@@ -115,12 +138,17 @@ impl ModelSearch<'_> {
                 }
             }
         }
-        let Some(scale) = fitted.last().map(|(_, fit)| fit.scale) else {
+        let Some(excess) = fitted.last().map(|(_, fit)| fit.excess_variance) else {
             return Err(RegistrationError::EveryModelFailed { failures });
         };
         let mut union: Vec<MatchIdxs> = fitted
             .iter()
-            .flat_map(|(_, fit)| fit.matches.iter().map(|star_match| star_match.idxs))
+            .flat_map(|(_, fit)| {
+                fit.result
+                    .matches()
+                    .iter()
+                    .map(|star_match| star_match.idxs)
+            })
             .collect();
         union.sort_unstable_by_key(|pair| (pair.reference, pair.target));
         union.dedup();
@@ -129,19 +157,22 @@ impl ModelSearch<'_> {
             union
                 .iter()
                 .map(|&pair| {
-                    (self.catalogs.normalized_residual(&fit.warp, pair) / scale)
+                    self.catalogs
+                        .normalized_residual(fit.result.warp(), pair, excess)
                         .libm_powi(2)
                         .min(4.0)
                 })
                 .sum::<f64>()
                 + per_parameter * model.parameter_count() as f64
         };
-        let max_rms_error = self.max_rms_error;
-        let any_accurate = fitted.iter().any(|(_, fit)| fit.rms_error <= max_rms_error);
+        let max_rms_error_px = self.max_rms_error_px;
+        let any_accurate = fitted
+            .iter()
+            .any(|(_, fit)| fit.result.rms_error_px() <= max_rms_error_px);
         let scores: Vec<f64> = fitted
             .iter()
             .map(|candidate| {
-                if any_accurate && candidate.1.rms_error > max_rms_error {
+                if any_accurate && candidate.1.result.rms_error_px() > max_rms_error_px {
                     f64::INFINITY
                 } else {
                     gric(candidate)
@@ -172,8 +203,19 @@ impl ModelSearch<'_> {
     pub(super) fn estimate_and_refine(&self, model: FitModel) -> Result<FinalFit, ModelFailure> {
         let t0 = Instant::now();
         let ransac_result = self.hypothesis(model.transform_type())?;
-        let ransac_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        tracing::debug!(
+            ransac_ms = t0.elapsed().as_secs_f64() * 1000.0,
+            "Registration RANSAC timing"
+        );
+        self.refine(model, &ransac_result)
+    }
 
+    /// The final fit of `model` over the full catalogs, from RANSAC's `hypothesis`.
+    fn refine(
+        &self,
+        model: FitModel,
+        ransac_result: &RansacResult,
+    ) -> Result<FinalFit, ModelFailure> {
         let t0 = Instant::now();
         let fit = self
             .catalogs
@@ -194,17 +236,16 @@ impl ModelSearch<'_> {
         // minimal sample has a near-zero RMS by construction, so the accuracy gate alone would
         // pass it.
         let min_matches = self.min_matches;
-        if fit.matches.len() < min_matches {
+        if fit.result.matches().len() < min_matches {
             return Err(ModelFailure::TooFewInliers {
-                found: fit.matches.len(),
+                found: fit.result.matches().len(),
                 required: min_matches,
             });
         }
         tracing::debug!(
-            ransac_ms,
             fit_ms,
             ransac_inliers = ransac_result.inliers.len(),
-            fit_scale = fit.scale,
+            excess_variance = fit.excess_variance,
             "Registration sub-step timing"
         );
         Ok(fit)

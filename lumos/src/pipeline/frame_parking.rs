@@ -9,7 +9,6 @@ use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::{SetKind, StoredFrame};
 use crate::frame_store::stored_image::StoredImage;
 use crate::image::linear_image::LinearImage;
-use crate::image::stackable_image::StackableImage;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::pipeline_frame::PipelineFrame;
 

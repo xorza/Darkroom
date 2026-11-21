@@ -29,6 +29,7 @@ struct Mosaics<'a> {
     budget: Budget,
     config: &'a AlignStackConfig,
     masters: &'a CalibrationMasters,
+    cosmic_ray: Option<&'a CosmicRayConfig>,
 }
 
 impl Mosaics<'_> {
@@ -41,6 +42,7 @@ impl Mosaics<'_> {
             budget,
             config,
             masters,
+            cosmic_ray,
         } = self;
         let session = Session::new("lumos_budget_registered");
         let paths =
@@ -52,6 +54,7 @@ impl Mosaics<'_> {
                     CalibratedLights {
                         paths: &paths,
                         masters,
+                        cosmic_ray,
                     },
                     &ingest,
                     ProgressMonitor::unattended(),
@@ -60,7 +63,7 @@ impl Mosaics<'_> {
         });
         let result = run.value;
         assert_eq!(
-            result.registered(),
+            result.stacked_count(),
             lights,
             "{label}: every light registers"
         );
@@ -80,9 +83,9 @@ struct Tiering {
 impl Tiering {
     const fn of(report: &RunReport) -> Self {
         Self {
-            parked_lights: report.parked_lights,
-            spilled_frames: report.spilled_frames,
-            overcommit_bytes: report.overcommit_bytes,
+            parked_lights: report.memory.parked_lights,
+            spilled_frames: report.memory.spilled_frames,
+            overcommit_bytes: report.memory.overcommit_bytes,
         }
     }
 }
@@ -100,6 +103,7 @@ fn a_spilled_run_that_finds_its_reference_stays_within_its_budget() {
             budget: SPILLED,
             config: &AlignStackConfig::default(),
             masters: &CalibrationMasters::default(),
+            cosmic_ray: None,
         }
         .report();
         assert_eq!(
@@ -129,6 +133,7 @@ fn a_spilled_run_with_a_named_reference_stays_within_its_budget() {
             budget: SPILLED,
             config: &config,
             masters: &CalibrationMasters::default(),
+            cosmic_ray: None,
         }
         .report();
         assert_eq!(
@@ -147,17 +152,14 @@ fn a_spilled_run_with_a_named_reference_stays_within_its_budget() {
 #[test]
 fn a_spilled_run_cleaned_of_cosmic_rays_stays_within_its_budget() {
     alone(|| {
-        let config = AlignStackConfig {
-            cosmic_ray: Some(CosmicRayConfig::default()),
-            ..AlignStackConfig::default()
-        };
         let report = Mosaics {
             label: "cosmic rays, spilled",
             side: 128,
             lights: 2,
             budget: Budget::kib(2624),
-            config: &config,
+            config: &AlignStackConfig::default(),
             masters: &CalibrationMasters::default(),
+            cosmic_ray: Some(&CosmicRayConfig::default()),
         }
         .report();
         assert_eq!(
@@ -182,6 +184,7 @@ fn a_resident_run_stays_within_its_budget() {
             budget: Budget::mib(32),
             config: &AlignStackConfig::default(),
             masters: &CalibrationMasters::default(),
+            cosmic_ray: None,
         }
         .report();
         assert_eq!(
@@ -210,7 +213,7 @@ fn held_lights_add_no_more_than_the_budget() {
                 .align_stack_images(lights, &ingest, ProgressMonitor::unattended())
                 .unwrap()
         });
-        assert_eq!(run.value.registered(), LIGHTS);
+        assert_eq!(run.value.stacked_count(), LIGHTS);
         budget.assert_held("held", run.peak_bytes, &run.value.product.report);
     });
 }
@@ -234,10 +237,11 @@ fn a_flat_divided_run_stays_within_its_budget() {
                 budget,
                 config: &AlignStackConfig::default(),
                 masters: &masters,
+                cosmic_ray: None,
             }
             .report();
-            assert_eq!(report.spilled_frames, spilled, "{label}");
-            assert_eq!(report.overcommit_bytes, 0, "{label}");
+            assert_eq!(report.memory.spilled_frames, spilled, "{label}");
+            assert_eq!(report.memory.overcommit_bytes, 0, "{label}");
         }
     });
 }

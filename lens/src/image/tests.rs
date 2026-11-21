@@ -200,7 +200,7 @@ fn an_auto_preview_is_lumos_stretch_of_the_image() {
 
     let mut frame = image.to_planar().unwrap();
     DisplayStretch::AUTO.apply(&mut frame).unwrap();
-    let lumos = imaginarium::Preview::new(size).planes_to_rgba8(&LinearParts::from(frame).pixels);
+    let lumos = imaginarium::Preview::new(size).planes_to_rgba8(&FrameParts::from(frame).samples);
     let auto = image.preview_rgba8(size, DisplayStretch::Auto).unwrap();
     assert_eq!(auto.bytes(), lumos.bytes());
     let linear = image.preview_rgba8(size, DisplayStretch::Linear).unwrap();

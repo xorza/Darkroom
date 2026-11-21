@@ -10,7 +10,6 @@ pub(crate) mod sample_noise;
 
 use std::convert::Infallible;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::{Buffer2, CancelToken, par};
 use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
@@ -21,7 +20,7 @@ use crate::combine::frame_cache::core::{CacheCore, ChunkCtx};
 use crate::combine::frame_cache::frame_step::{FrameStep, SteppedPaths};
 use crate::combine::frame_cache::frame_weights::FrameWeights;
 use crate::combine::frame_cache::loader::LoadedCache;
-use crate::combine::frame_cache::sample::{CombineScratch, FlagTallies, GatheredSamples};
+use crate::combine::frame_cache::sample::{CombineScratch, GatheredSamples, RowTallies};
 use crate::combine::frame_cache::sample_noise::SampleNoise;
 use crate::combine::frame_read::frame_gate::FrameGate;
 use crate::combine::frame_read::slots::Slots;
@@ -40,7 +39,6 @@ use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::error::FrameDimensionMismatch;
-use crate::image::flags::flag_counts::AtomicFlagCounts;
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flags::quality_map::QualityMap;
@@ -62,8 +60,8 @@ use crate::scratch_pool::ScratchPool;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_planes::QualityPlanes;
-use crate::stack_product::run_report::RunReport;
-use crate::stack_product::weight_kind::WeightKind;
+use crate::stack_product::run_report::{CombineReport, MemoryReport, RunReport};
+use crate::stack_product::weight_plane::{WeightKind, WeightPlane};
 use glam::USizeVec2;
 
 /// Channel-shaped result of one combine pass. A plane is `None` when [`QualityPlanes`] did not
@@ -71,13 +69,11 @@ use glam::USizeVec2;
 #[derive(Debug)]
 pub(crate) struct CombineOutput {
     pub(super) pixels: PlanarImage,
-    /// The share of frames gathered at each pixel, when coverage was asked for and some frame
-    /// carries frame quality; every pixel is wholly covered otherwise. One plane, or one per
-    /// channel when a frame is gathered by each channel's own rule.
-    coverage: Option<PlanarImage>,
-    weight: Option<PlanarImage>,
-    /// What the frame weights summed in `weight` were.
-    weight_kind: WeightKind,
+    /// The share of frames gathered at each pixel, when coverage was asked for: measured where
+    /// some frame carries frame quality, one plane or one per channel when a frame is gathered by
+    /// each channel's own rule, and [`Coverage::Full`] otherwise.
+    coverage: Option<Coverage>,
+    weight: Option<WeightPlane>,
     inverse_variance: Option<PlanarImage>,
     dispersion: Option<PlanarImage>,
     /// The stack's flags, for a frame set where a frame carries flags or is not gathered at every
@@ -137,7 +133,7 @@ impl FrameCache {
         // every plane in from disk once before the combine reads it again. What the frames' sources
         // stated (domain, row order, pattern) is the input's, and is checked here always.
         Cancelled::check(&core.monitor.cancel)?;
-        SetFacts::check_set(frames.iter().map(|frame| &frame.facts))?;
+        SetFacts::check_set(frames.iter().map(|frame| &frame.admitted.facts))?;
         for (idx, frame) in frames.iter().enumerate() {
             debug_assert!(
                 FrameCheck {
@@ -183,7 +179,7 @@ impl FrameCache {
             .into_iter()
             .map(|frame| StoredFrame::from_memory(frame.image, frame.quality, frame.admitted))
             .collect::<Vec<_>>();
-        SetFacts::check_set(stored.iter().map(|frame| &frame.facts))?;
+        SetFacts::check_set(stored.iter().map(|frame| &frame.admitted.facts))?;
         for (idx, frame) in stored.iter().enumerate() {
             FrameCheck {
                 idx,
@@ -232,33 +228,33 @@ impl FrameCache {
     pub(super) fn finish_product(
         &self,
         combined: CombineOutput,
-        planes: QualityPlanes,
         quantization_sigma: Option<f32>,
     ) -> StackProduct {
         let CombineOutput {
             pixels,
             coverage,
-            weight: weight_pixels,
-            weight_kind,
+            weight,
             inverse_variance: inverse_variance_pixels,
             dispersion: dispersion_pixels,
             flags,
             report,
         } = combined;
-        let desc = self.core.desc;
         // Every frame carries the first one's pattern: `SetFacts` held them to it.
-        let cfa_type = self.frames[0].facts.cfa_type;
+        let cfa_type = self.frames[0].admitted.facts.cfa_type;
         // Every saturated sample of the stack is flagged only when every frame's was.
         let saturation_flagged = self
             .frames
             .iter()
-            .all(|frame| frame.facts.saturation_flagged);
-        let conditions =
-            CaptureConditions::shared(self.frames.iter().map(|frame| frame.facts.conditions));
+            .all(|frame| frame.admitted.facts.saturation_flagged);
+        let conditions = CaptureConditions::shared(
+            self.frames
+                .iter()
+                .map(|frame| frame.admitted.facts.conditions),
+        );
         let dark_comparison = self
             .frames
             .iter()
-            .filter_map(|frame| frame.facts.dark_comparison)
+            .filter_map(|frame| frame.admitted.facts.dark_comparison)
             .reduce(DarkComparison::union);
         let image = LinearImage::new(
             pixels,
@@ -272,6 +268,11 @@ impl FrameCache {
                     exposure_time: conditions.exposure_time,
                     ccd_temp: conditions.ccd_temp,
                     camera_temp: conditions.camera_temp,
+                    gain: conditions.setting.gain,
+                    iso: conditions.setting.iso,
+                    offset: conditions.setting.offset,
+                    xbinning: conditions.setting.xbinning,
+                    ybinning: conditions.setting.ybinning,
                     ..self.core.metadata.header.clone()
                 },
                 derived: self
@@ -289,15 +290,8 @@ impl FrameCache {
         );
         StackProduct {
             image,
-            coverage: planes.coverage.then(|| match coverage {
-                Some(coverage) => Coverage::PerPixel(QualityMap::from(coverage)),
-                None => Coverage::Uniform {
-                    value: 1.0,
-                    size: desc.size(),
-                },
-            }),
-            weight: weight_pixels.map(QualityMap::from),
-            weight_kind,
+            coverage,
+            weight,
             inverse_variance: inverse_variance_pixels.map(QualityMap::from),
             dispersion: dispersion_pixels.map(QualityMap::from),
             cfa_type,
@@ -347,9 +341,7 @@ impl FrameCache {
         let mut output_flags = self
             .flag_plane()
             .then(|| Buffer2::<u8>::new_default(desc.size()));
-        let excluded = AtomicFlagCounts::default();
-        let kept_flagged = AtomicFlagCounts::default();
-        let fallback_pixels = AtomicU64::new(0);
+        let mut tallies = RowTallies::default();
         // One pool for the whole combine. `process_chunks` invokes the row loop below once per
         // chunk per channel, so the scratch has to outlive any single loop.
         let scratch_pool = ScratchPool::<CombineScratch>::new(self.frames.len());
@@ -435,14 +427,15 @@ impl FrameCache {
                     let plane = &mut plane.pixels_mut()[chunk];
                     attach_rows(&mut rows, plane, width, |row| &mut row.flags);
                 }
-                par::drain(&mut rows, ..)
+                let chunk_tallies = par::drain(&mut rows, ..)
                     .enumerate()
-                    .for_each(|(row_in_chunk, mut row)| {
+                    .map(|(row_in_chunk, mut row)| {
                         let scratch = &mut scratch_pool.acquire();
+                        let mut row_tallies = RowTallies::default();
                         // Cancelled: skip the row's work (output stays zero; the
                         // caller discards the partial result and reports Cancelled).
                         if cancel.is_cancelled() {
-                            return;
+                            return row_tallies;
                         }
                         // One deref, then disjoint field borrows — `combine` takes two of them
                         // at once, which `scratch.values` / `scratch.buffers` through the lease's
@@ -462,8 +455,6 @@ impl FrameCache {
                         let noise_bg = noise_bg.as_mut_slice();
                         let noise_sky = noise_sky.as_mut_slice();
                         let noise_per_unit = noise_per_unit.as_mut_slice();
-                        let mut row_tallies = FlagTallies::default();
-                        let mut row_fallbacks = 0u64;
                         let row_offset = row_in_chunk * width;
                         let y = pixel_offset / width + row_in_chunk;
                         for pixel_in_row in 0..width {
@@ -554,7 +545,8 @@ impl FrameCache {
                                 };
                                 row_flags[pixel_in_row] |= pixel_flags.byte();
                             }
-                            row_fallbacks += u64::from(sample.small_n_fallback);
+                            row_tallies.small_n_fallback_pixels +=
+                                u64::from(sample.small_n_fallback);
                             row.value[pixel_in_row] = sample.value;
                             if let Some(coverage) = row.coverage.as_deref_mut() {
                                 coverage[pixel_in_row] = covered as f32 * inverse_frame_count;
@@ -569,10 +561,10 @@ impl FrameCache {
                                 dispersion[pixel_in_row] = sample.dispersion;
                             }
                         }
-                        excluded.add(&row_tallies.excluded);
-                        kept_flagged.add(&row_tallies.kept);
-                        fallback_pixels.fetch_add(row_fallbacks, Ordering::Relaxed);
-                    });
+                        row_tallies
+                    })
+                    .reduce(RowTallies::default, RowTallies::merged);
+                tallies = tallies.merged(chunk_tallies);
                 kept_rows.put(rows);
                 kept_gains.put(gains);
                 kept_flags.put(flags);
@@ -580,26 +572,43 @@ impl FrameCache {
             });
         CombineOutput {
             pixels,
-            coverage: output_coverage,
-            weight: output_weight,
-            weight_kind: weights.map_or(WeightKind::Count, FrameWeights::kind),
+            coverage: planes.coverage.then(|| {
+                output_coverage.map_or(Coverage::Full, |pixels| {
+                    Coverage::PerPixel(QualityMap::from(pixels))
+                })
+            }),
+            weight: output_weight.map(|pixels| WeightPlane {
+                map: QualityMap::from(pixels),
+                // Weights are inverse variances where any are given; unit ones count frames.
+                kind: if weights.is_some() {
+                    WeightKind::InverseVariance
+                } else {
+                    WeightKind::Count
+                },
+            }),
             inverse_variance: output_inverse_variance,
             dispersion: output_dispersion,
             flags: output_flags,
             report: RunReport {
-                excluded_samples: excluded.totals(),
-                kept_flagged_samples: kept_flagged.totals(),
-                small_n_fallback_pixels: fallback_pixels.into_inner(),
-                variance_bg_only: planes.inverse_variance
-                    && noise.is_some_and(|noise| noise.first_without_gain().is_some()),
-                overcommit_bytes: chunking.overcommit_bytes,
-                planned_peak_bytes: self.core.tier.planned_peak_bytes(),
-                spilled_frames: if self.core.tier.spills() {
-                    self.frames.len() as u64
-                } else {
-                    0
+                combine: CombineReport {
+                    excluded_samples: tallies.excluded,
+                    kept_flagged_samples: tallies.kept,
+                    small_n_fallback_pixels: tallies.small_n_fallback_pixels,
+                    variance_bg_only: planes.inverse_variance
+                        && noise.is_some_and(|noise| noise.first_without_gain().is_some()),
                 },
-                ..RunReport::default()
+                memory: MemoryReport {
+                    spilled_frames: if self.core.tier.spills() {
+                        self.frames.len() as u64
+                    } else {
+                        0
+                    },
+                    parked_lights: 0,
+                    overcommit_bytes: chunking.overcommit_bytes,
+                    planned_peak_bytes: self.core.tier.planned_peak_bytes(),
+                },
+                calibration: None,
+                drizzle: None,
             },
         }
     }
@@ -651,7 +660,7 @@ impl FrameCache {
     pub(crate) fn from_cfa_paths<P, S, E>(
         frames: SteppedPaths<'_, P, S>,
         combine: PlannedCombine,
-        run: IngestRun,
+        run: IngestRun<'_>,
     ) -> Result<Self, E>
     where
         P: AsRef<Path>,
@@ -675,7 +684,7 @@ impl FrameCache {
     pub(crate) fn from_paths(
         paths: &[&Path],
         combine: PlannedCombine,
-        run: IngestRun,
+        run: IngestRun<'_>,
     ) -> Result<Self, StackError> {
         Self::from_tiered_paths(
             LoadedCache::load::<LinearDecoder, _, StackError>(
@@ -697,7 +706,7 @@ impl FrameCache {
         let LoadedCache { frames, core } = loaded;
         // The loader ran each frame's own checks as it decoded, and its facts against frame 0's;
         // the facts a later frame states first are compared here, in order.
-        SetFacts::check_set(frames.iter().map(|frame| &frame.facts))?;
+        SetFacts::check_set(frames.iter().map(|frame| &frame.admitted.facts))?;
         Self::measured(frames, core, normalization)
     }
 }
@@ -724,18 +733,18 @@ pub(crate) mod internals {
     use crate::frame::frame_quality::FrameQuality;
     use crate::frame_store::storage_tier::StorageTier;
     use crate::frame_store::stored_frame::StoredFrame;
-    use crate::image::stackable_image::StackableImage;
+    use crate::image::frame::{Frame, Samples};
 
     impl FrameCache {
         /// A resident cache over already-decoded frames — the shape `from_paths` builds, without
         /// the file round-trip, through the same validation. Nothing here was warped, so a frame
         /// carries quality planes only when its source declared pixels with no measurement.
-        pub(crate) fn from_images<I: StackableImage>(
-            images: Vec<I>,
+        pub(crate) fn from_images<S: Samples>(
+            images: Vec<Frame<S>>,
             normalization: Normalization,
         ) -> Self {
             let mut core = CacheCore::plain(StorageTier::UNPLANNED, images[0].desc());
-            core.metadata = images[0].metadata().clone();
+            core.metadata = images[0].metadata.clone();
             let frames = images
                 .into_iter()
                 .map(|image| {

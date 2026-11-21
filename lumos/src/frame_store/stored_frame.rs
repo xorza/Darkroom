@@ -4,9 +4,7 @@ use arrayvec::ArrayVec;
 use common::Buffer2;
 
 use crate::frame::admitted::Admitted;
-use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_quality::FrameQuality;
-use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::plane_sink::{PlaneRole, PlaneSink};
 use crate::frame_store::stored_gain::StoredGain;
@@ -14,7 +12,7 @@ use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::frame_store::stratified_samples::StratifiedSamples;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::stackable_image::{ImageParts, StackableImage};
+use crate::image::frame::{Frame, FrameParts, Samples};
 
 /// One frame as the combine engine sees it: its channel planes, the per-pixel quality it carries
 /// if a warp produced one or its source declared pixels with no measurement, its flags when its
@@ -31,23 +29,24 @@ pub(crate) struct StoredFrame {
     pub(crate) quality: FrameQuality<StoredPlane>,
     pub(crate) flags: Option<StoredPlane<u8>>,
     pub(crate) flat_gain: Option<StoredGain>,
-    pub(crate) source_stats: FrameStats,
-    pub(crate) facts: FrameFacts,
+    /// The source's statistics and facts, as its admission found them.
+    pub(crate) admitted: Admitted,
 }
 
 impl StoredFrame {
     /// `image` with `quality` in RAM, as the resident tier keeps it: its buffers moved in.
     pub(crate) fn from_memory(
-        image: impl StackableImage,
+        image: Frame<impl Samples>,
         quality: FrameQuality<Buffer2<f32>>,
         admitted: Admitted,
     ) -> Self {
-        let Admitted { stats, facts } = admitted;
-        let ImageParts {
-            planes,
+        let FrameParts {
+            samples,
             flags,
             flat_gain,
-        } = image.into_parts();
+            ..
+        } = FrameParts::from(image);
+        let planes = samples.into_planes();
         let flags = flags
             .filter(|flags| quality.keeps(flags.counts()))
             .map(|flags| StoredPlane::Memory(flags.into_buffer()));
@@ -57,8 +56,7 @@ impl StoredFrame {
             quality: quality.map(StoredPlane::Memory),
             flags,
             flat_gain: flat_gain.map(StoredGain::from),
-            source_stats: stats,
-            facts,
+            admitted,
         }
     }
 }
@@ -93,7 +91,7 @@ pub(crate) struct WrittenFrame {
     pub(crate) quality: FrameQuality<StoredPlane>,
 }
 
-impl<I: StackableImage> FrameWrite<'_, I> {
+impl<S: Samples> FrameWrite<'_, Frame<S>> {
     /// Write the planes the frame keeps to `sink` and map them back: its channels, its flags when
     /// its quality [keeps](FrameQuality::keeps) them, each slot's samples when it has no quality
     /// in a set of [`SetKind::Unwarped`], its quality planes and its own flat gain; a shared gain
@@ -129,7 +127,6 @@ impl WrittenFrame {
             samples,
             quality,
         } = self;
-        let Admitted { stats, facts } = admitted;
         let flags = image
             .flags
             .filter(|flags| quality.keeps(&flags.counts))
@@ -140,8 +137,7 @@ impl WrittenFrame {
             quality,
             flags,
             flat_gain: image.flat_gain,
-            source_stats: stats,
-            facts,
+            admitted,
         }
     }
 }
@@ -149,11 +145,11 @@ impl WrittenFrame {
 /// Each slot's [`StratifiedSamples`] of `image`, written to `sink` from one buffer the slots take
 /// in turn.
 fn store_samples(
-    image: &impl StackableImage,
+    image: &Frame<impl Samples>,
     mut sink: impl PlaneSink,
 ) -> Result<ArrayVec<StoredPlane, 3>, FrameStoreError> {
     let size = image.desc().size();
-    let mosaic = image.cfa_type().and_then(CfaType::mosaic);
+    let mosaic = image.sensor_pattern().and_then(CfaType::mosaic);
     let slots = mosaic.map_or_else(
         || image.desc().channel_count(),
         |mosaic| mosaic.color_count(),

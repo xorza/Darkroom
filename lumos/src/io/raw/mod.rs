@@ -71,22 +71,20 @@ pub(crate) const fn filter_color(filters: u32, row: usize, col: usize) -> usize 
 /// memory datastream is its simplest, and a path never meets a narrow or wide file API.
 fn read(path: &Path, ctx: &LoadCtx) -> Result<RawFile, ImageError> {
     ctx.check_cancelled(path)?;
-    let bytes = fs::read(path).map_err(|source| ImageError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let bytes = fs::read(path).map_err(|source| ImageError::new(path, source))?;
     Ok(RawFile { bytes })
 }
 
 /// `file`, read from `path`, opened in LibRaw, polling the cancel token of `ctx`.
 fn open(file: RawFile, path: &Path, ctx: &LoadCtx) -> Result<Libraw, ImageError> {
-    Libraw::open(file.bytes, &ctx.cancel).map_err(|source| ImageError::raw(path, source.into()))
+    Libraw::open(file.bytes, &ctx.cancel)
+        .map_err(|source| ImageError::new(path, RawError::from(source)))
 }
 
 /// Open and unpack `file`, read from `path`.
 fn open_raw(file: RawFile, path: &Path, ctx: &LoadCtx) -> Result<UnpackedRaw, ImageError> {
-    UnpackedRaw::unpack(open(file, path, ctx)?, ctx.decode_threads)
-        .map_err(|source| ImageError::raw(path, source))
+    UnpackedRaw::unpack(open(file, path, ctx)?, ctx.decode_threads.get())
+        .map_err(|source| ImageError::new(path, source))
 }
 
 /// What the decoder of the open `libraw` holds while it makes a mosaic: the file LibRaw parses in
@@ -109,7 +107,7 @@ pub(super) fn load_preview(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, Im
     let raw = open_raw(read(path, ctx)?, path, ctx)?;
     ctx.check_cancelled(path)?;
     raw.into_linear_image(ctx)
-        .map_err(|source| ImageError::raw(path, source))
+        .map_err(|source| ImageError::new(path, source))
 }
 
 /// What the CFA frame of `path` is, without the expensive `libraw_unpack`: the file is read whole,
@@ -117,7 +115,7 @@ pub(super) fn load_preview(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, Im
 /// decoded.
 pub(crate) fn cfa_peek(path: &Path, ctx: &LoadCtx) -> Result<Peek<RawFile>, ImageError> {
     let libraw = open(read(path, ctx)?, path, ctx)?;
-    let info = frame_info(&libraw).map_err(|source| ImageError::raw(path, source))?;
+    let info = frame_info(&libraw).map_err(|source| ImageError::new(path, source))?;
     Ok(Peek {
         info,
         read: RawFile {
@@ -155,7 +153,7 @@ fn frame_info(libraw: &Libraw) -> Result<FrameInfo, RawError> {
     let cfa_type = libraw_filters::cfa_type(&libraw.image_data())?.ok_or(RawError::NotACfaFrame)?;
     Ok(FrameInfo {
         desc: PlanarDesc::new(layout.active, ChannelLayout::Mono),
-        cfa_type,
+        cfa_type: Some(cfa_type),
         decoder: decoder_bytes(libraw, &layout),
         gain_bytes: 0,
     })
@@ -178,7 +176,7 @@ pub(crate) fn load_cfa_read(
     let raw = open_raw(file, path, ctx)?;
     ctx.check_cancelled(path)?;
     raw.into_cfa_image()
-        .map_err(|source| ImageError::raw(path, source))
+        .map_err(|source| ImageError::new(path, source))
 }
 
 #[cfg(all(test, feature = "real-data"))]
@@ -199,7 +197,7 @@ pub(crate) mod internals {
         let ctx = LoadCtx::default();
         let raw = open_raw(read(path, &ctx)?, path, &ctx)?;
         raw.processed_by_libraw(Some(user_qual))
-            .map_err(|source| ImageError::raw(path, source))
+            .map_err(|source| ImageError::new(path, source))
     }
 }
 

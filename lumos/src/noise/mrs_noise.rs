@@ -18,8 +18,6 @@ use glam::USizeVec2;
 
 /// Layers of the transform; PixInsight's default.
 const SCALES: usize = 4;
-/// The B3-spline à trous response of each detail layer to unit white noise (Starck & Murtagh).
-const LAYER_SIGMA: [f64; SCALES] = [0.889, 0.200, 0.086, 0.041];
 /// The significance threshold in units of a layer's noise.
 const K: f64 = 3.0;
 /// When the support iterations end, as the reference.
@@ -27,10 +25,11 @@ const CONVERGENCE: Convergence = Convergence {
     tolerance: 1e-4,
     iterations: 50,
 };
-/// What the uncorrected estimate reads for white Gaussian noise of unit σ: 0.97826, the mean over
-/// 32 frames of 10⁶ analysed pixels, with a standard error of 1.3 × 10⁻⁴. Not closed-form: the
-/// support truncates four correlated layers at once.
-const WHITE_NOISE_RESPONSE: f64 = 0.97826;
+/// What the uncorrected estimate reads for white Gaussian noise of unit σ: 0.97870, the mean over
+/// 32 frames of 10⁶ analysed pixels, with a standard error of 1.2 × 10⁻⁴, at the layers' exact
+/// responses ([`layer_sigmas`]). Not closed-form: the support truncates four correlated layers at
+/// once.
+const WHITE_NOISE_RESPONSE: f64 = 0.97870;
 /// The k-σ start: its relative accuracy and its iteration cap, as PixInsight's `NoiseKSigma`.
 const START: Convergence = Convergence {
     tolerance: 0.01,
@@ -362,13 +361,14 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
                 .zip(image.pixels())
                 .map(|(&coarse, &fine)| f64::from(fine) - f64::from(coarse)),
         );
+        let layer_sigma = layer_sigmas();
         significance.clear();
         significance.extend(
             first_layer
                 .iter()
-                .map(|detail| detail.abs() / LAYER_SIGMA[0]),
+                .map(|detail| detail.abs() / layer_sigma[0]),
         );
-        for (scale, &layer_sigma) in LAYER_SIGMA.iter().enumerate().take(scales).skip(1) {
+        for (scale, &layer_sigma) in layer_sigma.iter().enumerate().take(scales).skip(1) {
             wavelet::atrous_smooth_serial(smooth, next, 1 << scale, smoothing_row);
             for ((significance, &coarse), &fine) in significance
                 .iter_mut()
@@ -438,8 +438,7 @@ fn k_sigma_sigma(coefficients: CoefficientRun<'_>, size: USize2) -> f64 {
     );
     // The first layer's exact response to unit white noise, where the kernel lies inside the frame:
     // within `FIRST_LAYER_REACH` of an edge the mirror boundary reads a sample twice, and
-    // `interior` keeps those pixels out. `LAYER_SIGMA` keeps the literature's three digits, which
-    // the support's threshold and `WHITE_NOISE_RESPONSE` were measured with.
+    // `interior` keeps those pixels out.
     k_sigma(coefficients, &interior, CONVERGENCE) / wavelet::white_noise_sigma(0) / K_SIGMA_RESPONSE
 }
 
@@ -447,7 +446,7 @@ fn k_sigma_sigma(coefficients: CoefficientRun<'_>, size: USize2) -> f64 {
 /// fewer than one in [`MIN_NOISE_SHARE`] of them, or two, outside the support, or none converges.
 fn support_sigma(coefficients: CoefficientRun<'_>) -> Option<f64> {
     let floor = coefficients.idx.len().div_ceil(MIN_NOISE_SHARE).max(2);
-    let mut sigma = k_sigma(coefficients, &|_| true, START) / LAYER_SIGMA[0];
+    let mut sigma = k_sigma(coefficients, &|_| true, START) / wavelet::white_noise_sigma(0);
     let mut mean = None;
     for _ in 0..CONVERGENCE.iterations {
         let kept = Kept {
@@ -479,6 +478,12 @@ fn support_sigma(coefficients: CoefficientRun<'_>) -> Option<f64> {
 struct Tile {
     core: USizeRect2,
     region: USizeRect2,
+}
+
+/// The B3-spline à trous response of each detail layer to unit white noise, exactly
+/// ([`wavelet::white_noise_sigma`]), where Starck & Murtagh publish 0.889, 0.200, 0.086 and 0.041.
+fn layer_sigmas() -> [f64; SCALES] {
+    std::array::from_fn(wavelet::white_noise_sigma)
 }
 
 /// The pixels of the largest of `tiles`' regions; none for no tile.

@@ -13,6 +13,7 @@ use crate::bench::files::{Files, LIGHTS};
 use crate::bench::scene::{self, FRAME, Field};
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
+use crate::calibration::cosmic_ray::cosmic_ray_detector::CosmicRayDetector;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_image::StoredImage;
@@ -23,7 +24,7 @@ use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_ctx::LoadCtx;
 use crate::pipeline::align_stack_config::{AlignStackConfig, CalibratedLights};
 use crate::pipeline::calibration_notes::CalibrationNotes;
-use crate::pipeline::mosaic_preparation::MosaicPreparation;
+use crate::pipeline::mosaic_preparation::{MosaicLight, MosaicPreparation};
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::bench::Pair;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
@@ -47,7 +48,7 @@ fn prepare(c: &mut Criterion) {
     let mut group = Kind::Integration.group(c, "prepare", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for (variant, cosmic_ray) in [
-        ("light/rggb", AlignStackConfig::default().cosmic_ray),
+        ("light/rggb", None),
         ("light_cosmic_rays/rggb", Some(CosmicRayConfig::default())),
     ] {
         group.bench_function(BenchmarkId::new(variant, field.name()), |b| {
@@ -67,11 +68,19 @@ fn prepare(c: &mut Criterion) {
             };
             let light = field.light(FRAME, cfa_type);
             let ctx = LoadCtx::default();
+            let mut detector = CosmicRayDetector::new();
             b.iter_batched(
                 || light.clone(),
                 |light| {
                     preparation
-                        .prepare(light, Path::new("light.fits"), &ctx)
+                        .prepare(
+                            light,
+                            MosaicLight {
+                                path: Path::new("light.fits"),
+                                ctx: &ctx,
+                                cosmic_ray: &mut detector,
+                            },
+                        )
                         .unwrap()
                 },
                 bench::fresh_copies(size_of_val(light.data().pixels())),
@@ -180,6 +189,7 @@ fn end_to_end(c: &mut Criterion) {
                         CalibratedLights {
                             paths: &files.paths,
                             masters,
+                            cosmic_ray: None,
                         },
                         &ingest,
                         ProgressMonitor::unattended(),

@@ -25,6 +25,7 @@ pub(crate) mod frame_registration;
 mod light_files;
 mod light_shape;
 mod light_source;
+mod light_worker;
 mod mosaic_preparation;
 mod pipeline_frame;
 mod registered_set;

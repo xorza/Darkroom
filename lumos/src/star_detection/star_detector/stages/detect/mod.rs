@@ -130,7 +130,7 @@ fn extract_candidates(
 
     tracing::debug!(
         total_components = label_map.label_count(),
-        max_area = config.max_area,
+        max_area = ?config.max_area,
         deblend = ?config.deblend,
         "Processing components for candidate extraction"
     );
@@ -199,7 +199,8 @@ fn extract_candidates(
     );
 
     regions.retain(|c| {
-        (config.min_area..=config.max_area).contains(&c.area)
+        c.area >= config.min_area
+            && config.max_area.is_none_or(|max_area| c.area <= max_area)
             && c.bbox.min.x >= config.edge_margin
             && c.bbox.min.y >= config.edge_margin
             && c.bbox.max.x <= size.width.saturating_sub(config.edge_margin)

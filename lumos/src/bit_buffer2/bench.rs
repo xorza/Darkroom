@@ -9,13 +9,13 @@ use crate::bench::scene::{FRAME, Field};
 use crate::bit_buffer2::BitBuffer2;
 use crate::star_detection::bench as detection;
 use crate::star_detection::bench::Stages;
-use crate::star_detection::star_detection_config::bg_config::{BgRefinement, IterativeRefinement};
+use crate::star_detection::star_detection_config::bg_config::IterativeRefinement;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
     let mut group = Kind::Atomic.group(c, "detection/dilation/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
-    let BgRefinement::Iterative(IterativeRefinement { mask_dilation, .. }) =
+    let Some(IterativeRefinement { mask_dilation, .. }) =
         detection::config(Field::Dense).bg.refinement
     else {
         unreachable!("the crowded-field preset refines the background")

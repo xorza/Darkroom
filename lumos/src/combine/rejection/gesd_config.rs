@@ -4,6 +4,7 @@
 use std::ops::Range;
 
 use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};
+use crate::combine::rejection::percent;
 use crate::combine::rejection::scratch_buffers::MethodScratch;
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
@@ -19,9 +20,12 @@ pub struct GesdConfig {
     /// Significance level for the test (typically 0.05), in `(0, 1)`: at 0 the critical value is
     /// the Samuelson bound, which no sample reaches, and the test never rejects.
     pub alpha: f32,
-    /// The most outliers to test for, at least 1. `None` tests for 30% of the samples, as Siril and
-    /// PixInsight do: the test resists masking only when `r` reaches the true outlier count.
-    pub max_outliers: Option<usize>,
+    /// The most outliers to test for, as a share of the samples in percent, above 0 and at most
+    /// 50: the test resists masking only when `r` reaches the true outlier count, and past half the
+    /// samples the outliers are the population. A share follows the frame count, as Siril's and
+    /// PixInsight's ESD outliers of 0.3 do; a share in percent is exact where a fraction in binary
+    /// is not, as [`TrimBounds`](crate::TrimBounds) states its own.
+    pub outliers_percent: f32,
 }
 
 impl Default for GesdConfig {
@@ -34,33 +38,22 @@ impl GesdConfig {
     /// A significance of 5%, and up to 30% of the samples tested.
     pub const DEFAULT: Self = Self {
         alpha: 0.05,
-        max_outliers: None,
+        outliers_percent: 30.0,
     };
 
-    pub const fn new(alpha: f32, max_outliers: Option<usize>) -> Self {
-        Self {
-            alpha,
-            max_outliers,
-        }
-    }
-
-    /// Validate the significance level and the outlier cap: either at its bound disables the test.
+    /// Validate the significance level and the outlier share: either at 0 disables the test.
     pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
         ConfigField::new("alpha", self.alpha)
             .finite_and("finite and in (0, 1)", |value| value > 0.0 && value < 1.0)?;
-        match self.max_outliers {
-            Some(max_outliers) => ConfigField::count("max_outliers", max_outliers)
-                .must_be("at least 1", max_outliers >= 1),
-            None => Ok(()),
-        }
+        ConfigField::new("outliers_percent", self.outliers_percent)
+            .finite_and("finite, above 0 and at most 50", |value| {
+                value > 0.0 && value <= 50.0
+            })
     }
 
-    /// The configured maximum, or `⌊0.3·n⌋`.
-    pub(super) const fn max_outliers_for_size(self, n: usize) -> usize {
-        match self.max_outliers {
-            Some(max_outliers) => max_outliers,
-            None => 3 * n / 10,
-        }
+    /// `⌊outliers_percent·n/100⌋`, exact.
+    pub(super) fn max_outliers_for_size(self, n: usize) -> usize {
+        percent::share_of(self.outliers_percent, n)
     }
 
     /// The test, over the whole window: one pass. The outliers are the removals up to the last
@@ -165,7 +158,7 @@ pub(crate) mod internals {
     impl GesdConfig {
         /// Each removal's statistic over `pass`, in order: what a test compares with the critical
         /// values a reference prints.
-        pub(crate) fn statistics(&self, pass: &Pass<'_>) -> Vec<f64> {
+        pub(crate) fn statistics(self, pass: &Pass<'_>) -> Vec<f64> {
             let mut statistics = Vec::new();
             self.removals(pass, self.tests(pass), |removal| {
                 statistics.push(removal.statistic);

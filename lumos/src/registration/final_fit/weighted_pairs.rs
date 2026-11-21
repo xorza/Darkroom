@@ -48,7 +48,7 @@ impl WeightedPairs {
     pub(super) fn fit_warp(&self, model: FitModel) -> Option<WarpTransform> {
         let (linear, sip) = match model {
             FitModel::Plain(transform_type) => {
-                return self.fit(transform_type).map(WarpTransform::new);
+                return self.fit(transform_type).map(WarpTransform::from);
             }
             FitModel::WithSip(linear, sip) => (linear, sip),
         };

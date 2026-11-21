@@ -10,9 +10,9 @@ pub(super) const MIN_CHUNK_ROWS: usize = 64;
 /// of its work adds while in flight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Stage {
-    pub(crate) kept: usize,
-    pub(crate) held: usize,
-    pub(crate) in_flight: usize,
+    pub(crate) kept_bytes: usize,
+    pub(crate) held_bytes: usize,
+    pub(crate) in_flight_bytes: usize,
     pub(crate) units: Units,
 }
 
@@ -66,11 +66,13 @@ impl Stage {
         };
         let per_unit = match (self.units, spilled) {
             (Units::Whole, _) | (Units::Rows(_), false) => 0,
-            (Units::Frames | Units::Serial, true) => self.in_flight.saturating_add(self.kept),
-            (Units::Frames | Units::Serial | Units::Rows(_), _) => self.in_flight,
+            (Units::Frames | Units::Serial, true) => {
+                self.in_flight_bytes.saturating_add(self.kept_bytes)
+            }
+            (Units::Frames | Units::Serial | Units::Rows(_), _) => self.in_flight_bytes,
         } as u64;
         Charge {
-            beside: kept_set.saturating_add(self.held as u64),
+            beside: kept_set.saturating_add(self.held_bytes as u64),
             per_unit,
         }
     }

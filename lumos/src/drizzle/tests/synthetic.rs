@@ -110,13 +110,10 @@ fn drizzle_conserves_total_flux() {
         .sum::<f64>()
         / frames.images.len() as f64;
 
-    for (scale, pixfrac) in [(1.0f32, 1.0), (2.0, 0.8)] {
-        let product = drizzle(
-            &frames,
-            &kernel_config(DrizzleKernel::Turbo, scale, pixfrac),
-        );
+    for (scale, pixfrac) in [(1.0, 1.0), (2.0, 0.8)] {
+        let product = drizzle(&frames, &kernel_config(Kernel::Turbo, scale, pixfrac));
         let out_flux = sum(product.image.channel(0).pixels());
-        let expected = mean_flux * f64::from(scale * scale);
+        let expected = mean_flux * scale * scale;
         assert!(
             (out_flux - expected).abs() <= 33.0 * f64::from(f32::EPSILON) * expected,
             "scale {scale}: Σ_out {out_flux} against s²·Σ_in {expected}"
@@ -142,10 +139,7 @@ fn drizzle_places_star_at_its_reference_position() {
     );
     let frames = dithered_frames(&scene, &Camera::ideal(3.5), &HALF_PIXEL_DITHERS);
     let scale = 2.0;
-    let product = drizzle(
-        &frames,
-        &kernel_config(DrizzleKernel::Turbo, scale as f32, 0.8),
-    );
+    let product = drizzle(&frames, &kernel_config(Kernel::Turbo, scale, 0.8));
     let truth =
         scale * star_centroid(frames.images[0].channel(0)) + DVec2::splat((scale - 1.0) / 2.0);
     let center = star_centroid(product.image.channel(0));
@@ -175,7 +169,7 @@ fn drizzle_dithering_recovers_resolution() {
         .flat_map(|&dx| offs.iter().map(move |&dy| DVec2::new(dx, dy)))
         .collect();
     let frames = dithered_frames(&scene, &Camera::ideal(1.8), &dithers);
-    let config = kernel_config(DrizzleKernel::Turbo, 2.0, 0.6);
+    let config = kernel_config(Kernel::Turbo, 2.0, 0.6);
 
     // Distinct sub-pixel dithers vs the same single frame replicated N times: same frame count and
     // flux, so the only difference is sub-pixel diversity. Recovering it sharpens the peak.
@@ -218,7 +212,7 @@ fn drizzle_quality_maps_have_their_closed_form() {
     for image in &mut frames.images {
         image.metadata.derived.set_quantization_sigma(Some(1.0));
     }
-    let product = drizzle(&frames, &kernel_config(DrizzleKernel::Turbo, 1.0, 1.0));
+    let product = drizzle(&frames, &kernel_config(Kernel::Turbo, 1.0, 1.0));
     let coverage = product.coverage.as_ref().unwrap();
     let weight = weight_plane(&product);
     let inverse_variance = product.inverse_variance.as_ref().unwrap().channel(0);

@@ -95,20 +95,21 @@ fn weighted_sampling_follows_the_weights() {
 /// The guided phases draw from the most confident pairs, then the uniform phase from all. Twenty
 /// pairs, confident in reverse index order, give pools of the top 5 (indices 15–19) and the top 10
 /// (10–19); a sample of 2 at confidence 0.995 has phases of
-/// `⌈ln 0.005 / ln (1 − 0.5²)⌉ = ⌈18.42⌉ = 19` iterations.
+/// `⌈ln 0.005 / ln (1 − 0.5²)⌉ = ⌈18.42⌉ = 19` iterations, held to the distinct samples a pool
+/// holds: `C(5, 2)` = 10 for the first, 19 of `C(10, 2)` = 45 for the second.
 #[test]
 fn guided_phases_draw_from_the_most_confident_pools() {
     let confidences: Vec<f64> = (0..20).map(f64::from).collect();
     let mut sampler = sampler(&confidences, 2);
-    assert_eq!(sampler.guided_iterations(), 38);
+    assert_eq!(sampler.guided_iterations(), 29);
     let mut sample = Vec::new();
     let mut seen_below_ten = false;
     for iteration in 1..=200 {
         sampler.draw(iteration, &mut sample);
         assert_eq!(sample.len(), 2);
         let floor = match iteration {
-            1..=19 => 15,
-            20..=38 => 10,
+            1..=10 => 15,
+            11..=29 => 10,
             _ => 0,
         };
         assert!(
@@ -118,4 +119,31 @@ fn guided_phases_draw_from_the_most_confident_pools() {
         seen_below_ten |= sample.iter().any(|&idx| idx < 10);
     }
     assert!(seen_below_ten, "the uniform phase reaches every pair");
+}
+
+/// The seed decides the draws: two seeds over the same 40 pairs draw different uniform samples
+/// within their first ten, and one seed draws the same ones again.
+#[test]
+fn two_seeds_draw_differently() {
+    let confidences = vec![1.0; 40];
+    let draws = |seed| {
+        let mut sampler = Sampler::new(
+            &confidences,
+            3,
+            &RansacConfig {
+                seed,
+                ..Default::default()
+            },
+        );
+        let start = sampler.guided_iterations() + 1;
+        let mut sample = Vec::new();
+        (start..start + 10)
+            .map(|iteration| {
+                sampler.draw(iteration, &mut sample);
+                sample.clone()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(draws(7), draws(7));
+    assert_ne!(draws(7), draws(8));
 }

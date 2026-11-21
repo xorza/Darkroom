@@ -5,6 +5,7 @@ use crate::math::statistics::float::{Float, OrderKeys};
 pub(crate) mod clipped_stats;
 pub(crate) mod float;
 pub(crate) mod median_mad;
+pub(crate) mod median_variance;
 pub(crate) mod radix_median;
 pub(crate) mod spread;
 pub(crate) mod subsample;

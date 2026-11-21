@@ -4,7 +4,6 @@
 use common::FileIdentity;
 use serde::{Deserialize, Serialize};
 
-use crate::io::decoder::decode_params::DecodeParams;
 use crate::io::decoder::decode_version::DECODE_VERSION;
 use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::io::load_ctx::LoadCtx;
@@ -30,12 +29,7 @@ impl CacheKey {
             source,
             decoder,
             decode_version: DECODE_VERSION,
-            options: DecodeParams {
-                fits: &ctx.fits,
-                nulls: ctx.nulls,
-                xtrans_passes: ctx.xtrans_passes,
-            }
-            .digest(),
+            options: ctx.decode.digest(),
         }
     }
 }

@@ -12,6 +12,7 @@ use crate::internals::test_rng::TestRng;
 use crate::registration::distortion::sip::{SipConfig, SipModel};
 use crate::registration::final_fit::{FinalFit, FitModel};
 use crate::registration::register::PreparedPair;
+use crate::registration::registrar::Registrar;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::{self, row_poss};
 use crate::registration::transform::linear_model::LinearModel;
@@ -34,12 +35,13 @@ fn pair(c: &mut Criterion) {
     group.throughput(Throughput::Elements(field.stars() as u64));
     group.bench_function(BenchmarkId::new("pair", field.name()), |b| {
         let pair = Pair::typical();
-        let config = RegistrationConfig::default();
+        let registrar = Registrar::new(RegistrationConfig::default());
+        let reference = registrar
+            .reference(pair.reference.clone())
+            .expect("the reference registers");
         b.iter(|| {
-            config
-                .registrar()
-                .expect("the default configuration is valid")
-                .register(&pair.reference, &pair.target)
+            reference
+                .register(&pair.target)
                 .expect("the pair registers")
         });
     });
@@ -101,21 +103,29 @@ impl Pair {
         Self { reference, target }
     }
 
-    /// The pair prepared under `config`, as `register` prepares it.
-    pub(super) fn prepared<'a>(&self, config: &'a RegistrationConfig) -> PreparedPair<'a> {
-        PreparedPair::new(config, &self.reference, &self.target).expect("the pair is valid")
+    /// `f` of the pair prepared under `config`, as `register` prepares it.
+    pub(super) fn with_prepared<R>(
+        &self,
+        config: RegistrationConfig,
+        f: impl FnOnce(&PreparedPair<'_>) -> R,
+    ) -> R {
+        let registrar = Registrar::new(config);
+        let reference = registrar
+            .reference(self.reference.clone())
+            .expect("the reference is valid");
+        f(&PreparedPair::new(&reference, &self.target).expect("the pair is valid"))
     }
 
     /// RANSAC's `transform` on the matches of the default configuration's brightest stars: the
     /// hypothesis the final fit starts from.
     pub(super) fn hypothesis(&self, transform: TransformType) -> Transform {
-        let config = RegistrationConfig::default();
-        let prepared = self.prepared(&config);
-        prepared
-            .search(&prepared.matches())
-            .hypothesis(transform)
-            .expect("the pair registers")
-            .transform
+        self.with_prepared(RegistrationConfig::default(), |prepared| {
+            prepared
+                .search(&prepared.matches())
+                .hypothesis(transform)
+                .expect("the pair registers")
+                .transform
+        })
     }
 
     /// `transform` under `correction`: the SIP correction the precise presets add is taken about
@@ -127,7 +137,10 @@ impl Pair {
                 LinearModel::try_from(transform).expect("a SIP correction sits under up to affine"),
                 SipModel {
                     order: SipConfig::default().order,
-                    origin: self.prepared(&RegistrationConfig::default()).origin(),
+                    origin: Registrar::new(RegistrationConfig::default())
+                        .reference(self.reference.clone())
+                        .expect("the reference is valid")
+                        .origin(),
                 },
             ),
         }
@@ -136,25 +149,27 @@ impl Pair {
     /// The similarity `register` fits to the pair: the dither, with the lens left in its residuals.
     pub(crate) fn similarity_warp(&self) -> WarpTransform {
         self.fit(self.model(TransformType::Similarity, Correction::Linear))
-            .warp
+            .result
+            .into_warp()
     }
 
     /// The warp `register` fits to the pair with the SIP correction the precise presets add: the
     /// dither and the lens together.
     pub(crate) fn sip_warp(&self) -> WarpTransform {
         self.fit(self.model(TransformType::Similarity, Correction::Sip))
-            .warp
+            .result
+            .into_warp()
     }
 
     /// `model` fitted as `register` fits it under the default configuration: RANSAC on the
     /// matches, then the final fit over the whole catalogues.
     pub(super) fn fit(&self, model: FitModel) -> FinalFit {
-        let config = RegistrationConfig::default();
-        let prepared = self.prepared(&config);
-        prepared
-            .search(&prepared.matches())
-            .estimate_and_refine(model)
-            .expect("the pair registers")
+        self.with_prepared(RegistrationConfig::default(), |prepared| {
+            prepared
+                .search(&prepared.matches())
+                .estimate_and_refine(model)
+                .expect("the pair registers")
+        })
     }
 }
 

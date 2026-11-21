@@ -120,7 +120,7 @@ pub enum FitsRefusal {
     /// [`FitsFloatScale::FullScale`](crate::FitsFloatScale::FullScale) that is not finite and
     /// positive.
     DeclaredFullScale {
-        scale: f32,
+        scale: f64,
     },
     /// A zero or non-finite `BSCALE`.
     UnusableBscale {

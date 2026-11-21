@@ -53,8 +53,8 @@ impl PlannedCombine {
             };
         [
             Stage {
-                kept,
-                held: PlannedNormalization {
+                kept_bytes: kept,
+                held_bytes: PlannedNormalization {
                     frame_count: count,
                     desc,
                     slots,
@@ -63,7 +63,7 @@ impl PlannedCombine {
                     threads: workers,
                 }
                 .heap_bytes(),
-                in_flight: 0,
+                in_flight_bytes: 0,
                 units: Units::Whole,
             },
             CombineCost {

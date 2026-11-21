@@ -182,7 +182,7 @@ fn a_window_holds_the_taps_within_the_stretched_radius() {
 fn the_stretch_is_the_largest_local_scale() {
     let size = USize2::new(200, 120);
     let stretch = |transform: Transform| {
-        let warp = WarpTransform::new(transform);
+        let warp = WarpTransform::from(transform);
         let kernel = WarpKernel::for_frame(Filter::Bilinear, &warp, size);
         kernel.stretch
     };
@@ -202,7 +202,7 @@ fn the_stretch_is_the_largest_local_scale() {
 
     let homography = Transform::homography([0.5, 0.0, 0.0, 0.0, 0.5, 0.0, -1e-3, -1e-3]);
     let corner = DVec2::new(199.0, 119.0);
-    let warp = WarpTransform::new(homography);
+    let warp = WarpTransform::from(homography);
     let at_corner = LocalGeometry::of(warp.jacobian(corner)).stretch[0];
     assert!(at_corner > 1.0, "{at_corner}");
     assert_eq!(stretch(homography), at_corner as f32);

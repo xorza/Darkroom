@@ -31,7 +31,8 @@ fn stars(poss: &[DVec2], sigma: f64) -> Vec<Star> {
 }
 
 fn idxs(fit: &FinalFit) -> Vec<(usize, usize)> {
-    fit.matches
+    fit.result
+        .matches()
         .iter()
         .map(|m| (m.idxs.reference, m.idxs.target))
         .collect()
@@ -66,7 +67,7 @@ fn a_seed_that_misses_stars_reaches_them_all() {
         .unwrap();
     assert_eq!(idxs(&fit), (0..50).map(|i| (i, i)).collect::<Vec<_>>());
     for p in [DVec2::ZERO, DVec2::new(2000.0, 0.0), DVec2::splat(2000.0)] {
-        assert!(fit.warp.transform.apply(p).distance(truth.apply(p)) < 1e-9);
+        assert!(fit.result.warp().linear().apply(p).distance(truth.apply(p)) < 1e-9);
     }
 }
 
@@ -104,9 +105,12 @@ fn pairs_weigh_by_their_variance() {
             3.0,
         )
         .unwrap();
-    let found = fit.warp.transform.translation_components();
+    let found = fit.result.warp().linear().translation_components();
     assert!((found - DVec2::new(5.0, 0.0)).length() < 1e-12, "{found}");
-    assert_eq!(fit.scale, 1.0);
+    assert_eq!(
+        fit.excess_variance, 0.0,
+        "the residuals' median is half a σ"
+    );
 }
 
 /// Saturated stars take no part, on either side, and a blend 2 px off its true place falls out at
@@ -138,7 +142,7 @@ fn saturated_stars_and_a_blend_take_no_part() {
         .collect();
     assert_eq!(idxs(&fit), expected);
     for p in [DVec2::ZERO, DVec2::splat(2000.0)] {
-        assert!(fit.warp.transform.apply(p).distance(truth.apply(p)) < 1e-9);
+        assert!(fit.result.warp().linear().apply(p).distance(truth.apply(p)) < 1e-9);
     }
 }
 
@@ -236,7 +240,7 @@ fn the_fit_reaches_the_cramer_rao_bound() {
             let fit = catalogs
                 .fit(truth, FitModel::Plain(TransformType::Similarity), 3.0)
                 .unwrap();
-            parameters(&fit.warp.transform)
+            parameters(&fit.result.warp().linear())
         })
         .collect();
 
@@ -311,4 +315,62 @@ fn the_homography_minimizes_the_reprojection_error() {
             );
         }
     }
+}
+
+/// A floor every pair shares adds to each pair's variance, so the best-measured stars stay: of 200
+/// stars, the first `bright` of σ 0.01 px and the rest of σ 0.1 px, every target moved by a further
+/// 0.03 px a axis the position σ does not state. With 40 bright, a scale fitted to the faint stars
+/// multiplied every variance by about 1.2 and gated out 12 of them; the excess variance keeps all
+/// 40, the gate at χ²₀.₉₉(2) dropping 4 faint pairs, its 1% tail's 2 and their scatter. The faint
+/// stars barely feel a floor a tenth of their σ, so the median that sets the excess is theirs and
+/// the excess is loose; with all 200 bright the floor dominates, and the excess reads 0.03² =
+/// 9e-4 px² to within the scatter of a median of 200 pairs, under 15%.
+#[test]
+fn a_floor_the_position_sigma_misses_keeps_the_bright_stars() {
+    let reference = StarScatter {
+        count: 200,
+        side: 2000.0,
+        seed: 7,
+    }
+    .poss();
+    let truth = rotation_about_centre(0.5, DVec2::new(12.0, -7.0));
+    let fit = |bright: usize| {
+        let mut rng = TestRng::new(11);
+        let mut noise = |sigma: f64| {
+            DVec2::new(
+                f64::from(rng.next_gaussian_f32()) * sigma,
+                f64::from(rng.next_gaussian_f32()) * sigma,
+            )
+        };
+        let (mut reference_stars, mut target_stars) = (Vec::new(), Vec::new());
+        for (idx, &pos) in reference.iter().enumerate() {
+            let sigma = if idx < bright { 0.01 } else { 0.1 };
+            reference_stars.push(Star {
+                pos_sigma: sigma,
+                ..Star::at(pos + noise(sigma))
+            });
+            target_stars.push(Star {
+                pos_sigma: sigma,
+                ..Star::at(truth.apply(pos) + noise(sigma) + noise(0.03))
+            });
+        }
+        FitCatalogs::new(&reference_stars, &target_stars)
+            .fit(truth, FitModel::Plain(TransformType::Euclidean), 3.0)
+            .unwrap()
+    };
+    let mixed = fit(40);
+    let kept_bright = mixed
+        .result
+        .matches()
+        .iter()
+        .filter(|star_match| star_match.idxs.reference < 40)
+        .count();
+    assert_eq!((kept_bright, mixed.result.matches().len()), (40, 196));
+    assert!(mixed.excess_variance > 0.0);
+    let bright = fit(200);
+    assert!(
+        (bright.excess_variance / 9e-4 - 1.0).abs() < 0.15,
+        "{}",
+        bright.excess_variance
+    );
 }

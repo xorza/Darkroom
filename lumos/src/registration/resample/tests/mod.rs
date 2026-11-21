@@ -34,10 +34,9 @@ fn signed_pixels(size: USize2, channels: usize) -> Vec<f32> {
 }
 
 #[test]
-fn translated_images_use_border_only_outside_source_footprint() {
+fn translated_images_read_zero_only_outside_source_footprint() {
     const WIDTH: usize = 8;
     const HEIGHT: usize = 6;
-    const BORDER: f32 = -7.0;
     const CONSTANT: f32 = 3.25;
     let desc = PlanarDesc::new((WIDTH, HEIGHT), ChannelLayout::Mono);
     let fixtures = [
@@ -54,18 +53,17 @@ fn translated_images_use_border_only_outside_source_footprint() {
         let image = LinearImage::from_interleaved(desc, pixels);
         for (translation, outside_x, inside_x) in [(-0.75, 0, 1), (0.75, WIDTH - 1, WIDTH - 2)] {
             let transform =
-                WarpTransform::new(Transform::translation(DVec2::new(translation, 0.0)));
+                WarpTransform::from(Transform::translation(DVec2::new(translation, 0.0)));
             for method in InterpolationMethod::ALL {
                 let result = WarpConfig {
                     method,
-                    border_value: BORDER,
                     ..Default::default()
                 }
                 .warp(&image, &transform);
                 let y = HEIGHT / 2;
                 assert_eq!(
                     result.image.channel(0)[(outside_x, y)],
-                    BORDER,
+                    0.0,
                     "{fixture_name} {method:?} translation {translation}"
                 );
                 assert_eq!(
@@ -126,10 +124,9 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
     // neighbours. On an exact integer shift the separable kernels are zero away from the centre and
     // nothing would spread at all.
     const CONSTANT: f32 = 3.25;
-    const BORDER: f32 = -7.0;
     let desc = PlanarDesc::new((16, 16), ChannelLayout::Mono);
     let fixture = NullFixture::new(desc, 8 * 16 + 8);
-    let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
+    let transform = WarpTransform::from(Transform::translation(DVec2::new(0.5, 0.5)));
 
     // Without the clamp, which would hide the control's fill under a negative lobe: the
     // positive lobes' mean it falls back to is the constant.
@@ -137,7 +134,6 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
     for method in InterpolationMethod::ALL {
         let params = WarpConfig {
             method,
-            border_value: BORDER,
             clamping_threshold: None,
         };
         let masked = params.warp(&fixture.declared, &transform);
@@ -156,7 +152,7 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
                     "{method:?} pixel {idx}: coverage {coverage}, value {value}"
                 );
             } else {
-                assert_eq!(value, BORDER, "{method:?} pixel {idx}");
+                assert_eq!(value, 0.0, "{method:?} pixel {idx}");
             }
             if coverage < plain.coverage.pixels()[idx] {
                 reduced += 1;
@@ -186,14 +182,13 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
     // resampler is not composing the mask through its kernel at all.
     let desc = PlanarDesc::new((16, 16), ChannelLayout::Mono);
     let fixture = NullFixture::new(desc, 8 * 16 + 8);
-    let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
+    let transform = WarpTransform::from(Transform::translation(DVec2::new(0.5, 0.5)));
 
     // Against the same frame without the null, so the frame's own edge band — where a half-pixel
     // shift already costs coverage — is not counted as the null's doing.
     let reduced = |method| {
         let params = WarpConfig {
             method,
-            border_value: 0.0,
             ..Default::default()
         };
         let masked = params.warp(&fixture.declared, &transform);
@@ -217,7 +212,6 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
 fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
     // Where every tap of the window is missing there is nothing to reconstruct from, and the pixel
     // has to read as uncovered rather than as a confident reading of the fill.
-    const BORDER: f32 = -7.0;
     let desc = PlanarDesc::new((24, 24), ChannelLayout::Mono);
     let mut nulls = vec![0.0f32; desc.pixel_count()];
     for y in 6..18 {
@@ -230,19 +224,18 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
 
     let result = WarpConfig {
         method: InterpolationMethod::Bilinear,
-        border_value: BORDER,
         ..Default::default()
     }
     .warp(
         &image,
-        &WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5))),
+        &WarpTransform::from(Transform::translation(DVec2::new(0.5, 0.5))),
     );
 
     // Well inside the block, past the kernel's reach from any valid pixel.
     let centre = 12 * 24 + 12;
     assert_eq!(result.coverage.pixels()[centre], 0.0);
     assert_eq!(result.confidence.pixels()[centre], 0.0);
-    assert_eq!(result.image.channel(0).pixels()[centre], BORDER);
+    assert_eq!(result.image.channel(0).pixels()[centre], 0.0);
 
     // And well outside it the frame is untouched, so the block cost only its own neighbourhood.
     let corner = 2 * 24 + 2;
@@ -250,21 +243,6 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
     assert_eq!(result.image.channel(0).pixels()[corner], 3.25);
 }
 
-#[test]
-#[should_panic(expected = "warp border_value must be finite")]
-fn warp_refuses_a_non_finite_border() {
-    // `WarpConfig::validate` is only reached through `RegistrationConfig::validate`, so a direct
-    // caller of the public `warp` could fill every out-of-footprint pixel with NaN and have it
-    // noticed only by a debug assert deep in the combine.
-    let image =
-        LinearImage::from_interleaved(PlanarDesc::new((4, 4), ChannelLayout::Mono), vec![0.5; 16]);
-    let transform = WarpTransform::new(Transform::translation(DVec2::new(1.0, 1.0)));
-    WarpConfig {
-        border_value: f32::NAN,
-        ..Default::default()
-    }
-    .warp(&image, &transform);
-}
 /// `warp_into` writes every plane in full, so buffers handed back dirty — NaN, or what the last
 /// frame left — come out bit for bit what a fresh `warp` gives: mono and RGB, without nulls and
 /// with them, for an affine model and a homography. The last frame flags other pixels — nulls and
@@ -274,8 +252,8 @@ fn warp_refuses_a_non_finite_border() {
 fn warp_into_overwrites_dirty_buffers_completely() {
     let size = USize2::new(20, 14);
     let transforms = [
-        WarpTransform::new(Transform::similarity(DVec2::new(1.5, -2.25), 0.05, 1.02)),
-        WarpTransform::new(Transform::homography([
+        WarpTransform::from(Transform::similarity(DVec2::new(1.5, -2.25), 0.05, 1.02)),
+        WarpTransform::from(Transform::homography([
             1.01, 0.02, -1.5, -0.01, 0.99, 2.0, 1e-3, -2e-3,
         ])),
     ];
@@ -308,7 +286,6 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                 for method in InterpolationMethod::ALL {
                     let params = WarpConfig {
                         method,
-                        border_value: -7.0,
                         ..Default::default()
                     };
                     let fresh = params.warp(image, transform);
@@ -375,11 +352,10 @@ fn an_rgb_warp_is_three_mono_warps() {
         PlanarDesc::new((size.width, size.height), ChannelLayout::Rgb),
         signed_pixels(size, 3),
     );
-    let transform = WarpTransform::new(Transform::euclidean(DVec2::new(3.0, -2.0), 0.0175));
+    let transform = WarpTransform::from(Transform::euclidean(DVec2::new(3.0, -2.0), 0.0175));
     for method in InterpolationMethod::ALL {
         let params = WarpConfig {
             method,
-            border_value: 0.0,
             ..Default::default()
         };
         let warped = params.warp(&rgb, &transform);
@@ -457,10 +433,9 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
         }));
         WarpConfig {
             method: InterpolationMethod::Lanczos3,
-            border_value: 0.0,
             ..Default::default()
         }
-        .warp(&image, &WarpTransform::new(Transform::translation(shift)))
+        .warp(&image, &WarpTransform::from(Transform::translation(shift)))
     };
     let half = DVec2::splat(0.5);
     let within = |x: usize, y: usize| (7..=12).contains(&x) && (7..=12).contains(&y);
@@ -560,7 +535,7 @@ fn a_warp_moves_the_flat_gain_with_the_pixels() {
     )))));
     let warped = WarpConfig::default().warp(
         &image,
-        &WarpTransform::new(Transform::translation(DVec2::new(4.0, 0.0))),
+        &WarpTransform::from(Transform::translation(DVec2::new(4.0, 0.0))),
     );
     let gain = warped.image.flat_gain().unwrap();
     for (x, expected) in [(0.0, 1.5), (4.0, 1.875)] {
@@ -583,7 +558,7 @@ fn only_the_nearest_pixel_keeps_the_quantization_step() {
         quantization_sigma: Some(0.25),
     };
     image.metadata.derived.set_mosaic_noise(Some(mosaic_noise));
-    let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.0)));
+    let transform = WarpTransform::from(Transform::translation(DVec2::new(0.5, 0.0)));
     for method in InterpolationMethod::ALL {
         let warped = WarpConfig::with_method(method).warp(&image, &transform);
         let expected = (method == InterpolationMethod::Nearest).then_some(0.25);

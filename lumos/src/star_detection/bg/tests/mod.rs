@@ -17,9 +17,7 @@ use crate::star_detection::detection_filter::Prefilter;
 use crate::star_detection::detection_plane::PlaneSpec;
 use crate::star_detection::refined_bg::RefinedBg;
 use crate::star_detection::resources::DetectionResources;
-use crate::star_detection::star_detection_config::bg_config::{
-    BgConfig, BgRefinement, IterativeRefinement,
-};
+use crate::star_detection::star_detection_config::bg_config::{BgConfig, IterativeRefinement};
 use common::USize2;
 
 /// The background and noise maps of `pixels` at `tile_size`.
@@ -254,7 +252,7 @@ fn refine_masks_the_stars_and_their_halos_out() {
     let refined = |iterations, mask_dilation| {
         let mut resources = DetectionResources::new(size);
         let config = BgConfig {
-            refinement: BgRefinement::Iterative(IterativeRefinement {
+            refinement: Some(IterativeRefinement {
                 iterations: NonZeroUsize::new(iterations).unwrap(),
                 mask_dilation,
                 mask_sigma: 4.0,

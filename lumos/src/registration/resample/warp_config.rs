@@ -69,13 +69,10 @@ impl ClampingThreshold {
 /// Configuration for inverse-mapped image resampling.
 #[derive(Debug, Clone, Copy)]
 pub struct WarpConfig {
-    /// Resampling kernel.
+    /// Resampling kernel. A position outside the closed source pixel footprint reads 0, its
+    /// coverage and confidence 0 and its flags `NO_DATA`, so nothing downstream reads its value;
+    /// one inside it with partial kernel support is reconstructed from real source pixels only.
     pub method: InterpolationMethod,
-    /// Fill for source positions outside the closed source pixel footprint.
-    ///
-    /// Positions inside the footprint with partial kernel support are reconstructed from real
-    /// source pixels only.
-    pub border_value: f32,
     /// The ringing clamp of a kernel with negative lobes (Bicubic and the Lanczos family), as
     /// PixInsight's: where the negative lobes take more than this share of what the positive lobes
     /// carry, their weight is cut back smoothly, and to nothing once they would cancel it. `None`
@@ -87,7 +84,6 @@ impl Default for WarpConfig {
     fn default() -> Self {
         Self {
             method: InterpolationMethod::default(),
-            border_value: 0.0,
             clamping_threshold: Some(ClampingThreshold::DEFAULT),
         }
     }
@@ -95,10 +91,13 @@ impl Default for WarpConfig {
 
 impl WarpConfig {
     /// `image` warped by `transform` onto the reference frame's grid, resampled by these
-    /// parameters.
+    /// parameters. An interpolating warp samples the source's surface brightness at each output
+    /// pixel and multiplies by no Jacobian: a star's flux scales with the transform's area, and a
+    /// frame registered at another plate scale keeps its sky level per pixel, as every stacker's
+    /// registration does.
     ///
-    /// Use `result.warp_transform()` to obtain the transform from a `RegistrationResult`, or
-    /// `WarpTransform::new(transform)` for a plain transform.
+    /// Use `result.warp()` to obtain the transform from a `RegistrationResult`, or
+    /// `WarpTransform::from(transform)` for a plain transform.
     ///
     /// The output has the same dimensions and metadata as `image`; every output pixel is produced
     /// by inverse-mapping, so no input pixels are carried over. Returns a [`WarpResult`] carrying
@@ -110,14 +109,12 @@ impl WarpConfig {
     /// # Example
     ///
     /// ```no_run
-    /// use lumos::{LinearImage, RegistrationConfig, Star, WarpConfig};
+    /// use lumos::{LinearImage, Registrar, RegistrationConfig, Star, WarpConfig};
     ///
     /// # fn example(ref_stars: &[Star], target_stars: &[Star], target_image: &LinearImage)
     /// # -> Result<(), Box<dyn std::error::Error>> {
-    /// let result = RegistrationConfig::default().registrar()?.register(ref_stars, target_stars)?;
-    /// let aligned = WarpConfig::default()
-    ///     .warp(target_image, result.warp_transform())
-    ///     .image;
+    /// let result = Registrar::new(RegistrationConfig::default()).register(ref_stars, target_stars)?;
+    /// let aligned = WarpConfig::default().warp(target_image, result.warp()).image;
     /// # Ok(())
     /// # }
     /// ```
@@ -129,11 +126,6 @@ impl WarpConfig {
         };
         result.warp_into(&SourceImage::of(image), warp, &WarpScratch::default());
         result
-    }
-
-    /// The border value is finite; the threshold is checked when it is made.
-    pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
-        ConfigField::new("warp border_value", self.border_value).finite()
     }
 }
 
@@ -182,7 +174,6 @@ mod tests {
     fn warp_params_defaults() {
         let default = WarpConfig::default();
         assert_eq!(default.method, InterpolationMethod::Lanczos3);
-        assert_eq!(default.border_value, 0.0);
         assert_eq!(default.clamping_threshold, Some(ClampingThreshold::DEFAULT));
         assert_eq!(ClampingThreshold::DEFAULT.get(), 0.3);
         // Both ends of the range are thresholds PixInsight accepts, and `None` is the clamp off;
@@ -193,25 +184,8 @@ mod tests {
                 "warp clamping_threshold"
             );
         }
-        for clamping_threshold in [
-            Some(ClampingThreshold::new(0.0).unwrap()),
-            Some(ClampingThreshold::new(1.0).unwrap()),
-            None,
-        ] {
-            WarpConfig {
-                clamping_threshold,
-                ..Default::default()
-            }
-            .validate()
-            .unwrap();
+        for threshold in [0.0, 1.0] {
+            assert_eq!(ClampingThreshold::new(threshold).unwrap().get(), threshold);
         }
-        let nan_border = WarpConfig {
-            border_value: f32::NAN,
-            ..Default::default()
-        };
-        assert_eq!(
-            nan_border.validate().unwrap_err().field,
-            "warp border_value"
-        );
     }
 }

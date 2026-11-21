@@ -5,9 +5,9 @@ pub(crate) mod coverage;
 pub(crate) mod fits;
 pub(crate) mod quality_planes;
 pub(crate) mod run_report;
-pub(crate) mod weight_kind;
+pub(crate) mod weight_plane;
 
-use common::par;
+use common::{Buffer2, par};
 use rayon::prelude::*;
 use std::path::Path;
 
@@ -22,7 +22,7 @@ use crate::io::load_ctx::LoadCtx;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::fits::error::ProductError;
 use crate::stack_product::run_report::RunReport;
-use crate::stack_product::weight_kind::WeightKind;
+use crate::stack_product::weight_plane::WeightPlane;
 
 /// A stacked science product, of a statistical combine or of a drizzle.
 ///
@@ -43,25 +43,21 @@ pub struct StackProduct {
     /// through a sliver of a drop reads 1.0 — which is what `weight` answers, and what drizzle's
     /// `min_weight_fraction` gates on, on the drops' own weight.
     pub coverage: Option<Coverage>,
-    /// WHT map: `Σwᵢ` over whatever formed the pixel.
+    /// WHT map: `Σwᵢ` over whatever formed the pixel, with what the frame weights were.
     ///
     /// The combine sums, per channel, each surviving frame's weight. `Equal` weighting gives unit
     /// frame weights, so the sum is the survivor count. `Noise` weighting gives each frame its
     /// inverse noise variance, not normalized, so where no warp averaged and no flat amplified the
-    /// samples the sum is the inverse variance of the mean. `Manual` weights are relative, and so
-    /// is the sum. A warp's confidence enters the variance, not the weight — see
+    /// samples the sum is the inverse variance of the mean. A warp's confidence enters the
+    /// variance, not the weight — see
     /// [`WarpResult`](crate::WarpResult). A drizzled frame's weight is multiplied by its drops'
     /// summed weight at the pixel: how much of its input pixels' flux landed there.
     ///
     /// At a mean pixel it is the denominator the image was divided by, under the same weights as
     /// [`Self::inverse_variance`]. A median pixel — of a median stack, or of the small-sample
     /// fallback — divided by nothing; it reads its samples' `Σwᵢ` all the same, which overstates
-    /// the median's precision by up to `π/2` under `Noise` weighting, and its inverse variance
-    /// reads 0.
-    pub weight: Option<QualityMap>,
-    /// What the frame weights [`Self::weight`] sums were: a count, an inverse variance or relative
-    /// weights. Stated whether the plane was asked for or not, as it is a fact of the combine.
-    pub weight_kind: WeightKind,
+    /// the median's precision by up to `π/2` under `Noise` weighting.
+    pub weight: Option<WeightPlane>,
     /// The inverse variance of each pixel's value, in the image's units to the power −2:
     /// `(Σwᵢ)² / Σwᵢ²·vᵢ` over the samples that formed it. A pixel nothing formed reads 0, no
     /// information, which is what an inverse-variance consumer gives it; a variance plane would
@@ -69,12 +65,18 @@ pub struct StackProduct {
     ///
     /// `vᵢ` is the sample's CCD noise model: the frame's measured background noise, plus the photon
     /// noise of the signal above the sky when the frame states its gain
-    /// ([`RunReport::variance_bg_only`] says when one did not), both scaled by the gain the
-    /// frame's flat applied at the sample — the read noise and dark current by its square — carried
-    /// through normalization and divided by the warp's confidence, or a drizzled frame's drops'
-    /// Kish size. The combine takes it at the combined value. Drizzle spreads one input pixel over
-    /// several output pixels, so its noise correlates between neighbours (Fruchter & Hook 2002):
-    /// this plane is each pixel's own variance, not their covariance.
+    /// ([`CombineReport::variance_bg_only`](crate::CombineReport::variance_bg_only) says when one
+    /// did not), both scaled by the gain the frame's flat applied at the sample — the read noise
+    /// and dark current by its square — carried through normalization and divided by the warp's
+    /// confidence, or a drizzled frame's drops' Kish size. The combine takes it at the combined
+    /// value. Drizzle spreads one input pixel over several output pixels, so its noise correlates
+    /// between neighbours (Fruchter & Hook 2002): this plane is each pixel's own variance, not
+    /// their covariance.
+    ///
+    /// A rejecting mean states the variance of the clipped mean: a clip in a band of σ chooses its
+    /// survivors from the data, which costs `1/tv` of their variance as fixed, `tv` a unit normal's
+    /// variance truncated to the band, 0.911 at ±2.5σ (Huber, *Robust Statistics*, §3.2). A pixel
+    /// the small-sample fallback took by its median states the Gaussian median's `n/(f(n)·v̄)`.
     ///
     /// Absent for median output, which has no exact variance.
     pub inverse_variance: Option<QualityMap>,
@@ -87,9 +89,10 @@ pub struct StackProduct {
     /// [`Self::inverse_variance`], whose reciprocal it estimates: where the two disagree beyond the
     /// scatter of a scatter, the noise model or the frames are off. A clip in a band of σ — sigma
     /// clip, winsorized, linear fit — leaves survivors that scatter as a Gaussian truncated to the
-    /// band, so their sum of squares is divided by that variance, 0.911 at ±2.5σ; trim and GESD cut
-    /// by rank and by test, and read below the frames' full scatter. NaN where fewer than two
-    /// samples survive.
+    /// band, `σ²·tv`, and its mean's variance is `1/tv` above theirs, so the sum of squares is
+    /// divided by `tv²`, as [`Self::inverse_variance`] states; trim and GESD cut by rank and by
+    /// test, and read below the variance of their mean. NaN where fewer than two samples survive,
+    /// and at a pixel the small-sample fallback took by its median.
     ///
     /// Absent for median output, and unless asked for.
     pub dispersion: Option<QualityMap>,
@@ -168,13 +171,25 @@ impl StackProduct {
             );
         }
         let unmeasured = PixelQuality::UNMEASURED;
+        let size = self.image.desc().size();
+        // A full coverage filled anywhere is full no longer: it becomes the plane it stood for.
+        if matches!(self.coverage, Some(Coverage::Full))
+            && (0..size.pixel_count()).any(|idx| (0..channels).all(|channel| empty(channel, idx)))
+        {
+            self.coverage = Some(Coverage::PerPixel(QualityMap::Shared(Buffer2::new_filled(
+                size, 1.0,
+            ))));
+        }
         let coverage = match &mut self.coverage {
             Some(Coverage::PerPixel(map)) => Some(map),
-            Some(Coverage::Uniform { .. }) | None => None,
+            Some(Coverage::Full) | None => None,
         };
         let maps = [
             (coverage, unmeasured.coverage),
-            (self.weight.as_mut(), unmeasured.weight),
+            (
+                self.weight.as_mut().map(|weight| &mut weight.map),
+                unmeasured.weight,
+            ),
             (self.inverse_variance.as_mut(), unmeasured.inverse_variance),
             (self.dispersion.as_mut(), unmeasured.dispersion),
         ];
@@ -245,7 +260,7 @@ mod tests {
     use crate::stack_product::StackProduct;
     use crate::stack_product::coverage::Coverage;
     use crate::stack_product::run_report::RunReport;
-    use crate::stack_product::weight_kind::WeightKind;
+    use crate::stack_product::weight_plane::{WeightKind, WeightPlane};
     use common::USize2;
 
     fn product(channels: usize, cfa_type: Option<CfaType>) -> StackProduct {
@@ -260,7 +275,6 @@ mod tests {
             image,
             coverage: None,
             weight: None,
-            weight_kind: WeightKind::Count,
             inverse_variance: None,
             dispersion: None,
             cfa_type,
@@ -306,7 +320,10 @@ mod tests {
                 (2, 1),
                 vec![1.0; 2],
             )))),
-            weight: Some(measured()),
+            weight: Some(WeightPlane {
+                map: measured(),
+                kind: WeightKind::Count,
+            }),
             inverse_variance: Some(measured()),
             dispersion: Some(measured()),
             ..product(3, None)
@@ -320,7 +337,10 @@ mod tests {
         for channel in 0..3 {
             let kept = if channel == 0 { None } else { Some(5.0) };
             let expect = |empty: f32| [kept.unwrap_or(empty), empty];
-            assert_eq!(plane(filled.weight.as_ref(), channel), expect(0.0));
+            assert_eq!(
+                plane(filled.weight.as_ref().map(|weight| &weight.map), channel),
+                expect(0.0)
+            );
             assert_eq!(
                 plane(filled.inverse_variance.as_ref(), channel),
                 expect(0.0)
@@ -339,16 +359,45 @@ mod tests {
         let mut one_pixel = product(3, None);
         one_pixel.fill_where(|channel, idx| idx == 1 && channel == 2, -1.0);
         assert_eq!(one_pixel.image.flags().unwrap().bytes(), &[0, no_data]);
+
+        // A full coverage stays full where no pixel is empty in every channel, and becomes its
+        // plane, 0 at the filled pixel, where one is.
+        let full = |empty: fn(usize, usize) -> bool| {
+            let mut product = StackProduct {
+                coverage: Some(Coverage::Full),
+                ..product(3, None)
+            };
+            product.fill_where(empty, -1.0);
+            product.coverage.unwrap()
+        };
+        assert!(matches!(full(|_, _| false), Coverage::Full));
+        assert!(matches!(
+            full(|channel, idx| idx == 1 && channel == 2),
+            Coverage::Full
+        ));
+        let filled = full(|_, idx| idx == 1);
+        assert_eq!(filled.per_pixel().unwrap().channel(0).pixels(), &[1.0, 0.0]);
     }
 
-    /// A uniform coverage becomes an image of its one value at its size.
+    /// A full coverage becomes an image of 1 at the size asked, and a measured one its planes.
     #[test]
-    fn uniform_coverage_becomes_a_filled_plane() {
-        let image = LinearImage::from(Coverage::Uniform {
-            value: 0.5,
-            size: USize2::new(3, 2),
-        });
+    fn a_coverage_becomes_its_image() {
+        let size = USize2::new(3, 2);
+        let image = Coverage::Full.into_image(size);
         assert_eq!(image.desc(), PlanarDesc::new((3, 2), ChannelLayout::Mono));
-        assert_eq!(image.channel(0).pixels(), &[0.5; 6]);
+        assert_eq!(image.channel(0).pixels(), &[1.0; 6]);
+        assert_eq!(Coverage::Full.to_plane(2, size).pixels(), &[1.0; 6]);
+        let measured = Coverage::PerPixel(QualityMap::Shared(Buffer2::new(
+            size,
+            vec![0.0, 0.5, 1.0, 1.0, 0.5, 0.0],
+        )));
+        assert_eq!(
+            measured.to_plane(1, size).pixels(),
+            &[0.0, 0.5, 1.0, 1.0, 0.5, 0.0]
+        );
+        assert_eq!(
+            measured.into_image(size).channel(0).pixels(),
+            &[0.0, 0.5, 1.0, 1.0, 0.5, 0.0]
+        );
     }
 }

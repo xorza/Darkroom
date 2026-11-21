@@ -104,7 +104,7 @@ fn mean_stack_reduces_noise_as_sqrt_n() {
     let stack = stack_frames(
         &sims,
         &StackConfig {
-            combine: Combine::mean(),
+            combine: Combine::Mean,
             weighting: Weighting::Equal,
             normalization: Normalization::None,
             ..StackConfig::light()
@@ -142,7 +142,7 @@ fn sigma_clip_rejects_injected_outliers_where_mean_is_contaminated() {
     let mean = stack_frames(
         &sims,
         &StackConfig {
-            combine: Combine::mean(),
+            combine: Combine::Mean,
             weighting: Weighting::Equal,
             normalization: Normalization::None,
             ..StackConfig::light()
@@ -244,7 +244,7 @@ fn all_rejection_methods_remove_outliers() {
         (
             "median",
             StackConfig {
-                combine: Combine::median(),
+                combine: Combine::Median,
                 weighting: Weighting::Equal,
                 normalization: Normalization::None,
                 ..StackConfig::light()
@@ -252,10 +252,13 @@ fn all_rejection_methods_remove_outliers() {
         ),
     ];
     for (name, config) in configs {
-        assert!(
-            !config.combine.small_n.falls_back(config.combine.method, n),
-            "{name} must run as configured"
-        );
+        if let Combine::RejectedMean {
+            small_n: Some(small_n),
+            ..
+        } = config.combine
+        {
+            assert!(!small_n.falls_back(n), "{name} must run as configured");
+        }
         let stacked = stack_frames(&sims, &config);
         for &(_, x, y) in &sites {
             let idx = y * W + x;
@@ -288,7 +291,7 @@ fn noise_weighting_beats_equal_on_mixed_quality_frames() {
         &sims,
         &StackConfig {
             weighting: Weighting::Equal,
-            combine: Combine::mean(),
+            combine: Combine::Mean,
             normalization: Normalization::None,
             ..StackConfig::light()
         },
@@ -297,7 +300,7 @@ fn noise_weighting_beats_equal_on_mixed_quality_frames() {
         &sims,
         &StackConfig {
             weighting: Weighting::Noise,
-            combine: Combine::mean(),
+            combine: Combine::Mean,
             normalization: Normalization::None,
             ..StackConfig::light()
         },
@@ -348,7 +351,7 @@ fn rejection_methods_preserve_clean_frames() {
         stack_frames(
             &sims,
             &StackConfig {
-                combine: Combine::mean(),
+                combine: Combine::Mean,
                 weighting: Weighting::Equal,
                 normalization: Normalization::None,
                 ..StackConfig::light()

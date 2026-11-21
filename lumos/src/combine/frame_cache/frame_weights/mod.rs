@@ -1,13 +1,10 @@
 //! [`FrameWeights`]: each frame's weight in the mean, per slot.
 
-use std::iter;
-
 use crate::combine::error::StackError;
 use crate::combine::frame_cache::normalized_stats::NormalizedStats;
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::frame::frame_stats::FrameStats;
-use crate::stack_product::weight_kind::WeightKind;
 
 /// Each frame's weight per slot, not normalized.
 ///
@@ -15,13 +12,12 @@ use crate::stack_product::weight_kind::WeightKind;
 /// and `gain` its normalization: the inverse variance of the frame as combined. So where no warp
 /// averaged and no flat amplified the samples the weight plane, `Σwᵢ` over the survivors, is the
 /// inverse variance of their mean. Per slot, because a frame with a bad blue channel is noisier in
-/// blue only. Manual weights are relative and the same in every slot.
+/// blue only.
 #[derive(Debug)]
 pub(crate) struct FrameWeights {
     slots: Slots,
     /// Frame-major, `slots.count()` per frame.
     values: Vec<f32>,
-    kind: WeightKind,
 }
 
 impl FrameWeights {
@@ -31,7 +27,7 @@ impl FrameWeights {
     /// [`StackError::NoNoiseToWeigh`] when noise weighting meets a frame with no measured noise in
     /// a slot.
     pub(crate) fn resolve<'a>(
-        weighting: &Weighting,
+        weighting: Weighting,
         frames: NormalizedStats<'a, impl IntoIterator<Item = &'a FrameStats>>,
     ) -> Result<Option<Self>, StackError> {
         let NormalizedStats {
@@ -39,15 +35,8 @@ impl FrameWeights {
             norms: frame_norms,
             slots,
         } = frames;
-        let (values, kind) = match weighting {
-            Weighting::Equal => return Ok(None),
-            Weighting::Manual(weights) => (
-                weights
-                    .iter()
-                    .flat_map(|&weight| iter::repeat_n(weight, slots.count()))
-                    .collect(),
-                WeightKind::Relative,
-            ),
+        match weighting {
+            Weighting::Equal => Ok(None),
             Weighting::Noise => {
                 let mut values = Vec::new();
                 for (idx, stats) in stats.into_iter().enumerate() {
@@ -63,24 +52,36 @@ impl FrameWeights {
                         values.push(weight);
                     }
                 }
-                (values, WeightKind::InverseVariance)
+                Ok(Some(Self { slots, values }))
             }
-        };
-        Ok(Some(Self {
-            slots,
-            values,
-            kind,
-        }))
-    }
-
-    /// What the weights are: an inverse variance, or relative.
-    pub(crate) const fn kind(&self) -> WeightKind {
-        self.kind
+        }
     }
 
     pub(crate) fn weight(&self, frame: usize, slot: usize) -> f32 {
         debug_assert!(slot < self.slots.count());
         self.values[frame * self.slots.count() + slot]
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use std::iter;
+
+    use crate::combine::frame_cache::frame_weights::FrameWeights;
+    use crate::combine::frame_read::slots::Slots;
+
+    impl FrameWeights {
+        /// `weights`, one a frame and the same in each of `slots`: what a test of the gather sets
+        /// apart from any noise.
+        pub(crate) fn of_frames(weights: &[f32], slots: Slots) -> Self {
+            Self {
+                slots,
+                values: weights
+                    .iter()
+                    .flat_map(|&weight| iter::repeat_n(weight, slots.count()))
+                    .collect(),
+            }
+        }
     }
 }
 

@@ -1,9 +1,10 @@
 //! [`IngestRun`]: one run's memory reading, decode policy, storage and progress, taken once at its
 //! entry.
 
+use std::num::NonZeroUsize;
+
 use common::{SystemMemory, par};
 
-use crate::frame_store::storage_params::StorageParams;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_ctx::LoadCtx;
 use crate::memory::budget::Budget;
@@ -14,39 +15,36 @@ use crate::progress::progress_monitor::ProgressMonitor;
 /// passed to every stage, so the tier decision, the chunk sizes, the FITS policy, the place a spill
 /// goes and the place progress goes cannot disagree.
 #[derive(Debug, Clone)]
-pub(crate) struct IngestRun {
+pub(crate) struct IngestRun<'a> {
+    /// Where the run writes, and whether it keeps its decodes.
+    pub(crate) config: &'a IngestConfig,
     pub(crate) budget: Budget,
-    /// The run's FITS policy, null policy and cancel token.
+    /// The config's decode policy, the run's cancel token, and each decode's share of the workers.
     pub(crate) ctx: LoadCtx,
-    pub(crate) storage: StorageParams,
     pub(crate) progress: ProgressCallback,
 }
 
-impl IngestRun {
+impl<'a> IngestRun<'a> {
     /// A run planned for the caller's override when it gave one, else the available memory the
     /// system reports now, on every thread of the pool. Several stacks run side by side each read
     /// the whole system figure; a caller that runs them so divides it through the override.
-    pub(crate) fn new(config: &IngestConfig, monitor: ProgressMonitor) -> Self {
+    pub(crate) fn new(config: &'a IngestConfig, monitor: ProgressMonitor) -> Self {
         let memory = config
             .memory_override
             .unwrap_or_else(SystemMemory::available);
         Self::of(Budget::of_memory(memory, par::threads()), config, monitor)
     }
 
-    fn of(budget: Budget, config: &IngestConfig, monitor: ProgressMonitor) -> Self {
+    fn of(budget: Budget, config: &'a IngestConfig, monitor: ProgressMonitor) -> Self {
         let ProgressMonitor { progress, cancel } = monitor;
         Self {
+            config,
             budget,
             ctx: LoadCtx {
+                decode: config.decode.clone(),
                 cancel,
-                fits: config.fits.clone(),
-                nulls: config.nulls,
-                xtrans_passes: config.xtrans_passes,
-                decode_threads: budget.workers(),
-            },
-            storage: StorageParams {
-                cache_dir: config.cache_dir.clone(),
-                keep_cache: config.keep_cache,
+                decode_threads: NonZeroUsize::new(budget.workers())
+                    .expect("a budget has a worker at least"),
             },
             progress,
         }
@@ -73,9 +71,9 @@ pub(crate) mod internals {
     use crate::memory::budget::Budget;
     use crate::progress::progress_monitor::ProgressMonitor;
 
-    impl IngestRun {
+    impl<'a> IngestRun<'a> {
         /// A run planned against `memory` rather than the system's reading, under `config`.
-        pub(crate) fn planned(memory: u64, config: &IngestConfig) -> Self {
+        pub(crate) fn planned(memory: u64, config: &'a IngestConfig) -> Self {
             Self::of(
                 Budget::of_memory(memory, par::threads()),
                 config,
@@ -121,7 +119,7 @@ mod tests {
             keep_cache: true,
             ..IngestConfig::with_cache_dir("cache".into())
         };
-        config.nulls = NullPolicy::Reject;
+        config.decode.nulls = NullPolicy::Reject;
         let run = IngestRun::of(
             Budget::of_memory(100, 3),
             &config,
@@ -130,7 +128,7 @@ mod tests {
         assert_eq!(run.budget, Budget::new(75, 3));
         let overridden = IngestConfig {
             memory_override: Some(100),
-            ..config
+            ..config.clone()
         };
         assert_eq!(
             IngestRun::new(&overridden, ProgressMonitor::unattended())
@@ -138,10 +136,10 @@ mod tests {
                 .usable(),
             75
         );
-        assert_eq!(run.ctx.decode_threads, 3);
-        assert_eq!(run.ctx.nulls, NullPolicy::Reject);
-        assert_eq!(run.storage.cache_dir, Path::new("cache"));
-        assert!(run.storage.keep_cache);
+        assert_eq!(run.ctx.decode_threads.get(), 3);
+        assert_eq!(run.ctx.decode.nulls, NullPolicy::Reject);
+        assert_eq!(run.config.cache_dir, Path::new("cache"));
+        assert!(run.config.keep_cache);
 
         assert!(!run.ctx.cancel.is_cancelled());
         cancel.cancel();

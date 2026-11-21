@@ -6,17 +6,21 @@ use common::{Buffer2, CancelToken, TempDir, par};
 use glam::{DVec2, Vec2};
 use imaginarium::{ChannelLayout, PlanarDesc, RasterFormat};
 
-use crate::combine::error::StackConfigError;
+use crate::combine::error::StackError;
+use crate::combine::frame_cache::FrameCache;
 use crate::combine::frame_cache::core::CacheCore;
+use crate::combine::frame_cache::frame_weights::FrameWeights;
+use crate::combine::frame_cache::normalized_stats::NormalizedStats;
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::Normalization;
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::rejection_scale::RejectionScale;
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
-use crate::combine::rejection::trim_config::TrimConfig;
-use crate::combine::stack::*;
+use crate::combine::rejection::trim_config::{TrimBounds, TrimConfig};
 use crate::combine::stack_config::StackConfig;
-use crate::combine::stack_config::small_n::SmallN;
+use crate::combine::stack_config::combine::Combine;
+use crate::combine::stack_config::small_n::{Fallback, SmallN};
+use crate::combine::stack_config::weighting::Weighting;
 use crate::combine::stack_frame::StackFrame;
 use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::FrameQuality;
@@ -34,6 +38,7 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flags::quality_map::QualityMap;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
+
 use crate::image::linear_image::LinearImage;
 use crate::image::metadata::bg_split::BgSplit;
 use crate::image::metadata::image_provenance::{
@@ -42,7 +47,6 @@ use crate::image::metadata::image_provenance::{
 };
 use crate::image::metadata::mosaic_noise::MosaicNoise;
 use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals;
@@ -52,13 +56,16 @@ use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField};
 use crate::internals::test_rng::TestRng;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
+use crate::math::statistics::median_variance::median_variance_factor;
 use crate::memory::budget::Budget;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use crate::stack_product::weight_kind::WeightKind;
+use crate::stack_product::StackProduct;
+use crate::stack_product::quality_planes::QualityPlanes;
+use crate::stack_product::weight_plane::WeightKind;
 use common::USize2;
 
 /// The combine, with no progress reported and no cancel.
@@ -113,20 +120,20 @@ fn a_master_states_the_largest_step_of_its_inputs() {
     let stated = |pixels: Vec<Vec<f32>>, sigmas: &[f32], config: StackConfig| {
         let cache = make_cfa_stack_cache(pixels, sigmas, config.normalization);
         let product = config
-            .run_stacking(&cache)
+            .combine(&cache)
             .expect("this cache is never cancelled");
         product.image.metadata.derived.quantization_sigma()
     };
-    let mean = |rejection| Combine {
-        method: CombineMethod::Mean(rejection),
-        small_n: SmallN::none(),
+    let mean = |rejection| Combine::RejectedMean {
+        rejection,
+        small_n: None,
     };
     let normalized = stated(
         vec![vec![0.4; 2], vec![0.2; 2]],
         &[0.01, 0.02],
         StackConfig {
-            combine: mean(Rejection::None),
-            weighting: Weighting::Manual(vec![0.25, 0.75]),
+            combine: Combine::Mean,
+            weighting: Weighting::Equal,
             normalization: Normalization::Multiplicative,
             ..StackConfig::light()
         },
@@ -141,7 +148,7 @@ fn a_master_states_the_largest_step_of_its_inputs() {
     let median = stated(
         vec![vec![0.3; 2], vec![0.4; 2], vec![0.5; 2]],
         &[0.01; 3],
-        equal(Combine::median()),
+        equal(Combine::Median),
     );
     assert_eq!(median, Some(0.01));
     let winsorized = stated(
@@ -202,6 +209,16 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                         |_| false,
                     )))));
                 }
+                // One frame flags a saturated pixel, which the combine leaves out and tallies.
+                if f == 1 {
+                    image.set_flags(PixelFlags::from_fn(desc.size(), |idx| {
+                        if idx == 5 {
+                            QualityFlags::SATURATED
+                        } else {
+                            QualityFlags::default()
+                        }
+                    }));
+                }
                 // Every other frame gets a partial coverage map (warped-border emulation).
                 let quality = if f.is_multiple_of(2) {
                     let mut coverage = Buffer2::new_filled((w, h), 1.0f32);
@@ -254,19 +271,29 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     .unwrap()
             };
             let disk = spilled(1 << 30);
-            assert_eq!(disk.report.overcommit_bytes, 0, "{label}");
+            assert_eq!(disk.report.memory.overcommit_bytes, 0, "{label}");
+            assert_eq!(
+                ram.report
+                    .combine
+                    .excluded_samples
+                    .count(QualityFlags::SATURATED),
+                channels as u64,
+                "{label}: the flagged pixel is left out in each channel"
+            );
+            assert_eq!(ram.report.combine, disk.report.combine, "{label}");
             // With no memory at all the floor of 64 rows holds past the budget the resident image,
             // weight and inverse variance planes, the coverage plane the gather writes and the
             // flag byte a pixel no frame reached is flagged in, 24 × 150 × (12c + 5) B, beside two
             // chunks — the one reduced and the next one read — of 64 rows of every channel of the
-            // 12 frames and the six coverage-and-confidence pairs, 2 × 24 × 64 × (48c + 48) B; the
-            // four flat gain grids are read where they are mapped, in no chunk: 190 656c +
-            // 165 456 B in all, and a combine scratch for the 12 frames on each worker of the
+            // 12 frames and the six coverage-and-confidence pairs, 2 × 24 × 64 × (48c + 48) B, and
+            // of the one frame's flags, 2 × 24 × 64 B; the four flat gain grids are read where they
+            // are mapped, in no chunk: 190 656c + 168 528 B in all, and a combine scratch for the 12 frames on each worker of the
             // pool, 62 × 12 + 8 × 12² + 8 = 1904 B. The stack is the same.
             let starved = spilled(0);
+            assert_eq!(ram.report.combine, starved.report.combine, "{label}");
             assert_eq!(
-                starved.report.overcommit_bytes,
-                190_656 * channels as u64 + 165_456 + par::threads() as u64 * 1904,
+                starved.report.memory.overcommit_bytes,
+                190_656 * channels as u64 + 168_528 + par::threads() as u64 * 1904,
                 "{label}"
             );
             for channel in 0..channels {
@@ -279,8 +306,19 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
 
             let bits = |plane: &Buffer2<f32>| bits(plane.pixels());
             assert_eq!(
-                bits(&ram.coverage.as_ref().unwrap().to_plane(0)),
-                bits(&disk.coverage.as_ref().unwrap().to_plane(0)),
+                bits(
+                    &ram.coverage
+                        .as_ref()
+                        .unwrap()
+                        .to_plane(0, ram.image.desc().size())
+                ),
+                bits(
+                    &disk
+                        .coverage
+                        .as_ref()
+                        .unwrap()
+                        .to_plane(0, disk.image.desc().size())
+                ),
                 "{label}: coverage differs"
             );
             let ram_variance = ram.inverse_variance.as_ref().unwrap();
@@ -292,8 +330,8 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     "{label}: stacked channel {channel} differs"
                 );
                 assert_eq!(
-                    bits(ram.weight.as_ref().unwrap().channel(channel)),
-                    bits(disk.weight.as_ref().unwrap().channel(channel)),
+                    bits(ram.weight.as_ref().unwrap().map.channel(channel)),
+                    bits(disk.weight.as_ref().unwrap().map.channel(channel)),
                     "{label}: weight channel {channel} differs"
                 );
                 assert_eq!(
@@ -307,7 +345,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
 }
 
 fn source_stats(cache: &FrameCache) -> impl Iterator<Item = &FrameStats> {
-    cache.frames.iter().map(|frame| &frame.source_stats)
+    cache.frames.iter().map(|frame| &frame.admitted.stats)
 }
 
 #[test]
@@ -363,25 +401,6 @@ fn stack_rejects_invalid_config_before_loading() {
         PathBuf::from("/c.fits"),
     ];
     let error = (StackConfig {
-        weighting: Weighting::Manual(vec![1.0, 2.0]),
-        normalization: Normalization::None,
-        ..StackConfig::light()
-    })
-    .stack_paths(
-        &paths,
-        &IngestConfig::default(),
-        ProgressMonitor::unattended(),
-    )
-    .unwrap_err();
-    assert!(matches!(
-        error,
-        StackError::Config(StackConfigError::ManualWeightCountMismatch {
-            expected: 3,
-            actual: 2,
-        })
-    ));
-
-    let error = (StackConfig {
         combine: Combine::sigma_clip(-1.0),
         weighting: Weighting::Equal,
         normalization: Normalization::None,
@@ -395,7 +414,7 @@ fn stack_rejects_invalid_config_before_loading() {
     .unwrap_err();
     assert!(matches!(
         error,
-        StackError::Config(StackConfigError::Field(invalid))
+        StackError::Config(invalid)
             if invalid.field == "sigma.low" && invalid.value == -1.0
     ));
 }
@@ -410,7 +429,7 @@ fn stack_images_in_memory_mean() {
         LinearImage::from_interleaved(desc, vec![30.0; 16]),
     ];
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         weighting: Weighting::Equal,
         normalization: Normalization::None,
         ..StackConfig::light()
@@ -437,7 +456,7 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
         StackFrame::from(image)
     };
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         normalization: Normalization::None,
         weighting: Weighting::Equal,
         ..StackConfig::light()
@@ -544,7 +563,7 @@ fn normalization_fits_a_masked_set_over_the_pixels_they_all_reached() {
         &[&[f32::NAN, f32::NAN, 0.0, 0.0, 0.0, 0.0]],
     ));
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         normalization: Normalization::Multiplicative,
         weighting: Weighting::Equal,
         ..StackConfig::light()
@@ -966,7 +985,7 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
             },
         )],
         &StackConfig {
-            combine: Combine::mean(),
+            combine: Combine::Mean,
             normalization: Normalization::None,
             weighting: Weighting::Equal,
             ..StackConfig::light()
@@ -994,7 +1013,7 @@ fn stack_images_rejects_each_nonfinite_sample_class_with_location() {
         let error = combine(
             vec![finite.clone().into(), invalid.into()],
             &StackConfig {
-                combine: Combine::mean(),
+                combine: Combine::Mean,
                 weighting: Weighting::Equal,
                 normalization: Normalization::None,
                 ..StackConfig::light()
@@ -1027,10 +1046,7 @@ fn cancelled_combine_reports_cancellation_from_either_exit() {
     // itself rather than the loader's own cancellation check.
     let desc = PlanarDesc::new((2, 1), ChannelLayout::Mono);
     let config = StackConfig {
-        combine: Combine {
-            method: CombineMethod::Mean(Rejection::None),
-            small_n: SmallN::none(),
-        },
+        combine: Combine::Mean,
         normalization: Normalization::None,
         weighting: Weighting::Equal,
         ..StackConfig::light()
@@ -1053,14 +1069,14 @@ fn cancelled_combine_reports_cancellation_from_either_exit() {
         // Uncancelled, the same cache and config produce a product — so the error below is
         // the token talking, not a combine that could never have succeeded.
         config
-            .run_stacking(&cache)
+            .combine(&cache)
             .expect("an uncancelled combine produces a product");
 
         let cancel = CancelToken::new();
         cancel.cancel();
         cache.core.monitor.cancel = cancel;
         assert!(matches!(
-            config.run_stacking(&cache).unwrap_err(),
+            config.combine(&cache).unwrap_err(),
             StackError::Cancelled
         ));
     }
@@ -1098,7 +1114,7 @@ fn cancelled_stack_returns_cancelled_error() {
 fn coverage_decides_which_frames_reach_each_pixel() {
     let desc = PlanarDesc::new((2, 1), ChannelLayout::Mono);
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         normalization: Normalization::None,
         weighting: Weighting::Equal,
         ..StackConfig::light()
@@ -1126,11 +1142,16 @@ fn coverage_decides_which_frames_reach_each_pixel() {
     .unwrap();
     assert_eq!(product.image.channel(0).pixels(), &[20.0, 10.0]);
     assert_eq!(
-        product.coverage.as_ref().unwrap().to_plane(0).pixels(),
+        product
+            .coverage
+            .as_ref()
+            .unwrap()
+            .to_plane(0, product.image.desc().size())
+            .pixels(),
         &[1.0, 2.0 / 3.0]
     );
     assert_eq!(
-        product.weight.as_ref().unwrap().channel(0).pixels(),
+        product.weight.as_ref().unwrap().map.channel(0).pixels(),
         &[3.0, 2.0]
     );
     assert_eq!(
@@ -1146,7 +1167,12 @@ fn coverage_decides_which_frames_reach_each_pixel() {
     let alone = combine(vec![covered(10.0, [1.0, 0.0])], &config).unwrap();
     assert_eq!(alone.image.channel(0).pixels(), &[10.0, 0.0]);
     assert_eq!(
-        alone.coverage.as_ref().unwrap().to_plane(0).pixels(),
+        alone
+            .coverage
+            .as_ref()
+            .unwrap()
+            .to_plane(0, alone.image.desc().size())
+            .pixels(),
         &[1.0, 0.0]
     );
     // The uncovered pixel holds no information, not an exact value.
@@ -1214,7 +1240,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
 
         // σ, its gain, square, inverse, the sum and the quotient: 7 f32 roundings, 4ε relative.
         let weights = FrameWeights::resolve(
-            &Weighting::Noise,
+            Weighting::Noise,
             NormalizedStats {
                 stats: source_stats(cache),
                 norms: Some(norms),
@@ -1235,16 +1261,16 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
     }
 
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         weighting: Weighting::Noise,
         normalization: Normalization::Multiplicative,
         ..StackConfig::light()
     };
     let first = config
-        .run_stacking(&caches[0])
+        .combine(&caches[0])
         .expect("this cache is never cancelled");
     let second = config
-        .run_stacking(&caches[1])
+        .combine(&caches[1])
         .expect("this cache is never cancelled");
     assert_eq!(
         first.image.channel(0).pixels(),
@@ -1260,7 +1286,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
         );
     }
     assert_eq!(first.image.channel(0).pixels()[4..6], [0.0, 0.0]);
-    assert_eq!(first.weight_kind, WeightKind::InverseVariance);
+    assert_eq!(first.weight.unwrap().kind, WeightKind::InverseVariance);
 }
 
 /// Two warped frames that share no pixel cannot be normalized, but combine without it: each
@@ -1323,7 +1349,7 @@ fn confidence_scales_a_samples_noise_rather_than_its_weight() {
     let a = LinearImage::from_interleaved(desc, vec![10.0, 10.0]);
     let b = LinearImage::from_interleaved(desc, vec![20.0, 20.0]);
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         normalization: Normalization::None,
         weighting: Weighting::Equal,
         ..StackConfig::light()
@@ -1353,11 +1379,16 @@ fn confidence_scales_a_samples_noise_rather_than_its_weight() {
     let product = combine(frames, &config).unwrap();
     assert_eq!(product.image.channel(0).pixels(), &[15.0, 10.0]);
     assert_eq!(
-        product.coverage.as_ref().unwrap().to_plane(0).pixels(),
+        product
+            .coverage
+            .as_ref()
+            .unwrap()
+            .to_plane(0, product.image.desc().size())
+            .pixels(),
         &[1.0, 0.5]
     );
     assert_eq!(
-        product.weight.as_ref().unwrap().channel(0).pixels(),
+        product.weight.as_ref().unwrap().map.channel(0).pixels(),
         &[2.0, 1.0]
     );
     assert_eq!(
@@ -1379,9 +1410,9 @@ fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
     let desc = PlanarDesc::new((24, 20), ChannelLayout::Mono);
     let expected = -0.7;
     let source = LinearImage::from_interleaved(desc, vec![expected; desc.pixel_count()]);
-    let transform = WarpTransform::new(Transform::translation(DVec2::new(-2.37, 1.43)));
+    let transform = WarpTransform::from(Transform::translation(DVec2::new(-2.37, 1.43)));
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         normalization: Normalization::None,
         weighting: Weighting::Equal,
         ..StackConfig::light()
@@ -1455,7 +1486,7 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     let params = WarpConfig::with_method(InterpolationMethod::Bilinear);
     let warped_b = params.warp(
         &b,
-        &WarpTransform::new(Transform::translation(DVec2::new(1.0, 0.0))),
+        &WarpTransform::from(Transform::translation(DVec2::new(1.0, 0.0))),
     );
     let cache = FrameCache::from_stack_frames(
         vec![StackFrame::from(a), StackFrame::registered(&b, warped_b)],
@@ -1507,13 +1538,13 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
     let frames = vec![
         StackFrame::registered(
             &source,
-            params.warp(&source, &WarpTransform::new(Transform::identity())),
+            params.warp(&source, &WarpTransform::from(Transform::identity())),
         ),
         StackFrame::registered(
             &source,
             params.warp(
                 &source,
-                &WarpTransform::new(Transform::translation(DVec2::splat(0.5))),
+                &WarpTransform::from(Transform::translation(DVec2::splat(0.5))),
             ),
         ),
     ];
@@ -1521,7 +1552,7 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
         FrameCache::from_stack_frames(frames, Normalization::None, ProgressMonitor::unattended())
             .unwrap();
     let weights = FrameWeights::resolve(
-        &Weighting::Noise,
+        Weighting::Noise,
         NormalizedStats {
             stats: source_stats(&cache),
             norms: None,
@@ -1549,18 +1580,15 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
     let sigma_squared = source_stats(&cache).next().unwrap().ccd_noise(0).at(1.0).bg;
 
     let product = StackConfig {
-        combine: Combine {
-            method: CombineMethod::Mean(Rejection::None),
-            small_n: SmallN::none(),
-        },
+        combine: Combine::Mean,
         weighting: Weighting::Noise,
         normalization: Normalization::None,
         ..StackConfig::light()
     }
-    .run_stacking(&cache)
+    .combine(&cache)
     .expect("this cache is never cancelled");
     assert_eq!(
-        product.weight.as_ref().unwrap().channel(0)[pixel],
+        product.weight.as_ref().unwrap().map.channel(0)[pixel],
         2.0 * base_weights[0]
     );
     let expected = 1.0 / (0.3125 * sigma_squared);
@@ -1571,26 +1599,24 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
     );
 }
 
-/// A clipped pixel's dispersion reads the frames' full scatter: its survivors scatter as a Gaussian
-/// truncated to the band, so the sum of squares is divided by that variance, 0.9733369 at ±3σ.
-/// Six frames at 0, 1, …, 5 lie within ±3 of the MAD σ, 2.645, about 2.5, so nothing is clipped:
-/// the uncorrected dispersion is Σ(x − x̄)² / ((n − 1)·n) = 17.5 / 30, and the clip's is that
-/// times 1.0273935. A plain mean cuts nothing, and three frames, as many as `min_survivors`, are
-/// never clipped: both keep the uncorrected figure, 1/3 for 0, 1, 2.
+/// A clipped pixel's dispersion reads the variance of the clipped mean: its survivors scatter as a
+/// Gaussian truncated to the band, `σ²·tv`, and choosing them from the data costs `1/tv` more, so
+/// the sum of squares is divided by `tv²`, `tv` = 0.9733369 at ±3σ. Six frames at 0, 1, …, 5 lie
+/// within ±3 of the MAD σ, 2.645, about 2.5, so nothing is clipped: the uncorrected dispersion is
+/// Σ(x − x̄)² / ((n − 1)·n) = 17.5 / 30, and the clip's is that times 1.0555373. A plain mean cuts
+/// nothing, and three frames, as many as `min_survivors`, are never clipped: both keep the
+/// uncorrected figure, 1/3 for 0, 1, 2.
 #[test]
 fn a_clipped_pixels_dispersion_reads_the_full_scatter() {
     let desc = PlanarDesc::new((1, 1), ChannelLayout::Mono);
-    let dispersion = |count: usize, rejection: Rejection| {
+    let dispersion = |count: usize, method: Combine| {
         let frames = (0..count)
             .map(|i| StackFrame::from(LinearImage::from_interleaved(desc, vec![i as f32])))
             .collect();
         let stacked = combine(
             frames,
             &StackConfig {
-                combine: Combine {
-                    method: CombineMethod::Mean(rejection),
-                    small_n: SmallN::none(),
-                },
+                combine: method,
                 quality: QualityPlanes::ALL,
                 weighting: Weighting::Equal,
                 normalization: Normalization::None,
@@ -1601,11 +1627,15 @@ fn a_clipped_pixels_dispersion_reads_the_full_scatter() {
         f64::from(stacked.dispersion.unwrap().channel(0)[0])
     };
     let full = 17.5 / 30.0;
-    let clipped = dispersion(6, Rejection::sigma_clip(3.0));
-    let expected = full * 1.027_393_469_477_902;
+    let clip = Combine::RejectedMean {
+        rejection: Rejection::sigma_clip(3.0),
+        small_n: None,
+    };
+    let clipped = dispersion(6, clip);
+    let expected = full * 1.055_537_341_125_841;
     assert!((clipped - expected).abs() <= 1e-6 * expected, "{clipped}");
-    assert!((dispersion(6, Rejection::None) - full).abs() <= 1e-6 * full);
-    assert!((dispersion(3, Rejection::sigma_clip(3.0)) - 1.0 / 3.0).abs() <= 1e-6);
+    assert!((dispersion(6, Combine::Mean) - full).abs() <= 1e-6 * full);
+    assert!((dispersion(3, clip) - 1.0 / 3.0).abs() <= 1e-6);
 }
 
 #[test]
@@ -1627,7 +1657,7 @@ fn requested_planes_decide_what_the_combine_allocates() {
 
     // A mean asked for everything gets everything.
     let all = stack(StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         quality: QualityPlanes::ALL,
         weighting: Weighting::Equal,
         normalization: Normalization::None,
@@ -1640,7 +1670,7 @@ fn requested_planes_decide_what_the_combine_allocates() {
 
     // The default asks for the standard planes, which leave out the dispersion.
     let standard = stack(StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         weighting: Weighting::Equal,
         normalization: Normalization::None,
         ..StackConfig::light()
@@ -1651,18 +1681,18 @@ fn requested_planes_decide_what_the_combine_allocates() {
     // request asked for it — and is never allocated, not allocated and cleared. It weighs no
     // frame, whatever the weighting, so its weight is a count.
     let median = stack(StackConfig {
-        combine: Combine {
-            method: CombineMethod::Median,
-            small_n: SmallN::none(),
-        },
+        combine: Combine::Median,
         quality: QualityPlanes::ALL,
         weighting: Weighting::Noise,
         normalization: Normalization::None,
         ..StackConfig::light()
     });
     assert!(median.coverage.is_some());
-    assert!(median.weight.is_some(), "a median still reports weight");
-    assert_eq!(median.weight_kind, WeightKind::Count);
+    assert_eq!(
+        median.weight.as_ref().map(|weight| weight.kind),
+        Some(WeightKind::Count),
+        "a median still reports weight"
+    );
     assert!(
         median.inverse_variance.is_none() && median.dispersion.is_none(),
         "a median has no linear-combine variance factor and no dispersion"
@@ -1670,7 +1700,7 @@ fn requested_planes_decide_what_the_combine_allocates() {
 
     // Image only: no ancillary plane survives, whatever the method would support.
     let bare = stack(StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         quality: QualityPlanes::IMAGE_ONLY,
         weighting: Weighting::Equal,
         normalization: Normalization::None,
@@ -1704,9 +1734,9 @@ fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
         })
         .collect();
     let config = StackConfig {
-        combine: Combine {
-            method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
-            small_n: SmallN::median_below(5),
+        combine: Combine::RejectedMean {
+            rejection: Rejection::sigma_clip(2.5),
+            small_n: Some(SmallN::median_below(5)),
         },
         normalization: Normalization::None,
         weighting: Weighting::Equal,
@@ -1720,7 +1750,7 @@ fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
         .map(|&v| LinearImage::from_interleaved(desc, vec![v]).into())
         .collect();
     let mean = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         normalization: Normalization::None,
         weighting: Weighting::Equal,
         ..StackConfig::light()
@@ -1750,10 +1780,7 @@ fn noise_weights_read_a_demosaiced_frames_mosaic_noise() {
         StackFrame::from(image)
     };
     let config = StackConfig {
-        combine: Combine {
-            method: CombineMethod::Mean(Rejection::None),
-            small_n: SmallN::none(),
-        },
+        combine: Combine::Mean,
         weighting: Weighting::Noise,
         normalization: Normalization::None,
         ..StackConfig::light()
@@ -1784,26 +1811,30 @@ fn noise_weights_read_a_demosaiced_frames_mosaic_noise() {
 #[test]
 fn rejection_emits_channel_shaped_survivor_weight_and_inverse_variance() {
     // Trimming removes each channel's high value, hence a different source frame: R keeps f0/f1, G
-    // keeps f1/f2, B keeps f0/f2. Manual weights [1,2,3] stay as given, and every frame has unit
-    // noise, so the inverse variance is (Σw)²/Σw²: R 9/5, G 25/13, B 16/10. Three frames leave two
+    // keeps f1/f2, B keeps f0/f2. The frames' noise of 1, 1/2 and 1/4 weighs them 1, 4 and 16, and
+    // each weight is its frame's inverse variance, so a pixel's is Σw: R 5, G 20, B 17, its
+    // value (1 + 8)/5 = 9/5, (8 + 48)/20 = 14/5 and (1 + 48)/17 = 49/17. Three frames leave two
     // survivors, so the minimum comes down to 2. The dispersion is Σw(x − x̄)² / ((n − 1)·Σw): R's
-    // 1 and 2 lie −2/3 and 1/3 about 5/3, so (4/9 + 2/9) / 3 = 2/9; G's 2 and 3 lie −0.6 and 0.4
-    // about 2.6, so (0.72 + 0.48) / 5 = 6/25; B's 1 and 3 lie −1.5 and 0.5 about 2.5, so (2.25 +
-    // 0.75) / 4 = 3/4.
+    // 1 and 2 lie −4/5 and 1/5 about 9/5, so (16/25 + 4/25) / 5 = 4/25; G's 2 and 3 lie the same
+    // about 14/5, so (64/25 + 16/25) / 20 = 4/25; B's 1 and 3 lie −32/17 and 2/17 about 49/17, so
+    // (1024 + 64) / 289 / 17 = 64/289.
     let desc = PlanarDesc::new((1, 1), ChannelLayout::Rgb);
-    let frame =
-        |pixels: Vec<f32>| with_noise(LinearImage::from_interleaved(desc, pixels).into(), 1.0);
+    let frame = |pixels: Vec<f32>, sigma: f32| {
+        with_noise(LinearImage::from_interleaved(desc, pixels).into(), sigma)
+    };
     let frames = vec![
-        frame(vec![1.0, 100.0, 1.0]),
-        frame(vec![2.0, 2.0, 100.0]),
-        frame(vec![100.0, 3.0, 3.0]),
+        frame(vec![1.0, 100.0, 1.0], 1.0),
+        frame(vec![2.0, 2.0, 100.0], 0.5),
+        frame(vec![100.0, 3.0, 3.0], 0.25),
     ];
     let config = StackConfig {
-        combine: Combine {
-            method: CombineMethod::Mean(Rejection::Trim(TrimConfig::new(0.0, 34.0))),
-            small_n: SmallN::none(),
+        combine: Combine::RejectedMean {
+            rejection: Rejection::Trim(TrimConfig {
+                percent: TrimBounds::asymmetric(0.0, 34.0),
+            }),
+            small_n: None,
         },
-        weighting: Weighting::Manual(vec![1.0, 2.0, 3.0]),
+        weighting: Weighting::Noise,
         normalization: Normalization::None,
         min_survivors: 2,
         quality: QualityPlanes::ALL,
@@ -1812,12 +1843,15 @@ fn rejection_emits_channel_shaped_survivor_weight_and_inverse_variance() {
     let result = combine(frames, &config).unwrap();
 
     assert_eq!(result.coverage.as_ref().unwrap()[0], 1.0);
-    let expected_values: [f64; 3] = [5.0 / 3.0, 13.0 / 5.0, 5.0 / 2.0];
-    let expected_dispersions: [f64; 3] = [2.0 / 9.0, 6.0 / 25.0, 3.0 / 4.0];
-    let expected_weights: [f64; 3] = [3.0, 5.0, 4.0];
-    let expected_inverse_variances: [f64; 3] = [9.0 / 5.0, 25.0 / 13.0, 16.0 / 10.0];
+    let expected_values: [f64; 3] = [9.0 / 5.0, 14.0 / 5.0, 49.0 / 17.0];
+    let expected_dispersions: [f64; 3] = [4.0 / 25.0, 4.0 / 25.0, 64.0 / 289.0];
+    let expected_weights: [f64; 3] = [5.0, 20.0, 17.0];
+    let expected_inverse_variances: [f64; 3] = [5.0, 20.0, 17.0];
     let inverse_variance = result.inverse_variance.as_ref().unwrap();
-    assert!(matches!(&result.weight, Some(QualityMap::PerChannel(_))));
+    assert!(matches!(
+        result.weight.as_ref().map(|weight| &weight.map),
+        Some(QualityMap::PerChannel(_))
+    ));
     assert!(matches!(inverse_variance, QualityMap::PerChannel(_)));
     // Each figure is an exact quotient of exact sums, rounded once: within half an ulp, ε relative.
     for channel in 0..3 {
@@ -1835,7 +1869,7 @@ fn rejection_emits_channel_shaped_survivor_weight_and_inverse_variance() {
             "value",
         );
         close(
-            result.weight.as_ref().unwrap().channel(channel)[0],
+            result.weight.as_ref().unwrap().map.channel(channel)[0],
             expected_weights[channel],
             "weight",
         );
@@ -1855,8 +1889,8 @@ fn rejection_emits_channel_shaped_survivor_weight_and_inverse_variance() {
         );
     }
     assert_ne!(
-        result.weight.as_ref().unwrap().channel(0)[0],
-        result.weight.as_ref().unwrap().channel(1)[0]
+        result.weight.as_ref().unwrap().map.channel(0)[0],
+        result.weight.as_ref().unwrap().map.channel(1)[0]
     );
     assert_ne!(
         inverse_variance.channel(1)[0],
@@ -1886,8 +1920,8 @@ fn dispersion_agrees_with_the_variance_where_the_model_holds() {
         })
         .collect();
     let config = StackConfig {
-        combine: Combine::mean(),
-        weighting: Weighting::Manual(SIGMAS.iter().map(|sigma| 1.0 / (sigma * sigma)).collect()),
+        combine: Combine::Mean,
+        weighting: Weighting::Noise,
         normalization: Normalization::None,
         quality: QualityPlanes::ALL,
         ..StackConfig::light()
@@ -1929,6 +1963,86 @@ fn dispersion_agrees_with_the_variance_where_the_model_holds() {
     }
 }
 
+/// Both planes of a clipped stack state the variance of the clipped mean, which choosing the
+/// survivors from the data makes larger than the survivors' own. Ten frames of a flat 0.5 under
+/// unit Gaussian noise, which the model states, clipped at ±2.5σ and ±3σ: over 16384 independent
+/// pixels the realized variance of the combined value about 0.5 is known to √(2/16384) = 1.1% at
+/// one σ. Neither plane's mean, the inverse variance's reciprocal or the dispersion, reads below
+/// it by more than three of those, 3.3%, where the survivors' variance as fixed reads 6% and 12.5%
+/// low at ±2.5σ. Neither reads above it by more than 6%: the correction is asymptotic, and at ten
+/// frames it overstates a little, more as the band narrows.
+#[test]
+fn a_clipped_stacks_planes_state_the_clipped_means_variance() {
+    const SIDE: usize = 128;
+    const FRAMES: usize = 10;
+    let desc = PlanarDesc::new((SIDE, SIDE), ChannelLayout::Mono);
+    let mut rng = TestRng::new(29);
+    let pixels: Vec<Vec<f32>> = (0..FRAMES)
+        .map(|_| {
+            (0..SIDE * SIDE)
+                .map(|_| 0.5 + rng.next_gaussian_f32())
+                .collect()
+        })
+        .collect();
+    for sigma in [2.5, 3.0] {
+        let frames: Vec<StackFrame> = pixels
+            .iter()
+            .map(|pixels| {
+                with_noise(
+                    LinearImage::from_interleaved(desc, pixels.clone()).into(),
+                    1.0,
+                )
+            })
+            .collect();
+        let product = combine(
+            frames,
+            &StackConfig {
+                combine: Combine::RejectedMean {
+                    rejection: Rejection::sigma_clip(sigma),
+                    small_n: None,
+                },
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                quality: QualityPlanes::ALL,
+                ..StackConfig::light()
+            },
+        )
+        .unwrap();
+        let count = (SIDE * SIDE) as f64;
+        let realized = product
+            .image
+            .channel(0)
+            .pixels()
+            .iter()
+            .map(|&value| (f64::from(value) - 0.5).libm_powi(2))
+            .sum::<f64>()
+            / count;
+        let mean = |plane: &[f32], of: fn(f32) -> f64| {
+            plane.iter().map(|&value| of(value)).sum::<f64>() / count
+        };
+        let stated = mean(
+            product
+                .inverse_variance
+                .as_ref()
+                .unwrap()
+                .channel(0)
+                .pixels(),
+            |value| 1.0 / f64::from(value),
+        );
+        let dispersion = mean(
+            product.dispersion.as_ref().unwrap().channel(0).pixels(),
+            f64::from,
+        );
+        for (plane, variance) in [("inverse variance", stated), ("dispersion", dispersion)] {
+            let ratio = variance / realized;
+            assert!(
+                (0.967..=1.06).contains(&ratio),
+                "{plane} at {sigma}σ states {ratio} of the realized variance"
+            );
+        }
+    }
+}
+
 #[test]
 fn median_quality_uses_equal_weights_and_has_no_variance() {
     let desc = PlanarDesc::new((8, 1), ChannelLayout::Mono);
@@ -1944,10 +2058,7 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
     let stack = |config: &StackConfig| combine(frames(), config).unwrap();
 
     let explicit = stack(&StackConfig {
-        combine: Combine {
-            method: CombineMethod::Median,
-            small_n: SmallN::median_below(5),
-        },
+        combine: Combine::Median,
         weighting: Weighting::Noise,
         normalization: Normalization::None,
         ..StackConfig::light()
@@ -1956,11 +2067,16 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
     // The middle frame is the median at every pixel, sample for sample.
     assert_eq!(explicit.image.channel(0).pixels(), mk(100.0, 2.0));
     assert_eq!(
-        explicit.coverage.as_ref().unwrap().to_plane(0).pixels(),
+        explicit
+            .coverage
+            .as_ref()
+            .unwrap()
+            .to_plane(0, explicit.image.desc().size())
+            .pixels(),
         &[1.0; 8]
     );
     assert_eq!(
-        explicit.weight.as_ref().unwrap().channel(0).pixels(),
+        explicit.weight.as_ref().unwrap().map.channel(0).pixels(),
         &[3.0; 8],
         "median quality must count unit-confidence contributors"
     );
@@ -2003,59 +2119,58 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
         ),
         ("flat", StackConfig::flat()),
         ("light", StackConfig::light()),
-        (
-            "manual weighting",
-            StackConfig {
-                weighting: Weighting::Manual(vec![1.0, 2.0, 3.0]),
-                normalization: Normalization::None,
-                ..StackConfig::light()
-            },
-        ),
     ] {
         // Three frames reach every pixel, below each floor: every pixel combines by its median, the
-        // middle frame's where nothing normalizes. Its inverse variance reads 0, no information,
-        // and its weight is the frames' Σw: 1 each under equal weights, 1, 2 and 3 under manual
-        // ones, and noise weights under the light preset's normalization.
+        // middle frame's where nothing normalizes. Its inverse variance is the median's of three
+        // samples of unit variance, 3 / f(3) = 3 / 1.346 = 2.2288, where nothing normalizes, and
+        // its weight is the frames' Σw: 1 each under equal weights, noise weights under the light
+        // preset's normalization.
         let downgraded = stack(&config);
+        let inverse_variance = downgraded
+            .inverse_variance
+            .as_ref()
+            .unwrap()
+            .channel(0)
+            .pixels();
         if config.normalization == Normalization::None {
             assert_eq!(
                 downgraded.image.channel(0).pixels(),
                 mk(100.0, 2.0),
                 "{name}"
             );
+            let median = (9.0 / (median_variance_factor(3) * 3.0)) as f32;
+            assert_eq!(inverse_variance, &[median; 8], "{name}");
         }
-        assert_eq!(
-            downgraded
-                .inverse_variance
-                .as_ref()
-                .unwrap()
-                .channel(0)
-                .pixels(),
-            &[0.0; 8],
-            "{name} must measure no variance at a median fallback"
+        assert!(
+            inverse_variance
+                .iter()
+                .all(|&value| value.is_finite() && value > 0.0),
+            "{name} measures a median fallback's variance"
         );
-        let weight = match &config.weighting {
+        let weight = match config.weighting {
             Weighting::Equal => Some(3.0),
-            Weighting::Manual(_) => Some(6.0),
             Weighting::Noise => None,
         };
         if let Some(weight) = weight {
             assert_eq!(
-                downgraded.weight.as_ref().unwrap().channel(0).pixels(),
+                downgraded.weight.as_ref().unwrap().map.channel(0).pixels(),
                 &[weight; 8],
                 "{name} median fallback must count its contributors' weights"
             );
         }
-        assert_eq!(downgraded.report.small_n_fallback_pixels, 8, "{name}");
+        assert_eq!(
+            downgraded.report.combine.small_n_fallback_pixels, 8,
+            "{name}"
+        );
     }
 
     let linear_fallback = stack(&StackConfig {
-        combine: Combine {
-            method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
-            small_n: SmallN {
+        combine: Combine::RejectedMean {
+            rejection: Rejection::sigma_clip(2.5),
+            small_n: Some(SmallN {
                 min_frames: 4,
-                fallback: CombineMethod::Mean(Rejection::None),
-            },
+                fallback: Fallback::Mean,
+            }),
         },
         weighting: Weighting::Equal,
         normalization: Normalization::None,
@@ -2087,7 +2202,7 @@ fn disk_backed_stack_combines_via_mmap() {
     }
 
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         normalization: Normalization::None,
         weighting: Weighting::Equal,
         ..StackConfig::light()
@@ -2113,13 +2228,13 @@ fn noise_weighting_refuses_a_frame_with_no_noise() {
         Normalization::None,
     );
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         weighting: Weighting::Noise,
         normalization: Normalization::None,
         ..StackConfig::light()
     };
     assert!(matches!(
-        config.run_stacking(&cache),
+        config.combine(&cache),
         Err(StackError::NoNoiseToWeigh { idx: 0 })
     ));
 }
@@ -2147,12 +2262,12 @@ fn noise_weights_survive_rejection() {
         Normalization::None,
     );
     for (frame, sigma) in cache.frames.iter_mut().zip([1.0 / 16.0, 4.0, 1.0]) {
-        frame.source_stats.bg[0] = BgSplit::of_sigma(sigma);
+        frame.admitted.stats.bg[0] = BgSplit::of_sigma(sigma);
     }
     let config = StackConfig {
-        combine: Combine {
-            method: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
-            small_n: SmallN::none(),
+        combine: Combine::RejectedMean {
+            rejection: Rejection::sigma_clip(2.0),
+            small_n: None,
         },
         weighting: Weighting::Noise,
         min_survivors: 2,
@@ -2160,7 +2275,7 @@ fn noise_weights_survive_rejection() {
         ..StackConfig::light()
     };
     let result = config
-        .run_stacking(&cache)
+        .combine(&cache)
         .expect("this cache is never cancelled");
     assert_close!(
         result.image.channel(0)[0],
@@ -2201,7 +2316,7 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
         })
         .collect();
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         weighting: Weighting::Equal,
         normalization: Normalization::None,
         ..StackConfig::light()
@@ -2221,6 +2336,7 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
     assert_eq!(
         product
             .report
+            .combine
             .excluded_samples
             .count(QualityFlags::SATURATED),
         3
@@ -2228,6 +2344,7 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
     assert_eq!(
         product
             .report
+            .combine
             .kept_flagged_samples
             .count(QualityFlags::SATURATED),
         18
@@ -2235,6 +2352,7 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
     assert_eq!(
         product
             .report
+            .combine
             .excluded_samples
             .count(QualityFlags::COSMIC_RAY),
         0
@@ -2284,18 +2402,18 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
         ),
         StackFrame::registered(
             &reference,
-            params.warp(&reference, &WarpTransform::new(Transform::identity())),
+            params.warp(&reference, &WarpTransform::from(Transform::identity())),
         ),
         StackFrame::registered(
             &shifted,
             params.warp(
                 &shifted,
-                &WarpTransform::new(Transform::translation(DVec2::new(-1.0, 0.0))),
+                &WarpTransform::from(Transform::translation(DVec2::new(-1.0, 0.0))),
             ),
         ),
     ];
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         weighting: Weighting::Equal,
         normalization: Normalization::None,
         ..StackConfig::light()
@@ -2335,7 +2453,7 @@ fn each_samples_noise_reads_the_gain_its_flat_applied() {
         frame
     };
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         normalization: Normalization::None,
         weighting: Weighting::Equal,
         ..StackConfig::light()
@@ -2385,7 +2503,7 @@ fn the_inverse_variance_plane_carries_the_source_term_above_the_sky() {
         frame
     };
     let config = StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         normalization: Normalization::None,
         weighting: Weighting::Equal,
         ..StackConfig::light()
@@ -2400,7 +2518,7 @@ fn the_inverse_variance_plane_carries_the_source_term_above_the_sky() {
         known.inverse_variance.as_ref().unwrap().channel(0).pixels(),
         &[2.0 / 3.0; 2]
     );
-    assert!(!known.report.variance_bg_only);
+    assert!(!known.report.combine.variance_bg_only);
 
     let unknown = combine(vec![frame(10.0, Some(0.5)), frame(14.0, None)], &config).unwrap();
     assert_eq!(
@@ -2412,17 +2530,18 @@ fn the_inverse_variance_plane_carries_the_source_term_above_the_sky() {
             .pixels(),
         &[2.0 / 3.0; 2]
     );
-    assert!(unknown.report.variance_bg_only);
+    assert!(unknown.report.combine.variance_bg_only);
 
     // CCD-model rejection holds each sample to its own model, whose photon term needs the gain:
     // a set is refused before the combine, naming frame 1, the first that states none, and with
     // every gain it combines.
     let ccd = StackConfig {
-        combine: Combine {
-            method: CombineMethod::Mean(Rejection::SigmaClip(
-                SigmaClipConfig::default().with_scale(RejectionScale::CcdModel),
-            )),
-            small_n: SmallN::none(),
+        combine: Combine::RejectedMean {
+            rejection: Rejection::SigmaClip(SigmaClipConfig {
+                scale: RejectionScale::CcdModel,
+                ..SigmaClipConfig::DEFAULT
+            }),
+            small_n: None,
         },
         ..config
     };
@@ -2450,28 +2569,37 @@ fn the_inverse_variance_plane_carries_the_source_term_above_the_sky() {
 /// The small-sample fallback is a pixel's, not the stack's: of 20 sigma-clipped frames of 2 × 1,
 /// all cover pixel 0 and only frames 0 to 3 pixel 1, so pixel 1 has 4 samples, below the preset's
 /// floor of 5, and combines by their median. [1, 2, 10, 4] has the median (2 + 4)/2 = 3, where a
-/// clip at 2.5σ keeps all four and averages 17/4. A median has no linear-combination variance, so
-/// its inverse variance reads 0, no information, and its dispersion NaN, and the report counts the
-/// one pixel. Pixel 0, at 1 in every frame, is the clipped mean, 1.
+/// clip at 2.5σ keeps all four and averages 17/4. Its inverse variance is the median's of four
+/// samples of unit variance, 4 / f(4) = 4 / 1.1928 = 3.3535, its dispersion NaN, as no linear
+/// combination's. Pixel 2, which frames 0 and 1 alone reach at 1 and 2, takes their mean, 1.5: a
+/// median of two is their mean, whose variance is exact, 1/2, and whose dispersion is
+/// (1/4 + 1/4) / (1·2) = 1/4. The report counts both pixels. Pixel 0, at 1 in every frame, is the
+/// clipped mean, 1.
 #[test]
 fn a_pixel_too_few_frames_reached_combines_by_its_median() {
-    let desc = PlanarDesc::new((2, 1), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((3, 1), ChannelLayout::Mono);
     let edge = [1.0, 2.0, 10.0, 4.0];
+    let pair = [1.0, 2.0];
     let frames: Vec<StackFrame> = (0..20)
         .map(|frame| {
-            let reached = frame < edge.len();
             let image = LinearImage::from_interleaved(
                 desc,
-                vec![1.0, edge.get(frame).copied().unwrap_or(0.0)],
+                vec![
+                    1.0,
+                    edge.get(frame).copied().unwrap_or(0.0),
+                    pair.get(frame).copied().unwrap_or(0.0),
+                ],
             );
-            let coverage = Buffer2::new((2, 1), vec![1.0, f32::from(u8::from(reached))]);
-            stack_frame(
+            let reached = |samples: &[f32]| f32::from(u8::from(frame < samples.len()));
+            let coverage = Buffer2::new((3, 1), vec![1.0, reached(&edge), reached(&pair)]);
+            let frame = stack_frame(
                 image,
                 FrameQuality::Planes {
                     confidence: coverage.clone(),
                     coverage,
                 },
-            )
+            );
+            with_noise(frame, 1.0)
         })
         .collect();
     let config = StackConfig {
@@ -2482,9 +2610,15 @@ fn a_pixel_too_few_frames_reached_combines_by_its_median() {
         ..StackConfig::light()
     };
     let product = combine(frames, &config).unwrap();
-    assert_eq!(product.image.channel(0).pixels(), &[1.0, 3.0]);
+    assert_eq!(product.image.channel(0).pixels(), &[1.0, 3.0, 1.5]);
     let plane = |map: Option<&QualityMap>| map.unwrap().channel(0).pixels().to_vec();
-    assert_eq!(plane(product.inverse_variance.as_ref())[1], 0.0);
-    assert!(plane(product.dispersion.as_ref())[1].is_nan());
-    assert_eq!(product.report.small_n_fallback_pixels, 1);
+    let inverse_variance = plane(product.inverse_variance.as_ref());
+    let dispersion = plane(product.dispersion.as_ref());
+    assert_eq!(
+        inverse_variance[1],
+        (16.0 / (median_variance_factor(4) * 4.0)) as f32
+    );
+    assert!(dispersion[1].is_nan());
+    assert_eq!((inverse_variance[2], dispersion[2]), (2.0, 0.25));
+    assert_eq!(product.report.combine.small_n_fallback_pixels, 2);
 }

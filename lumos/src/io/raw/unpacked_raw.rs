@@ -29,7 +29,6 @@ use crate::io::raw::libraw_filters;
 use crate::io::raw::raw_decoder::RawDecoder;
 use crate::io::{null_policy, raw};
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
-use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 use glam::USizeVec2;
 
 /// A camera RAW file LibRaw unpacked, with what lumos reads of it, ready for sensor-specific
@@ -326,21 +325,7 @@ impl UnpackedRaw {
             tracing::info!("no mosaic lumos demosaics; LibRaw processes the image");
             return self.processed_by_libraw(None);
         }
-        let cfa = self.into_cfa_image()?;
-        let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
-        let mut image = cfa.demosaic(ctx.xtrans_passes, noise, &ctx.cancel)?;
-        // The demosaic's own reach leaves the range, ~1.06 out of RCD and ~1.16 out of
-        // Markesteijn at a step edge, and the frame arrives with its noise below black: the
-        // preview clamps both, after the demosaic, so the interpolation sees the samples as
-        // they are.
-        for channel in 0..image.channel_count() {
-            par::iter_mut(image.channel_mut(channel).pixels_mut())
-                .for_each(|sample| *sample = sample.clamp(0.0, 1.0));
-        }
-        if let Some(provenance) = image.metadata.derived.provenance_mut() {
-            provenance.clipped = true;
-        }
-        Ok(image)
+        Ok(ctx.demosaic_preview(self.into_cfa_image()?)?)
     }
 
     /// The image through LibRaw's own processing, linear, unbalanced and unturned: the path for a

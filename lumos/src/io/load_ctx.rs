@@ -2,52 +2,48 @@
 
 use std::fs::File;
 use std::io::BufReader;
+use std::num::NonZeroUsize;
 use std::path::Path;
 
 use common::{CancelToken, fs, par};
+use rayon::prelude::*;
 
+use crate::error::Cancelled;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
+use crate::io::decode_config::DecodeConfig;
 use crate::io::decoder::Peek;
 use crate::io::decoder::cfa_decoder::CfaRead;
-use crate::io::error::{ImageError, RasterLoadError, ScientificRefusal};
+use crate::io::error::{ImageError, LoadError, RasterLoadError, ScientificRefusal};
 use crate::io::fits::decode::fits_file::FitsFile;
 use crate::io::fits::error::FitsLoadError;
-use crate::io::fits::fits_load_config::FitsLoadConfig;
+use crate::io::fits::fits_load_config::FitsCubeInterpretation;
 use crate::io::input_format::InputFormat;
-use crate::io::null_policy::NullPolicy;
 use crate::io::{raster, raw};
+use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
-/// Cancellation, resource controls, and format policy shared by file decoders.
+/// How a file decodes, the cancel token its decode polls, and the threads it may run on.
 #[derive(Debug, Clone)]
 pub struct LoadCtx {
+    pub decode: DecodeConfig,
     /// Cooperative cancellation token polled between bounded decode stages.
     pub cancel: CancelToken,
-    /// FITS-specific policy; ignored by non-FITS decoders.
-    pub fits: FitsLoadConfig,
-    /// What a null sample does to a linear decode: a FITS null, or a floating-point raster's NaN
-    /// or infinity.
-    pub nulls: NullPolicy,
-    /// How many passes an X-Trans demosaic makes; ignored for every other mosaic.
-    pub xtrans_passes: MarkesteijnPasses,
     /// How many threads one decode may run inside a decoder that parallelizes itself — LibRaw's
     /// tiled CR3, compressed Fuji and Panasonic v8 decoders. Every thread rayon has for one decode
     /// at a time; a run decoding several frames at once shares them out, so the decodes together
     /// stay within the cores.
-    pub decode_threads: usize,
+    pub(crate) decode_threads: NonZeroUsize,
 }
 
 impl LoadCtx {
-    /// A context polling `cancel`, with strict FITS defaults.
-    pub fn new(cancel: CancelToken) -> Self {
+    /// A context decoding under `decode` and polling `cancel`, one decode at a time on every
+    /// thread rayon has.
+    pub fn new(decode: DecodeConfig, cancel: CancelToken) -> Self {
         Self {
+            decode,
             cancel,
-            fits: FitsLoadConfig::default(),
-            nulls: NullPolicy::default(),
-            xtrans_passes: MarkesteijnPasses::default(),
-            decode_threads: par::threads(),
+            decode_threads: NonZeroUsize::new(par::threads()).expect("rayon has a thread at least"),
         }
     }
 
@@ -55,7 +51,7 @@ impl LoadCtx {
     /// threads, one at least — see [`Self::decode_threads`].
     pub(crate) fn for_decode_slots(&self, slots: usize) -> Self {
         Self {
-            decode_threads: threads_per_decode(self.decode_threads, slots),
+            decode_threads: threads_per_decode(self.decode_threads.get(), slots),
             ..self.clone()
         }
     }
@@ -78,10 +74,7 @@ impl LoadCtx {
         self.check_cancelled(path)?;
         match InputFormat::of(path)? {
             InputFormat::Fits => self.fits(path, |file| file.linear(self, gains)),
-            InputFormat::CameraRaw => Err(ImageError::scientific_rejection(
-                path,
-                ScientificRefusal::CameraRaw,
-            )),
+            InputFormat::CameraRaw => Err(ImageError::new(path, ScientificRefusal::CameraRaw)),
             InputFormat::Raster(format) => {
                 self.raster(path, |source| raster::linear(source, format, self))
             }
@@ -97,7 +90,7 @@ impl LoadCtx {
     ) -> Result<LinearImage, ImageError> {
         self.check_cancelled(path)?;
         file.linear(self, gains)
-            .map_err(|error| ImageError::fits_load(path, error))
+            .map_err(|error| ImageError::new(path, error))
     }
 
     /// Load an undemosaiced sensor image from camera RAW or mosaic FITS.
@@ -115,25 +108,47 @@ impl LoadCtx {
         match InputFormat::of(path)? {
             InputFormat::Fits => self.fits(path, |file| file.cfa(self, gains)),
             InputFormat::CameraRaw => raw::load_cfa(path, self),
-            InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
-                path,
-                ScientificRefusal::RasterCfa,
-            )),
+            InputFormat::Raster(_) => Err(ImageError::new(path, ScientificRefusal::RasterCfa)),
         }
     }
 
     /// Load a display or inspection image from FITS, camera RAW, TIFF, PNG, or JPEG, as planes: a
-    /// mosaic demosaiced, a raster in `f32` with its alpha dropped.
+    /// mosaic demosaiced and clamped to `[0, 1]`, a raster in `f32` with its alpha
+    /// dropped, and a three-plane FITS cube as RGB whatever [`FitsLoadConfig::cube`](crate::FitsLoadConfig::cube) says: three
+    /// planes are RGB in what every stacker writes, and a preview is for looking. The science
+    /// loaders, [`Self::linear`] and [`Self::cfa`], refuse an undeclared cube.
     pub fn preview(&self, path: impl AsRef<Path>) -> Result<LinearImage, ImageError> {
         let path = path.as_ref();
         self.check_cancelled(path)?;
         match InputFormat::of(path)? {
-            InputFormat::Fits => self.fits(path, |file| file.preview(self)),
+            InputFormat::Fits => {
+                let mut ctx = self.clone();
+                ctx.decode.fits.cube = FitsCubeInterpretation::Rgb;
+                ctx.fits(path, |file| file.preview(&ctx))
+            }
             InputFormat::CameraRaw => raw::load_preview(path, self),
             InputFormat::Raster(format) => {
                 self.raster(path, |source| raster::preview(source, format, self))
             }
         }
+    }
+
+    /// `cfa` demosaiced for display, as [`Self::preview`] returns a mosaic from either container: its
+    /// noise measured, demosaiced in this context's passes, then clamped to `[0, 1]` and recorded as
+    /// clipped. The demosaic's own reach leaves the range, ~1.06 out of RCD and ~1.16 out of
+    /// Markesteijn at a step edge, and a frame arrives with its noise below black: the clamp takes
+    /// both, after the demosaic, so the interpolation sees the samples as they are.
+    pub(crate) fn demosaic_preview(&self, cfa: CfaImage) -> Result<LinearImage, Cancelled> {
+        let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
+        let mut image = cfa.demosaic(self.decode.xtrans_passes, noise, &self.cancel)?;
+        for channel in 0..image.channel_count() {
+            par::iter_mut(image.channel_mut(channel).pixels_mut())
+                .for_each(|sample| *sample = sample.clamp(0.0, 1.0));
+        }
+        if let Some(provenance) = image.metadata.derived.provenance_mut() {
+            provenance.clipped = true;
+        }
+        Ok(image)
     }
 
     /// What the CFA frame at `path` is, read from its header without decoding it, with what the
@@ -145,10 +160,7 @@ impl LoadCtx {
                 .fits(path, FitsFile::cfa_peek)?
                 .map(|file| CfaRead::Fits(Box::new(file)))),
             InputFormat::CameraRaw => Ok(raw::cfa_peek(path, self)?.map(CfaRead::Raw)),
-            InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
-                path,
-                ScientificRefusal::RasterCfa,
-            )),
+            InputFormat::Raster(_) => Err(ImageError::new(path, ScientificRefusal::RasterCfa)),
         }
     }
 
@@ -164,7 +176,7 @@ impl LoadCtx {
             CfaRead::Raw(file) => raw::load_cfa_read(file, path, self),
             CfaRead::Fits(file) => file
                 .cfa(self, gains)
-                .map_err(|error| ImageError::fits_load(path, error)),
+                .map_err(|error| ImageError::new(path, error)),
         }
     }
 
@@ -174,7 +186,7 @@ impl LoadCtx {
         path: &Path,
         load: impl FnOnce(FitsFile) -> Result<T, FitsLoadError>,
     ) -> Result<T, ImageError> {
-        load(FitsFile::open(path, self)?).map_err(|error| ImageError::fits_load(path, error))
+        load(FitsFile::open(path, self)?).map_err(|error| ImageError::new(path, error))
     }
 
     /// `load` of the raster at `path`, read through a buffer.
@@ -186,12 +198,12 @@ impl LoadCtx {
         fs::open(path)
             .map_err(RasterLoadError::from)
             .and_then(|file| load(BufReader::new(file)))
-            .map_err(|error| ImageError::raster_load(path, error))
+            .map_err(|error| ImageError::new(path, error))
     }
 
     pub(crate) fn check_cancelled(&self, path: &Path) -> Result<(), ImageError> {
         if self.cancel.is_cancelled() {
-            return Err(ImageError::cancelled(path));
+            return Err(ImageError::new(path, LoadError::Cancelled));
         }
         Ok(())
     }
@@ -199,16 +211,18 @@ impl LoadCtx {
 
 /// The threads each of `slots` decodes running at once gets of `cores`: an equal share, one at
 /// least, so the decodes together use the cores and no more.
-const fn threads_per_decode(cores: usize, slots: usize) -> usize {
+const fn threads_per_decode(cores: usize, slots: usize) -> NonZeroUsize {
     debug_assert!(slots > 0, "a run decodes in one slot at least");
-    let share = cores / slots;
-    if share == 0 { 1 } else { share }
+    match NonZeroUsize::new(cores / slots) {
+        Some(share) => share,
+        None => NonZeroUsize::MIN,
+    }
 }
 
 impl Default for LoadCtx {
     /// A load of one file outside any run, which nothing cancels.
     fn default() -> Self {
-        Self::new(CancelToken::never())
+        Self::new(DecodeConfig::default(), CancelToken::never())
     }
 }
 
@@ -222,7 +236,7 @@ mod tests {
     fn decodes_share_the_cores() {
         for (cores, slots, threads) in [(16, 1, 16), (16, 4, 4), (16, 5, 3), (4, 8, 1), (1, 1, 1)] {
             assert_eq!(
-                threads_per_decode(cores, slots),
+                threads_per_decode(cores, slots).get(),
                 threads,
                 "{cores} cores over {slots}"
             );

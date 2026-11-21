@@ -19,7 +19,7 @@ fn square_kernel_mixes_two_pixels_by_their_overlap() {
     pixels[0] = 10.0;
     pixels[1] = 20.0;
     let product = drizzle_one(
-        kernel_config(DrizzleKernel::Square, 2.0, 1.0),
+        kernel_config(Kernel::Square, 2.0, 1.0),
         &DrizzleFrame::new(
             mono_image(USize2::new(4, 4), pixels),
             warp_of(Transform::translation(DVec2::new(0.25, 0.0))),
@@ -70,8 +70,8 @@ fn square_matches_turbo_only_while_the_drop_stays_axis_aligned() {
                     &DrizzleFrame::new(mono_image(size, gradient.clone()), warp_of(transform)),
                 )
             };
-            let turbo = render(DrizzleKernel::Turbo);
-            let square = render(DrizzleKernel::Square);
+            let turbo = render(Kernel::Turbo);
+            let square = render(Kernel::Square);
 
             let mut max_diff = 0.0f32;
             let mut max_weight_diff = 0.0f32;
@@ -123,7 +123,7 @@ fn a_rotated_square_drop_keeps_its_flux() {
     }
     let mut acc = accumulator(
         PlanarDesc::new(size, ChannelLayout::Mono),
-        kernel_config(DrizzleKernel::Square, 1.0, 1.0),
+        kernel_config(Kernel::Square, 1.0, 1.0),
     );
     acc.add_image(
         mono_image(size, pixels),

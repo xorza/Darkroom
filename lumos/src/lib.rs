@@ -64,7 +64,7 @@ pub use calibration::bundle::error::{BundleError, DefectTableError};
 pub use calibration::cosmic_ray::cosmic_ray_config::{CosmicRayConfig, NoiseEstimation};
 pub use calibration::cosmic_ray::error::CosmicRayError;
 pub use calibration::error::{
-    CalibrationError, DarkMismatch, MasterBuildError, MasterStackError, SubtractionError,
+    CalibrationError, MasterBuildError, MasterMismatch, MasterStackError, SubtractionError,
 };
 pub use error::InvalidConfigField;
 pub use image::cfa::bayer_pattern::BayerPattern;
@@ -73,14 +73,16 @@ pub use image::cfa::cfa_image::CfaImage;
 pub use image::cfa::cfa_type::CfaType;
 pub use image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 pub use image::cfa::mosaic::Mosaic;
+pub use image::cfa::mosaic_plane::MosaicPlane;
 pub use image::cfa::xtrans_pattern::XTransPattern;
 pub use image::error::{FrameDescError, FrameDimensionMismatch, XTransPatternError};
 pub use image::flags::pixel_flags::PixelFlags;
 pub use image::flags::quality_flags::QualityFlags;
 pub use image::flat_gain::FlatGain;
 pub use image::flat_gain::frame_gain::FrameGain;
+pub use image::frame::{Frame, FrameParts, Samples};
 pub use image::frame_desc;
-pub use image::linear_image::{LinearImage, LinearParts};
+pub use image::linear_image::LinearImage;
 pub use image::metadata::bg_split::BgSplit;
 pub use image::metadata::calibration_state::CalibrationState;
 pub use image::metadata::dark_comparison::DarkComparison;
@@ -98,10 +100,12 @@ pub use image::metadata::sample_domain::{DomainMap, Pedestal, SampleDomain, Scal
 pub use image::metadata::temperature_difference::TemperatureDifference;
 pub use image::metadata::temperature_source::TemperatureSource;
 pub use image::metadata::unverified_conditions::UnverifiedConditions;
-pub use io::error::{ImageError, ScientificRefusal, WriteError};
+pub use io::decode_config::DecodeConfig;
+pub use io::error::{ImageError, LoadError, RasterLoadError, ScientificRefusal, WriteError};
 pub use io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
 pub use io::fits::fits_load_config::{
-    FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadConfig,
+    FitsChecksumPolicy, FitsCubeInterpretation, FitsDataMax, FitsFloatScale, FitsHduSelector,
+    FitsLoadConfig,
 };
 pub use io::fits::lumos_extension::LumosExtension;
 pub use io::input_format::{PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
@@ -112,24 +116,19 @@ pub use io::raw::raw_files::raw_files;
 pub use stack_product::fits::error::{ProductError, ProductRefusal};
 
 pub use calibration::calibration_component::CalibrationComponent;
-pub use calibration::calibration_masters::{CalibrationMasters, MasterBuild};
-pub use calibration::calibration_outcome::CalibrationOutcome;
+pub use calibration::calibration_masters::{CalibrationMasters, MastersConfig};
+pub use calibration::calibration_outcome::{CalibrationOutcome, DarkOutcome};
 pub use calibration::calibration_set::CalibrationSet;
 pub use calibration::dark_scale::{DarkScale, DarkScaleSource};
 pub use calibration::defect_map::defect_summary::{ColorDefects, ColorShares, DefectSummary};
 pub use calibration::defect_map::sigma_threshold::SigmaThreshold;
-pub use calibration::master_cache::{
-    CachedMaster, MasterCache, MasterInputs, NoMasterCache, SubtractedFrames,
-};
-pub use calibration::master_recipe::MasterRecipe;
+pub use calibration::master_cache::{MasterCache, MasterKey, MasterSlot};
 pub use calibration::master_role::MasterRole;
 
 pub use star_detection::roundness::Roundness;
 pub use star_detection::star::Star;
 pub use star_detection::star_detection_config::StarDetectionConfig;
-pub use star_detection::star_detection_config::bg_config::{
-    BgConfig, BgRefinement, IterativeRefinement,
-};
+pub use star_detection::star_detection_config::bg_config::{BgConfig, IterativeRefinement};
 pub use star_detection::star_detection_config::extraction_config::{
     Connectivity, Deblend, ExtractionConfig,
 };
@@ -150,20 +149,22 @@ pub use registration::error::{
 };
 pub use registration::match_idxs::MatchIdxs;
 pub use registration::ransac::ransac_config::{RansacConfig, ScaleRange};
-pub use registration::registrar::Registrar;
-pub use registration::registration_config::{RegistrationConfig, RegistrationMatchingConfig};
+pub use registration::registrar::{ReferenceCatalog, Registrar};
+pub use registration::registration_config::{
+    MAX_STARS, RegistrationConfig, RegistrationMatchingConfig,
+};
 pub use registration::registration_result::{RegistrationResult, StarMatch};
 pub use registration::resample::WarpResult;
 pub use registration::resample::warp_config::{ClampingThreshold, InterpolationMethod, WarpConfig};
 pub use registration::transform::linear_model::LinearModel;
 pub use registration::transform::local_geometry::LocalGeometry;
 pub use registration::transform::{Transform, TransformType};
-pub use registration::transform_model::TransformModel;
+pub use registration::transform_model::{ModelChoice, TransformModel};
 pub use registration::triangle::triangle_config::TriangleConfig;
 pub use registration::warp_transform::WarpTransform;
 pub use registration::warp_transform::inverse_warp::InverseWarp;
 
-pub use combine::error::{StackConfigError, StackError};
+pub use combine::error::StackError;
 pub use combine::normalization::Normalization;
 pub use combine::rejection::Rejection;
 pub use combine::rejection::gesd_config::GesdConfig;
@@ -171,16 +172,15 @@ pub use combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 pub use combine::rejection::rejection_scale::RejectionScale;
 pub use combine::rejection::sigma_bounds::SigmaBounds;
 pub use combine::rejection::sigma_clip_config::SigmaClipConfig;
-pub use combine::rejection::trim_config::TrimConfig;
+pub use combine::rejection::trim_config::{TrimBounds, TrimConfig};
 pub use combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 pub use combine::stack_config::StackConfig;
 pub use combine::stack_config::combine::Combine;
-pub use combine::stack_config::combine_method::CombineMethod;
-pub use combine::stack_config::small_n::SmallN;
+pub use combine::stack_config::small_n::{Fallback, SmallN};
 pub use combine::stack_config::weighting::Weighting;
 pub use combine::stack_frame::StackFrame;
 pub use frame::capture_condition::CaptureCondition;
-pub use frame::error::ConditionMismatch;
+pub use frame::error::{ConditionMismatch, SettingMismatch};
 pub use frame::frame_plane::FramePlane;
 pub use frame_store::error::FrameStoreError;
 pub use image::flags::flag_counts::FlagCounts;
@@ -193,8 +193,10 @@ pub use progress::stacking_progress::{StackingProgress, StackingStage};
 pub use stack_product::StackProduct;
 pub use stack_product::coverage::Coverage;
 pub use stack_product::quality_planes::QualityPlanes;
-pub use stack_product::run_report::RunReport;
-pub use stack_product::weight_kind::WeightKind;
+pub use stack_product::run_report::{
+    CalibrationReport, CombineReport, DrizzleReport, MemoryReport, RunReport,
+};
+pub use stack_product::weight_plane::{WeightKind, WeightPlane};
 
 pub use pipeline::align_stack_config::{AlignStackConfig, CalibratedLights, Reference};
 pub use pipeline::align_stack_result::{AlignStackResult, LightOutcome};
@@ -203,8 +205,8 @@ pub use pipeline::frame_registration::FrameRegistration;
 
 pub use drizzle::drizzle_config::DrizzleConfig;
 pub use drizzle::drizzle_frame::DrizzleFrame;
-pub use drizzle::drizzle_kernel::DrizzleKernel;
-pub use drizzle::error::{DrizzleConfigError, DrizzleError};
+pub use drizzle::drizzle_sampling::{DrizzleSampling, DrizzleScale, DropShape, Pixfrac};
+pub use drizzle::error::DrizzleError;
 
 pub use image_ops::stretch::{ColorMode, Stretch, StretchMethod};
 

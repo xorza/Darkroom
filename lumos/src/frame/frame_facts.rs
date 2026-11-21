@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::frame::{Frame, Samples};
 use crate::image::metadata::dark_comparison::DarkComparison;
 use crate::image::metadata::image_provenance::RowOrder;
 use crate::image::metadata::sample_domain::SampleDomain;
-use crate::image::stackable_image::StackableImage;
 
 /// What a frame's source said about it: the domain, row order and pattern every frame of a set has
 /// to state alike — see `ingest::set_facts::SetFacts` — the capture conditions the set's product
@@ -33,14 +33,14 @@ pub(crate) struct FrameFacts {
 }
 
 impl FrameFacts {
-    pub(crate) fn of(image: &impl StackableImage) -> Self {
+    pub(crate) fn of(image: &Frame<impl Samples>) -> Self {
         Self {
-            domain: image.metadata().derived.domain().cloned(),
-            row_order: image.metadata().derived.row_order(),
-            cfa_type: image.cfa_type(),
-            saturation_flagged: image.metadata().derived.saturation_flagged(),
-            conditions: CaptureConditions::of(image.metadata()),
-            dark_comparison: image.metadata().derived.dark_comparison(),
+            domain: image.metadata.derived.domain().cloned(),
+            row_order: image.metadata.derived.row_order(),
+            cfa_type: image.sensor_pattern(),
+            saturation_flagged: image.metadata.derived.saturation_flagged(),
+            conditions: CaptureConditions::of(&image.metadata),
+            dark_comparison: image.metadata.derived.dark_comparison(),
         }
     }
 }

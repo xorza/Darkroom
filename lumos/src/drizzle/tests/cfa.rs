@@ -19,9 +19,10 @@ use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::internals::test_rng::TestRng;
+use crate::registration::registrar::Registrar;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::TransformType;
-use crate::registration::transform_model::TransformModel;
+use crate::registration::transform_model::{ModelChoice, TransformModel};
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
 use common::TempDir;
@@ -92,13 +93,13 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_color_alone() {
         let config = DrizzleConfig {
             fill_value: FILL,
             stack: plain_stack(),
-            ..kernel_config(DrizzleKernel::Turbo, 1.0, 1.0)
+            ..kernel_config(Kernel::Turbo, 1.0, 1.0)
         };
         let product = config
             .drizzle_cfa_images(frames, ingest, ProgressMonitor::unattended())
             .unwrap();
         assert_eq!(
-            product.report.spilled_frames,
+            product.report.memory.spilled_frames,
             if ingest.memory_override.is_some() {
                 dithers.len() as u64
             } else {
@@ -134,7 +135,7 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_color_alone() {
                     assert_eq!(
                         (
                             product.image.channel(c)[(x, y)],
-                            weight.channel(c)[(x, y)],
+                            weight.map.channel(c)[(x, y)],
                             coverage.channel(c)[(x, y)],
                         ),
                         expected,
@@ -145,8 +146,12 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_color_alone() {
             }
         }
         if cfa_type == rggb {
-            assert_eq!(weight.channel(0)[(0, 0)], 1.0, "red reached (0, 0)");
-            assert_eq!(weight.channel(1)[(0, 0)], 0.0, "green never reached (0, 0)");
+            assert_eq!(weight.map.channel(0)[(0, 0)], 1.0, "red reached (0, 0)");
+            assert_eq!(
+                weight.map.channel(1)[(0, 0)],
+                0.0,
+                "green never reached (0, 0)"
+            );
         }
     }
 }
@@ -190,7 +195,7 @@ fn the_light_preset_combines_a_cfa_drizzle() {
         .collect();
     let config = DrizzleConfig {
         fill_value: -1.0,
-        ..kernel_config(DrizzleKernel::Square, 1.0, 1.0)
+        ..kernel_config(Kernel::Square, 1.0, 1.0)
     };
     let product = DrizzleConfig {
         stack: StackConfig::light(),
@@ -275,7 +280,7 @@ fn a_cfa_drizzle_above_scale_one_is_normalized_frame_by_frame() {
     };
     let config = DrizzleConfig {
         fill_value: -1.0,
-        ..kernel_config(DrizzleKernel::Square, 2.0, 0.8)
+        ..kernel_config(Kernel::Square, 2.0, 0.8)
     };
     let drizzle = |frames: Vec<DrizzleFrame<CfaImage>>, normalization| {
         DrizzleConfig {
@@ -339,7 +344,7 @@ fn a_cfa_drizzle_refuses_a_frame_of_another_pattern() {
     };
     let error = DrizzleConfig {
         stack: plain_stack(),
-        ..kernel_config(DrizzleKernel::Turbo, 1.0, 1.0)
+        ..kernel_config(Kernel::Turbo, 1.0, 1.0)
     }
     .drizzle_cfa_images(
         vec![frame(BayerPattern::Rggb), frame(BayerPattern::Bggr)],
@@ -415,23 +420,19 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
     config.filter.min_snr = 5.0;
     config.extraction.sigma_threshold = 3.0;
     let mut detector = StarDetector::new(config);
-    let registration = RegistrationConfig {
-        model: TransformModel::Fixed(TransformType::Translation),
+    let registrar = Registrar::new(RegistrationConfig {
+        model: TransformModel::Plain(ModelChoice::Fixed(TransformType::Translation)),
         ..Default::default()
-    };
+    });
     let mut register_on = |reference: LinearImage, target: LinearImage| {
         let stars = [
             detector.detect(&reference).stars,
             detector.detect(&target).stars,
         ];
-        let result = registration
-            .registrar()
-            .unwrap()
-            .register(&stars[0], &stars[1])
-            .unwrap();
+        let result = registrar.register(&stars[0], &stars[1]).unwrap();
         (
-            result.transform().apply(DVec2::ZERO),
-            result.inlier_count(),
+            result.warp().linear().apply(DVec2::ZERO),
+            result.matches().len(),
             stars,
         )
     };

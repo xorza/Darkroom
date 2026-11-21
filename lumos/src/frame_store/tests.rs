@@ -3,8 +3,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arrayvec::ArrayVec;
-use common::{Buffer2, FileIdentity, ScratchFile, TempDir, fs};
+use common::{Buffer2, CancelToken, FileIdentity, ScratchFile, TempDir, fs};
 use imaginarium::{ChannelLayout, PlanarDesc};
+
+use imaginarium::PlanarImage;
+
+use crate::image::cfa::mosaic_plane::MosaicPlane;
 
 use crate::combine::frame_read::frame_gate::FrameGate;
 use crate::frame::admitted::Admitted;
@@ -26,9 +30,10 @@ use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::shared_gains::SharedGains;
+use crate::image::frame::{Frame, Samples};
 use crate::image::linear_image::LinearImage;
-use crate::image::stackable_image::StackableImage;
 use crate::internals::panic_message;
+use crate::io::decode_config::DecodeConfig;
 use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::io::fits::fits_load_config::{FitsHduSelector, FitsLoadConfig};
 use crate::io::load_ctx::LoadCtx;
@@ -39,7 +44,7 @@ fn reuse(spill: &FrameSpill<'_>) -> Option<KeptFrame> {
 }
 
 /// The frame `spill` commits, as the image it was decoded to in a run of its own.
-fn reuse_image<I: StackableImage>(spill: &FrameSpill<'_>) -> Option<I> {
+fn reuse_image<S: Samples>(spill: &FrameSpill<'_>) -> Option<Frame<S>> {
     KeptFrame::reuse_image(spill, spill.committed()?, &SharedGains::default())
         .map(|kept| kept.image)
 }
@@ -76,7 +81,7 @@ fn a_parked_image_reads_back_and_leaves_no_file() {
         .flag_counts()
         .expect("the mask is spilled with the planes");
     assert_eq!(counts.count(QualityFlags::NO_DATA), 2);
-    let read: LinearImage = masked.into_image(None);
+    let read: LinearImage = masked.into_image(());
     let nulls = read.flags().unwrap();
     assert_eq!(nulls.counts(), image.flags().unwrap().counts());
     assert_eq!(
@@ -153,7 +158,7 @@ fn light_frame_keeps_quality_with_its_planes() {
         frame.quality.confidence(0).unwrap().chunk(0..4),
         &[4.0, 3.0, 2.0, 0.0]
     );
-    assert_eq!(frame.source_stats.medians[0], 2.5);
+    assert_eq!(frame.admitted.stats.medians[0], 2.5);
 }
 
 #[test]
@@ -231,7 +236,9 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         &[0, 0, QualityFlags::NO_DATA.byte(), 0]
     );
     drop(frame);
-    // Read back whole, the frame is the image it was decoded to, flags and metadata with it.
+    // Read back whole, the frame is the image it was decoded to, flags and metadata with it; as a
+    // mosaic, which the kept planes are not, it is none.
+    assert!(reuse_image::<MosaicPlane>(&spill).is_none());
     let restored: LinearImage = reuse_image(&spill).unwrap();
     assert_eq!(restored.channel(0).pixels(), image.channel(0).pixels());
     assert_eq!(
@@ -251,17 +258,23 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         decoder: DecoderKind::Cfa,
         ..key
     };
-    let three_passes = LoadCtx {
-        xtrans_passes: MarkesteijnPasses::Three,
-        ..LoadCtx::default()
-    };
-    let second_hdu = LoadCtx {
-        fits: FitsLoadConfig {
-            hdu: FitsHduSelector::Idx(1),
-            ..FitsLoadConfig::default()
+    let three_passes = LoadCtx::new(
+        DecodeConfig {
+            xtrans_passes: MarkesteijnPasses::Three,
+            ..DecodeConfig::default()
         },
-        ..LoadCtx::default()
-    };
+        CancelToken::never(),
+    );
+    let second_hdu = LoadCtx::new(
+        DecodeConfig {
+            fits: FitsLoadConfig {
+                hdu: FitsHduSelector::Idx(1),
+                ..FitsLoadConfig::default()
+            },
+            ..DecodeConfig::default()
+        },
+        CancelToken::never(),
+    );
     let other_options =
         [three_passes, second_hdu].map(|ctx| CacheKey::new(identity, DecoderKind::Linear, &ctx));
     for other in [other_version, other_decoder]
@@ -274,7 +287,7 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
 
     fs::remove_file(spill.flags_path()).unwrap();
     assert!(reuse(&spill).is_none(), "a mask without its flags");
-    assert!(reuse_image::<LinearImage>(&spill).is_none());
+    assert!(reuse_image::<PlanarImage>(&spill).is_none());
 
     // A frame of no mask keeps one slot of samples, on the first run as on a reuse.
     let plain = LinearImage::from_interleaved(desc, vec![1.0, 2.0, 3.0, 4.0]);
@@ -328,12 +341,12 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let nodes = fs::read(spill.gain_path(gain.key())).unwrap();
     fs::write(spill.gain_path(gain.key()), &nodes[..4]).unwrap();
     assert!(reuse(&spill).is_none(), "a gain file cut short");
-    assert!(reuse_image::<LinearImage>(&spill).is_none());
+    assert!(reuse_image::<PlanarImage>(&spill).is_none());
     let mut other = nodes.clone();
     other[0] ^= 1;
     fs::write(spill.gain_path(gain.key()), &other).unwrap();
     assert!(reuse(&spill).is_none(), "another gain under the key");
-    assert!(reuse_image::<LinearImage>(&spill).is_none());
+    assert!(reuse_image::<PlanarImage>(&spill).is_none());
     fs::write(spill.gain_path(gain.key()), &nodes).unwrap();
 
     let channel = fs::read(spill.channel_path(0)).unwrap();
@@ -342,12 +355,12 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         reuse(&spill).is_none(),
         "a plane shorter than the shape it was committed with"
     );
-    assert!(reuse_image::<LinearImage>(&spill).is_none());
+    assert!(reuse_image::<PlanarImage>(&spill).is_none());
     let mut flipped = channel.clone();
     flipped[0] ^= 1;
     fs::write(spill.channel_path(0), &flipped).unwrap();
     assert!(reuse(&spill).is_none(), "a plane changed");
-    assert!(reuse_image::<LinearImage>(&spill).is_none());
+    assert!(reuse_image::<PlanarImage>(&spill).is_none());
     fs::write(spill.channel_path(0), &channel).unwrap();
     assert!(reuse(&spill).is_some(), "the planes as committed");
     fs::remove_file(spill.channel_path(0)).unwrap();

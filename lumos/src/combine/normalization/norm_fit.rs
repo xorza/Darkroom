@@ -102,7 +102,7 @@ impl NormFit<'_> {
                         Some(_) => planes.slot_medians(&pixels)?,
                         None => frames
                             .iter()
-                            .map(|frame| frame.source_stats.medians.clone())
+                            .map(|frame| frame.admitted.stats.medians.clone())
                             .collect(),
                     };
                     multiplicative_norms(&medians, self.reference)?
@@ -260,17 +260,18 @@ impl NormFit<'_> {
         let reference = self.reference;
         let medians: Vec<ArrayVec<f32, 3>> = frames
             .iter()
-            .map(|frame| frame.source_stats.medians.clone())
+            .map(|frame| frame.admitted.stats.medians.clone())
             .collect();
         let spread = |idx: usize, slot: usize| {
             frames[idx]
-                .source_stats
+                .admitted
+                .stats
                 .spread
                 .as_ref()
                 .map(|spread| spread[slot])
         };
         let scale = |idx: usize, slot: usize| -> Result<MeasuredScale, StackError> {
-            let stats = &frames[idx].source_stats;
+            let stats = &frames[idx].admitted.stats;
             let spread = spread(idx, slot)
                 .expect("a frame gathered per channel was measured with its spread");
             let noise = stats.slot_noise(slot);
@@ -300,7 +301,7 @@ impl NormFit<'_> {
             .iter()
             .enumerate()
             .map(|(idx, frame)| {
-                (0..frame.source_stats.medians.len())
+                (0..frame.admitted.stats.medians.len())
                     .map(|slot| {
                         if idx == reference {
                             return Ok(SlotEstimate::EXACT_IDENTITY);
@@ -479,7 +480,7 @@ impl<'a> SlotSamples<'a> {
             median,
             self.planes.cancel,
         )?;
-        Ok(shared.unwrap_or(self.planes.frames[frame].source_stats.medians[slot]))
+        Ok(shared.unwrap_or(self.planes.frames[frame].admitted.stats.medians[slot]))
     }
 
     /// Frame `frame`'s stored samples of `slot`, when it stores them over every pixel.

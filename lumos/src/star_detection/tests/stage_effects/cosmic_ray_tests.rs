@@ -18,9 +18,8 @@ use glam::DVec2;
 /// each side: its peak holds ≥ 1/1.3 = 0.77 of its 3×3 core, past the 0.7 cut, where a 4-px-FWHM
 /// star holds ≤ 0.14. With every other cut that can drop a ray opened — the area floor at 1, the
 /// eccentricity bar at 1 and the roundness bar at 2, the FWHM-outlier cut off — the default sharpness cut
-/// leaves no isolated ray, and a cut opened to 1.0 keeps every isolated ray below the saturation
-/// level (a saturated peak is rejected as such). With the defaults, no isolated ray survives
-/// either. Every isolated star survives all three.
+/// leaves no isolated ray, and a cut opened to 1.0 keeps every isolated ray, a saturated one
+/// flagged as a saturated star is. With the defaults, no isolated ray survives either. Every isolated star survives all three.
 #[test]
 fn sharpness_rejects_isolated_cosmic_rays() {
     init_tracing();
@@ -40,7 +39,12 @@ fn sharpness_rejects_isolated_cosmic_rays() {
     let pixels = frame.image.channel(0);
     let size = pixels.size();
     let (lone_stars, lone_rays) = (isolated(&stars, &rays, size), isolated(&rays, &stars, size));
-    let saturation = frame.image.metadata.header.saturation_level();
+    let saturation = frame
+        .image
+        .metadata
+        .derived
+        .unflagged_saturation()
+        .expect("a synthetic frame flags no saturation");
     let unsaturated = |ray: &DVec2| pixels[(ray.x as usize, ray.y as usize)] < saturation;
     assert!(
         lone_stars.len() >= 15,
@@ -95,7 +99,7 @@ fn sharpness_rejects_isolated_cosmic_rays() {
             save_image(overlay, "synthetic_starfield/stage_cr_rejection_overlay");
         }
         for ray in &lone_rays {
-            let expected = usize::from(rays_kept && unsaturated(ray));
+            let expected = usize::from(rays_kept);
             assert_eq!(near(*ray, &found, 1.0), expected, "{leg}: ray at {ray}");
         }
         for star in &lone_stars {

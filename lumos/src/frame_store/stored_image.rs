@@ -11,11 +11,10 @@ use crate::frame_store::plane_sink::{PlaneRole, PlaneSink};
 use crate::frame_store::stored_frame::{StoredFrame, WrittenFrame};
 use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_plane::StoredPlane;
-use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flags::flag_counts::FlagCounts;
 use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::frame::{Frame, FrameParts, Samples};
 use crate::image::metadata::image_metadata::ImageMetadata;
-use crate::image::stackable_image::{ImageParts, StackableImage};
 
 /// An image whose channels, flags and flat gain are memory maps: a calibrated light parked between
 /// detection and registration, or a frame the decode cache keeps.
@@ -43,8 +42,8 @@ impl StoredImage {
     /// `image`'s channels, `flags` and own flat gain written to `sink` and mapped back, a shared
     /// gain kept as the handle the run holds: `flags` are
     /// the image's own, or none when the frame does not keep them.
-    pub(crate) fn write<I: StackableImage>(
-        image: &I,
+    pub(crate) fn write(
+        image: &Frame<impl Samples>,
         flags: Option<&PixelFlags>,
         mut sink: impl PlaneSink,
     ) -> Result<Self, FrameStoreError> {
@@ -64,7 +63,7 @@ impl StoredImage {
             .map(|gain| StoredGain::write(gain, &mut sink))
             .transpose()?;
         Ok(Self {
-            metadata: image.metadata().clone(),
+            metadata: image.metadata.clone(),
             desc,
             channels,
             flags,
@@ -85,9 +84,9 @@ impl StoredImage {
         self.flags.as_ref().map(|flags| &flags.counts)
     }
 
-    /// The image read back into RAM, of `cfa_type`: its channels, flags, flat gain and metadata,
+    /// The image read back into RAM, of `pattern`: its channels, flags, flat gain and metadata,
     /// each plane copied out of its map front to back.
-    pub(crate) fn into_image<I: StackableImage>(self, cfa_type: Option<CfaType>) -> I {
+    pub(crate) fn into_image<S: Samples>(self, pattern: S::Pattern) -> Frame<S> {
         let size = self.desc.size();
         let planes = self
             .planes()
@@ -97,12 +96,12 @@ impl StoredImage {
             let bytes = flags.plane.chunk(0..size.pixel_count()).to_vec();
             PixelFlags::from_counted(Buffer2::new(size, bytes), flags.counts)
         });
-        let parts = ImageParts {
-            planes,
+        Frame::from(FrameParts {
+            samples: S::from_planes(planes, pattern),
+            metadata: self.metadata,
             flags,
             flat_gain: self.flat_gain.map(StoredGain::into_frame_gain),
-        };
-        I::from_parts(parts, cfa_type, self.metadata)
+        })
     }
 
     /// The image as the reference frame of a registered stack, every plane where it lies: its
@@ -172,7 +171,7 @@ mod tests {
         image.set_flags(PixelFlags::from_bytes(Buffer2::new(size, bytes.clone())));
         let parked = StoredImage::write(&image, image.flags(), &scratch).unwrap();
         assert_eq!(parked.evict(), MappedFile::EVICTS);
-        let loaded: LinearImage = parked.into_image(None);
+        let loaded: LinearImage = parked.into_image(());
         for channel in 0..3 {
             assert_eq!(
                 loaded.channel(channel).pixels(),
@@ -205,7 +204,7 @@ mod tests {
         };
         assert!(Arc::ptr_eq(held, &gain));
         assert_eq!(parked.flat_gain.as_ref().unwrap().own_channels(), 0);
-        let loaded: LinearImage = parked.into_image(None);
+        let loaded: LinearImage = parked.into_image(());
         let Some(FrameGain::Shared(read)) = loaded.flat_gain() else {
             panic!("a parked source gain reads back shared");
         };
@@ -217,7 +216,7 @@ mod tests {
         let stored = parked.flat_gain.as_ref().unwrap();
         assert!(matches!(stored, StoredGain::Mapped(_)));
         assert_eq!(stored.own_channels(), 1);
-        let loaded: LinearImage = parked.into_image(None);
+        let loaded: LinearImage = parked.into_image(());
         let Some(FrameGain::Own(read)) = loaded.flat_gain() else {
             panic!("a frame's own gain reads back its own");
         };

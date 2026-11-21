@@ -1,9 +1,10 @@
 use imaginarium::{ChannelLayout, PlanarDesc};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::drizzle::error::*;
 use crate::image::error::FrameDimensionMismatch;
+use crate::io::error::LoadError;
 
 /// The shared failures read the same from a drizzle as from a stack, their wording kept with
 /// the payload that owns it.
@@ -30,20 +31,23 @@ fn shared_failures_report_through_the_stack_error() {
 #[test]
 fn a_cancel_is_one_case_from_every_phase() {
     let cancels = [
-        DrizzleError::from(ImageError::cancelled(Path::new("light.fits"))),
+        DrizzleError::from(ImageError::new(
+            Path::new("light.fits"),
+            LoadError::Cancelled,
+        )),
         DrizzleError::from(AdmissionError::Cancelled),
         DrizzleError::from(StackError::Cancelled),
     ];
     for cancel in cancels {
         assert!(cancel.is_cancelled(), "{cancel:?}");
     }
-    let missing = ImageError::Io {
-        path: PathBuf::from("light.fits"),
-        source: io::Error::from(io::ErrorKind::NotFound),
-    };
+    let missing = ImageError::new(
+        Path::new("light.fits"),
+        io::Error::from(io::ErrorKind::NotFound),
+    );
     assert!(matches!(
         DrizzleError::from(missing),
-        DrizzleError::Stack(StackError::ImageLoad(ImageError::Io { path, .. }))
+        DrizzleError::Stack(StackError::ImageLoad(ImageError { path, kind: LoadError::Io(_) }))
             if path == Path::new("light.fits")
     ));
 }

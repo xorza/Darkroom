@@ -14,10 +14,9 @@ mod homography_refinement;
 mod weighted_pairs;
 
 use crate::registration::distortion::sip::SipModel;
-use crate::registration::registration_result::StarMatch;
+use crate::registration::registration_result::RegistrationResult;
 use crate::registration::transform::TransformType;
 use crate::registration::transform::linear_model::LinearModel;
-use crate::registration::warp_transform::WarpTransform;
 
 /// What the final fit fits: a transform alone, or one up to affine under a SIP correction applied
 /// before it.
@@ -58,14 +57,12 @@ impl FitModel {
 /// The final fit of one model.
 #[derive(Debug)]
 pub(crate) struct FinalFit {
-    pub(crate) warp: WarpTransform,
-    /// The pairs the warp was fitted to, with their residuals in target pixels.
-    pub(crate) matches: Vec<StarMatch>,
-    /// The robust scale of the normalized residuals, at least 1: how far the residuals spread
-    /// beyond what the stars' position σ claims.
-    pub(crate) scale: f64,
-    /// The RMS of the matches' residuals, in target pixels.
-    pub(crate) rms_error: f64,
+    /// The warp, the pairs it was fitted to with their residuals in target pixels, and their RMS.
+    pub(crate) result: RegistrationResult,
+    /// The variance, in square pixels, the residuals held past their stars' position σ: a floor
+    /// every pair shares — the seeing's jitter, a distortion the model leaves — that the fit added
+    /// to each pair's variance; 0 where the position σ explains the residuals.
+    pub(crate) excess_variance: f64,
 }
 
 /// Why a final fit produced no transform.

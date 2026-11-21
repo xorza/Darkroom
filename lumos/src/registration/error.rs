@@ -131,8 +131,12 @@ fn joined(failures: &[FailedModel]) -> String {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum RegistrationError {
     /// Not enough stars detected.
-    #[error("too few stars detected: found {found}, need {required}")]
-    TooFewStars { found: usize, required: usize },
+    #[error("{catalog} catalog has {found} stars, and registration needs {required}")]
+    TooFewStars {
+        catalog: RegistrationCatalog,
+        found: usize,
+        required: usize,
+    },
     /// Too few of a catalog's stars are unsaturated for the final fit, which reads no saturated
     /// star's position.
     #[error("{catalog} catalog has {found} unsaturated stars, and the fit needs {required}")]

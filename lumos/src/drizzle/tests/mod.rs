@@ -19,8 +19,8 @@ use crate::drizzle::accumulator::internals::DrizzleAccumulator;
 use crate::drizzle::accumulator::kernel_plan::DropReach;
 use crate::drizzle::drizzle_config::DrizzleConfig;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
-use crate::drizzle::drizzle_kernel::DrizzleKernel;
-use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
+use crate::drizzle::drizzle_sampling::{DrizzleSampling, DrizzleScale, DropShape, Pixfrac};
+use crate::drizzle::error::DrizzleError;
 use crate::image::error::FrameDimensionMismatch;
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_map::QualityMap;
@@ -58,7 +58,7 @@ fn accumulator(input_desc: PlanarDesc, config: DrizzleConfig) -> DrizzleAccumula
 /// equally weighted and unnormalized, with the standard quality planes.
 fn plain_stack() -> StackConfig {
     StackConfig {
-        combine: Combine::mean(),
+        combine: Combine::Mean,
         weighting: Weighting::Equal,
         normalization: Normalization::None,
         ..StackConfig::light()
@@ -81,14 +81,55 @@ fn drizzle_plain(
     )
 }
 
+/// The five ways a frame is sampled, as these tests sweep them: the three drop shapes, a point, and
+/// Lanczos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kernel {
+    Square,
+    Turbo,
+    Point,
+    Gaussian,
+    Lanczos,
+}
+
+impl Kernel {
+    const ALL: [Self; 5] = [
+        Self::Square,
+        Self::Turbo,
+        Self::Point,
+        Self::Gaussian,
+        Self::Lanczos,
+    ];
+
+    /// This kernel at `scale` and `pixfrac`; a point reads no pixfrac, and Lanczos neither, at
+    /// scale 1 alone.
+    fn sampling(self, scale: f64, pixfrac: f64) -> DrizzleSampling {
+        let drops = |shape| DrizzleSampling::Drops {
+            shape,
+            scale: DrizzleScale::new(scale),
+            pixfrac: Pixfrac::new(pixfrac),
+        };
+        match self {
+            Self::Square => drops(DropShape::Square),
+            Self::Turbo => drops(DropShape::Turbo),
+            Self::Gaussian => drops(DropShape::Gaussian),
+            Self::Point => DrizzleSampling::Point {
+                scale: DrizzleScale::new(scale),
+            },
+            Self::Lanczos => {
+                assert_eq!((scale, pixfrac), (1.0, 1.0), "Lanczos resamples at scale 1");
+                DrizzleSampling::Lanczos
+            }
+        }
+    }
+}
+
 /// A drizzle config for `kernel`. `min_weight_fraction` is 0 everywhere in these tests so nothing
 /// is dropped for thin coverage, `fill_value` is 0 unless a case overrides it by struct update, and
 /// the frames combine under [`plain_stack`].
-fn kernel_config(kernel: DrizzleKernel, scale: f32, pixfrac: f32) -> DrizzleConfig {
+fn kernel_config(kernel: Kernel, scale: f64, pixfrac: f64) -> DrizzleConfig {
     DrizzleConfig {
-        scale,
-        pixfrac,
-        kernel,
+        sampling: kernel.sampling(scale, pixfrac),
         fill_value: 0.0,
         min_weight_fraction: 0.0,
         stack: plain_stack(),
@@ -97,9 +138,9 @@ fn kernel_config(kernel: DrizzleKernel, scale: f32, pixfrac: f32) -> DrizzleConf
 
 /// [`kernel_config`] at the sampling `kernel` is usually run at: scale 2 and pixfrac 0.8, except
 /// Lanczos, which is defined only at scale 1 and pixfrac 1.
-fn usual_config(kernel: DrizzleKernel) -> DrizzleConfig {
+fn usual_config(kernel: Kernel) -> DrizzleConfig {
     match kernel {
-        DrizzleKernel::Lanczos => kernel_config(kernel, 1.0, 1.0),
+        Kernel::Lanczos => kernel_config(kernel, 1.0, 1.0),
         _ => kernel_config(kernel, 2.0, 0.8),
     }
 }
@@ -117,12 +158,21 @@ fn constant_image(size: USize2, value: f32) -> LinearImage {
     mono_image(size, vec![value; size.pixel_count()])
 }
 
+/// [`constant_image`] whose noise is a quantization `sigma`: a constant frame measures none of its
+/// own, so noise weighting weighs it `1/sigma²`.
+fn quantized_image(size: USize2, value: f32, sigma: f32) -> LinearImage {
+    let mut image = constant_image(size, value);
+    image.metadata.derived.set_quantization_sigma(Some(sigma));
+    image
+}
+
 /// The one weight plane drizzle shares between channels.
 fn weight_plane(product: &StackProduct) -> &Buffer2<f32> {
     product
         .weight
         .as_ref()
         .expect("weight was requested")
+        .map
         .channel(0)
 }
 
@@ -141,5 +191,5 @@ fn drizzle_frames(
 /// The registration warp a fixture's input-to-reference `transform` stands for: its inverse, the
 /// direction registration reports.
 fn warp_of(transform: Transform) -> WarpTransform {
-    WarpTransform::new(transform.inverse())
+    WarpTransform::from(transform.inverse())
 }

@@ -19,7 +19,6 @@ use crate::frame_store::decode_cache::frame_spill::FrameSpill;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::CombineBudget;
 use crate::image::cfa::bayer_pattern::BayerPattern;
-use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
@@ -45,13 +44,11 @@ impl SetFrame<'_> {
         let Self { source, desc, idx } = self;
         // A fresh intake per call: these tests are about one frame's cache files, not the set it
         // belongs to, so no frame 0 is admitted before it.
-        let run = IngestRun::planned(
-            1 << 40,
-            &IngestConfig {
-                keep_cache: true,
-                ..IngestConfig::with_cache_dir(cache_dir.to_path_buf())
-            },
-        );
+        let config = IngestConfig {
+            keep_cache: true,
+            ..IngestConfig::with_cache_dir(cache_dir.to_path_buf())
+        };
+        let run = IngestRun::planned(1 << 40, &config);
         let intake = FrameIntake::new(
             IntakePlan {
                 desc,
@@ -66,7 +63,7 @@ impl SetFrame<'_> {
             combine: CombineBudget::new(Budget::of_memory(1 << 30, 1)),
         };
         let paths = vec![source; idx + 1];
-        let files = FileSet::<_, D>::new(&paths, &run.storage, &run.ctx).unwrap();
+        let files = FileSet::<_, D>::new(&paths, &run).unwrap();
         FrameStore {
             files: &files,
             kept: files.storage().kept(),
@@ -134,7 +131,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
 
     let first = frame.load::<LinearDecoder>(temp_dir.path()).unwrap();
     assert_eq!(first.channels[0].chunk(0..12), pixels);
-    assert_eq!(first.source_stats.medians[0], 5.5);
+    assert_eq!(first.admitted.stats.medians[0], 5.5);
     drop(first);
 
     // A sample and the statistics changed on disk and sealed again come back as they are: the
@@ -157,13 +154,13 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     edit(102.0);
     let reused = frame.load::<LinearDecoder>(temp_dir.path()).unwrap();
     assert_eq!(reused.channels[0].chunk(0..3), &[0.0, 1.0, 102.0]);
-    assert_eq!(reused.source_stats.medians[0], 99.0);
+    assert_eq!(reused.admitted.stats.medians[0], 99.0);
     drop(reused);
 
     fs::write(&plane, [0u8; 48]).unwrap();
     let decoded = frame.load::<LinearDecoder>(temp_dir.path()).unwrap();
     assert_eq!(decoded.channels[0].chunk(0..12), pixels, "a zeroed plane");
-    assert_eq!(decoded.source_stats.medians[0], 5.5);
+    assert_eq!(decoded.admitted.stats.medians[0], 5.5);
     drop(decoded);
 
     let settle = || thread::sleep(Duration::from_millis(20));
@@ -453,16 +450,17 @@ fn cache_frame_dimension_mismatch() {
 /// 3 × 46 + 32 + 96.
 #[test]
 fn stages_charge_the_decode_the_normalization_and_the_combine() {
-    let peek = SetPeek {
+    let peek = FilesPeek {
         idx: 0,
         info: FrameInfo {
             desc: PlanarDesc::new((100, 100), ChannelLayout::Mono),
-            cfa_type: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
+            cfa_type: Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb))),
             decoder: DecoderBytes::default(),
             gain_bytes: 8112,
         },
-        held: 30_000,
-        gains: 8112,
+        uncached_count: 0,
+        held_bytes: 30_000,
+        gains_bytes: 8112,
     };
     let combine = PlannedCombine {
         normalization: Normalization::None,
@@ -473,21 +471,21 @@ fn stages_charge_the_decode_the_normalization_and_the_combine() {
         stages(combine, peek, 3, 1),
         [
             Stage {
-                kept,
-                held: 38_112,
-                in_flight: 49_000,
+                kept_bytes: kept,
+                held_bytes: 38_112,
+                in_flight_bytes: 49_000,
                 units: Units::Frames,
             },
             Stage {
-                kept,
-                held: 8112,
-                in_flight: 0,
+                kept_bytes: kept,
+                held_bytes: 8112,
+                in_flight_bytes: 0,
                 units: Units::Whole,
             },
             Stage {
-                kept,
-                held: 58_112 + 266,
-                in_flight: 3000,
+                kept_bytes: kept,
+                held_bytes: 58_112 + 266,
+                in_flight_bytes: 3000,
                 units: Units::Rows(100),
             },
         ]

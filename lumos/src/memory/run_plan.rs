@@ -34,8 +34,9 @@ impl RunPlan {
         let kept_sets: ArrayVec<u64, MAX_STAGES> = stages
             .iter()
             .scan(0, |before, stage| {
-                let set = ((*before).max(stage.kept) as u64).saturating_mul(frame_count as u64);
-                *before = stage.kept;
+                let set =
+                    ((*before).max(stage.kept_bytes) as u64).saturating_mul(frame_count as u64);
+                *before = stage.kept_bytes;
                 Some(set)
             })
             .collect();

@@ -1,10 +1,12 @@
 use crate::calibration::dark_match::*;
+use crate::frame::capture_conditions::SensorSetting;
 
 fn conditions(exposure_time: Option<f64>, ccd_temp: Option<f64>) -> CaptureConditions {
     CaptureConditions {
         exposure_time,
         ccd_temp,
         camera_temp: None,
+        setting: SensorSetting::default(),
     }
 }
 
@@ -38,7 +40,7 @@ fn a_bias_free_dark_of_another_exposure_scales_by_the_ratio() {
                 conditions(Some(dark), None),
                 bias,
             ),
-            Err(DarkMismatch::Exposure { frame: 300.0, dark })
+            Err(MasterMismatch::Exposure { frame: 300.0, dark })
         );
     }
 }

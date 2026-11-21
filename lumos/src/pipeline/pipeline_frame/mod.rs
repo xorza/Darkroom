@@ -23,7 +23,7 @@ impl PipelineFrame {
     pub(super) fn into_resident(self) -> LinearImage {
         match self {
             Self::Resident(image) => image,
-            Self::Spilled(stored) => stored.into_image(None),
+            Self::Spilled(stored) => stored.into_image(()),
         }
     }
 

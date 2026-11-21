@@ -11,9 +11,10 @@ use crate::internals::real_data::{LightPair, first_and_last_lights};
 use crate::registration::distortion::sip::SipModel;
 use crate::registration::distortion::sip::sip_order::SipOrder;
 use crate::registration::point_normalization::centroid;
+use crate::registration::registrar::Registrar;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::warp_config::WarpConfig;
-use crate::registration::transform_model::TransformModel;
+use crate::registration::transform_model::{ModelChoice, TransformModel};
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
 
@@ -59,47 +60,46 @@ fn register_two_lights() {
 
     // Register image 2 to image 1 WITHOUT SIP first (baseline).
     let reg_config = RegistrationConfig {
-        model: TransformModel::Auto { sip: None },
+        model: TransformModel::Plain(ModelChoice::Auto),
         ..RegistrationConfig::default()
     };
 
-    let result = reg_config
-        .registrar()
-        .unwrap()
+    let result = Registrar::new(reg_config)
         .register(&result1.stars, &result2.stars)
         .expect("Registration should succeed");
 
-    let baseline_rms = result.rms_error();
+    let baseline_rms = result.rms_error_px();
 
     println!("Registration result:");
-    println!("  Matched stars: {}", result.inlier_count());
+    println!("  Matched stars: {}", result.matches().len());
     println!("  RMS error:     {baseline_rms:.4} pixels");
 
-    let t = result.transform().translation_components();
+    let t = result.warp().linear().translation_components();
     println!("  Translation:   ({:.2}, {:.2})", t.x, t.y);
     println!(
         "  Rotation:      {:.4} rad ({:.2} deg)",
-        result.transform().local_geometry(DVec2::ZERO).rotation,
+        result.warp().linear().local_geometry(DVec2::ZERO).rotation,
         result
-            .transform()
+            .warp()
+            .linear()
             .local_geometry(DVec2::ZERO)
             .rotation
             .to_degrees()
     );
     println!(
         "  Stretch:       {:?}",
-        result.transform().local_geometry(DVec2::ZERO).stretch
+        result.warp().linear().local_geometry(DVec2::ZERO).stretch
     );
 
     // Now fit SIP on the SAME inliers from the SAME RANSAC run for fair comparison. A match
     // indexes the star slices `register` was handed.
     let inlier_ref: Vec<DVec2> = result
-        .matched_stars()
+        .matches()
         .iter()
         .map(|star_match| result1.stars[star_match.idxs.reference].pos)
         .collect();
     let inlier_target: Vec<DVec2> = result
-        .matched_stars()
+        .matches()
         .iter()
         .map(|star_match| result2.stars[star_match.idxs.target].pos)
         .collect();
@@ -109,10 +109,10 @@ fn register_two_lights() {
         order: SipOrder::Four,
         origin,
     }
-    .fitted_under(&result.transform(), &inlier_ref, &inlier_target);
+    .fitted_under(&result.warp().linear(), &inlier_ref, &inlier_target);
 
     let corrected_residuals =
-        sip.corrected_residuals(&inlier_ref, &inlier_target, &result.transform());
+        sip.corrected_residuals(&inlier_ref, &inlier_target, &result.warp().linear());
     let sip_rms = (corrected_residuals.iter().map(|r| r * r).sum::<f64>()
         / corrected_residuals.len() as f64)
         .sqrt();
@@ -134,20 +134,18 @@ fn register_two_lights() {
     );
 
     assert!(
-        result.inlier_count() >= 5,
+        result.matches().len() >= 5,
         "Expected at least 5 inlier matches, got {}",
-        result.inlier_count()
+        result.matches().len()
     );
     assert!(
-        result.rms_error() < 1.5,
+        result.rms_error_px() < 1.5,
         "Expected RMS error < 1.5 pixels, got {:.4}",
-        result.rms_error()
+        result.rms_error_px()
     );
 
     let warp_start = Instant::now();
-    let warped = WarpConfig::default()
-        .warp(&img2, result.warp_transform())
-        .image;
+    let warped = WarpConfig::default().warp(&img2, result.warp()).image;
     let warp_elapsed = warp_start.elapsed();
 
     println!(

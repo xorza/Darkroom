@@ -8,7 +8,7 @@
 
 use common::{Introspect, IntrospectEnum};
 use lumos::{
-    Combine, FwhmMode, Normalization, RegistrationConfig, SipConfig, StackConfig,
+    Combine, FwhmMode, ModelChoice, Normalization, RegistrationConfig, SipConfig, StackConfig,
     StarDetectionConfig, TransformModel, Weighting,
 };
 
@@ -46,7 +46,7 @@ pub(crate) enum RegistrationPreset {
     Fast,
     Precise,
     WideField,
-    Mosaic,
+    WideScale,
 }
 
 impl Preset for RegistrationPreset {
@@ -59,7 +59,7 @@ impl Preset for RegistrationPreset {
             Self::Fast => RegistrationConfig::fast(),
             Self::Precise => RegistrationConfig::precise(),
             Self::WideField => RegistrationConfig::wide_field(),
-            Self::Mosaic => RegistrationConfig::mosaic(),
+            Self::WideScale => RegistrationConfig::wide_scale(),
         }
     }
 }
@@ -72,7 +72,6 @@ pub(crate) struct DetectionKnobs {
     sigma_threshold: f32,
     expected_fwhm: f32,
     min_area: usize,
-    max_area: usize,
     min_snr: f32,
     max_eccentricity: f32,
 }
@@ -95,7 +94,6 @@ impl DetectionKnobs {
                 .expect("a config the editor offers runs a matched filter")
                 .seed(),
             min_area: config.extraction.min_area,
-            max_area: config.extraction.max_area,
             min_snr: config.filter.min_snr,
             max_eccentricity: config.filter.max_eccentricity,
         }
@@ -108,7 +106,6 @@ impl From<DetectionKnobs> for StarDetectionConfig {
         config.extraction.sigma_threshold = knobs.sigma_threshold;
         config.fwhm.mode = Some(FwhmMode::Fixed(knobs.expected_fwhm));
         config.extraction.min_area = knobs.min_area;
-        config.extraction.max_area = knobs.max_area;
         config.filter.min_snr = knobs.min_snr;
         config.filter.max_eccentricity = knobs.max_eccentricity;
         config
@@ -116,8 +113,9 @@ impl From<DetectionKnobs> for StarDetectionConfig {
 }
 
 /// The registration knobs the editor offers. `sip_enabled` stands in for the
-/// `sip` of [`TransformModel::Auto`], the model the editor fits: on means the
-/// default SIP fit, off means none.
+/// SIP correction of the model the editor fits, chosen by `Auto` either way:
+/// on means [`TransformModel::WithSip`] with the default SIP fit, off
+/// [`TransformModel::Plain`].
 #[derive(Debug, Clone, Introspect)]
 #[config(
     type_id = "63cd4de9-b82f-4829-bea5-391da64e296f",
@@ -128,7 +126,7 @@ pub(crate) struct RegistrationKnobs {
     min_matches: usize,
     ratio_tolerance: f64,
     ransac_iterations: usize,
-    max_rms_error: f64,
+    max_rms_error_px: f64,
     sip_enabled: bool,
 }
 
@@ -146,7 +144,7 @@ impl RegistrationKnobs {
             min_matches: config.matching.min_matches,
             ratio_tolerance: config.matching.triangle.ratio_tolerance,
             ransac_iterations: config.ransac.max_iterations,
-            max_rms_error: config.max_rms_error,
+            max_rms_error_px: config.max_rms_error_px,
             sip_enabled: config.model.sip().is_some(),
         }
     }
@@ -159,9 +157,11 @@ impl From<RegistrationKnobs> for RegistrationConfig {
         config.matching.min_matches = knobs.min_matches;
         config.matching.triangle.ratio_tolerance = knobs.ratio_tolerance;
         config.ransac.max_iterations = knobs.ransac_iterations;
-        config.max_rms_error = knobs.max_rms_error;
-        config.model = TransformModel::Auto {
-            sip: knobs.sip_enabled.then(SipConfig::default),
+        config.max_rms_error_px = knobs.max_rms_error_px;
+        config.model = if knobs.sip_enabled {
+            TransformModel::WithSip(ModelChoice::Auto, SipConfig::default())
+        } else {
+            TransformModel::Plain(ModelChoice::Auto)
         };
         config
     }
@@ -243,8 +243,8 @@ impl From<CombineKnobs> for StackConfig {
         let combine = match knobs.method {
             CombineMethodChoice::SigmaClipped => Combine::sigma_clip(knobs.sigma),
             CombineMethodChoice::Winsorized => Combine::winsorized(knobs.sigma),
-            CombineMethodChoice::Median => Combine::median(),
-            CombineMethodChoice::Mean => Combine::mean(),
+            CombineMethodChoice::Median => Combine::Median,
+            CombineMethodChoice::Mean => Combine::Mean,
         };
         Self {
             combine,
@@ -258,8 +258,8 @@ impl From<CombineKnobs> for StackConfig {
 #[cfg(test)]
 mod tests {
     use lumos::{
-        Combine, Normalization, RegistrationConfig, SipConfig, StackConfig, TransformModel,
-        Weighting,
+        Combine, ModelChoice, Normalization, RegistrationConfig, SipConfig, StackConfig,
+        TransformModel, Weighting,
     };
     use lumos::{FwhmMode, StarDetectionConfig};
 
@@ -276,7 +276,6 @@ mod tests {
         let mut config = StarDetectionConfig::default();
         config.extraction.sigma_threshold = 4.5;
         config.extraction.min_area = 7;
-        config.extraction.max_area = 900;
         config.fwhm.mode = Some(FwhmMode::Fixed(3.25));
         config.filter.min_snr = 12.5;
         config.filter.max_eccentricity = 0.75;
@@ -284,7 +283,6 @@ mod tests {
         let restored: StarDetectionConfig = DetectionKnobs::of(&config).into();
         assert_eq!(restored.extraction.sigma_threshold, 4.5);
         assert_eq!(restored.extraction.min_area, 7);
-        assert_eq!(restored.extraction.max_area, 900);
         assert_eq!(restored.fwhm.mode, Some(FwhmMode::Fixed(3.25)));
         assert_eq!(restored.filter.min_snr, 12.5);
         assert_eq!(restored.filter.max_eccentricity, 0.75);
@@ -297,14 +295,14 @@ mod tests {
         config.matching.min_matches = 9;
         config.matching.triangle.ratio_tolerance = 0.125;
         config.ransac.max_iterations = 1500;
-        config.max_rms_error = 0.75;
+        config.max_rms_error_px = 0.75;
 
         let restored: RegistrationConfig = RegistrationKnobs::of(&config).into();
         assert_eq!(restored.matching.max_stars, 250);
         assert_eq!(restored.matching.min_matches, 9);
         assert_eq!(restored.matching.triangle.ratio_tolerance, 0.125);
         assert_eq!(restored.ransac.max_iterations, 1500);
-        assert_eq!(restored.max_rms_error, 0.75);
+        assert_eq!(restored.max_rms_error_px, 0.75);
     }
 
     /// The one knob that stands for a whole sub-config rather than a field:
@@ -312,16 +310,14 @@ mod tests {
     #[test]
     fn registration_sip_flag_stands_for_the_whole_sub_config() {
         let without = RegistrationConfig {
-            model: TransformModel::Auto { sip: None },
+            model: TransformModel::Plain(ModelChoice::Auto),
             ..RegistrationConfig::default()
         };
         let off: RegistrationConfig = RegistrationKnobs::of(&without).into();
         assert!(off.model.sip().is_none());
 
         let with = RegistrationConfig {
-            model: TransformModel::Auto {
-                sip: Some(SipConfig::default()),
-            },
+            model: TransformModel::WithSip(ModelChoice::Auto, SipConfig::default()),
             ..RegistrationConfig::default()
         };
         let on: RegistrationConfig = RegistrationKnobs::of(&with).into();
@@ -341,8 +337,8 @@ mod tests {
         for (method, combine) in [
             (CombineMethodChoice::SigmaClipped, Combine::sigma_clip(2.5)),
             (CombineMethodChoice::Winsorized, Combine::winsorized(2.5)),
-            (CombineMethodChoice::Median, Combine::median()),
-            (CombineMethodChoice::Mean, Combine::mean()),
+            (CombineMethodChoice::Median, Combine::Median),
+            (CombineMethodChoice::Mean, Combine::Mean),
         ] {
             assert_eq!(
                 StackConfig::from(knobs(method)),

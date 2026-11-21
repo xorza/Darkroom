@@ -71,7 +71,7 @@ impl<'a> SlotPlanes<'a> {
         idxs: &[usize],
     ) -> Result<f64, StackError> {
         let frame = &self.frames[frame];
-        let sigma = f64::from(frame.source_stats.slot_noise(slot));
+        let sigma = f64::from(frame.admitted.stats.slot_noise(slot));
         let Some(confidence) = frame.quality.confidence(self.slots.channel(slot)) else {
             return Ok(sigma * sigma);
         };

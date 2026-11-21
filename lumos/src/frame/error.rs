@@ -1,4 +1,5 @@
-//! The errors of a frame set: a frame taken under other conditions than the set's.
+//! The errors of a frame set: a frame taken under other conditions than the set's, or a master
+//! than the frame it calibrates.
 
 use crate::frame::capture_condition::CaptureCondition;
 
@@ -16,4 +17,14 @@ pub struct ConditionMismatch {
     pub value: f64,
     pub reference_idx: usize,
     pub reference: f64,
+}
+
+/// A master was taken at another sensor setting than the frame it calibrates: a bias or a dark at
+/// another gain, ISO, offset or binning holds another offset, read noise or dark current.
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+#[error("the frame has {condition} {frame}, the master {master}")]
+pub struct SettingMismatch {
+    pub condition: CaptureCondition,
+    pub frame: f64,
+    pub master: f64,
 }

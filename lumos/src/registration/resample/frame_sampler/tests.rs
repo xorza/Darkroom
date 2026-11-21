@@ -43,7 +43,6 @@ struct Oracle<'a> {
     validity: Option<Validity<'a>>,
     flags: Option<&'a PixelFlags>,
     size: USize2,
-    border: f32,
 }
 
 /// Sums over a window's taps that hold data, and its whole magnitude.
@@ -183,7 +182,7 @@ impl Oracle<'_> {
 
     fn no_data(&self) -> Expected {
         Expected {
-            values: vec![f64::from(self.border); self.planes.len()],
+            values: vec![0.0; self.planes.len()],
             coverage: 0.0,
             confidence: 0.0,
             tolerance: 0.0,
@@ -474,20 +473,12 @@ fn every_pixel_follows_the_rules() {
             let source = SourceImage::of(&rgb);
             let mut scratch = FlagScratch::default();
             let sources = flagged.then(|| scratch.prepare(&flags, method.window_reach()));
-            let sampler = FrameSampler::new(
-                SampleRule {
-                    method,
-                    border: -7.0,
-                },
-                &source,
-                sources.as_ref(),
-            );
+            let sampler = FrameSampler::new(SampleRule { method }, &source, sources.as_ref());
             let oracle = Oracle {
                 planes: sampler.sources.iter().copied().collect(),
                 validity: sources.as_ref().and_then(FlaggedSources::validity),
                 flags: flagged.then_some(&flags),
                 size,
-                border: -7.0,
             };
             let Sampled {
                 channels,
@@ -560,14 +551,7 @@ fn every_tier_samples_to_portables_bits() {
             let source = SourceImage::of(&rgb);
             let mut scratch = FlagScratch::default();
             let sources = flagged.then(|| scratch.prepare(&flags, method.window_reach()));
-            let sampler = FrameSampler::new(
-                SampleRule {
-                    method,
-                    border: -7.0,
-                },
-                &source,
-                sources.as_ref(),
-            );
+            let sampler = FrameSampler::new(SampleRule { method }, &source, sources.as_ref());
             let reference = sample(IsaTier::portable(), &sampler, &poss);
             for tier in IsaTier::supported() {
                 let sampled = sample(tier, &sampler, &poss);
@@ -613,14 +597,7 @@ fn clamped_sample(bright: f32, bg: f32, threshold: Option<f32>) -> f32 {
             .map(|threshold| RingingClamp::new(ClampingThreshold::new(threshold).unwrap())),
     });
     let source = SourceImage::of(&image);
-    let sampler = FrameSampler::new(
-        SampleRule {
-            method,
-            border: 0.0,
-        },
-        &source,
-        None,
-    );
+    let sampler = FrameSampler::new(SampleRule { method }, &source, None);
     let poss = [SourcePos::within(pos, size)];
     sample(IsaTier::portable(), &sampler, &poss).channels[0][0]
 }
@@ -714,14 +691,7 @@ fn two_adjacent_nulls_fall_back_to_bilinear() {
     let source = SourceImage::of(&image);
     let mut scratch = FlagScratch::default();
     let sources = scratch.prepare(image.flags().unwrap(), method.window_reach());
-    let sampler = FrameSampler::new(
-        SampleRule {
-            method,
-            border: -7.0,
-        },
-        &source,
-        Some(&sources),
-    );
+    let sampler = FrameSampler::new(SampleRule { method }, &source, Some(&sources));
     let poss = [SourcePos::within(DVec2::new(8.5, 8.5), size)];
     let Sampled {
         channels,
@@ -757,14 +727,13 @@ fn coverage_and_confidence_vanish_together() {
     for method in InterpolationMethod::ALL {
         let sample_method = SampleMethod::for_frame(
             WarpConfig::with_method(method),
-            &WarpTransform::new(Transform::identity()),
+            &WarpTransform::from(Transform::identity()),
             size,
         );
         let source = SourceImage::of(&rgb);
         let sampler = FrameSampler::new(
             SampleRule {
                 method: sample_method,
-                border: 0.0,
             },
             &source,
             None,
@@ -800,7 +769,7 @@ fn a_halved_nyquist_grating_does_not_alias() {
         .collect();
     let image =
         LinearImage::from_interleaved(PlanarDesc::new((64, 64), ChannelLayout::Mono), grating);
-    let halving = WarpTransform::new(Transform::similarity(DVec2::ZERO, 0.0, 2.0));
+    let halving = WarpTransform::from(Transform::similarity(DVec2::ZERO, 0.0, 2.0));
     let warped = WarpConfig::with_method(InterpolationMethod::Lanczos3).warp(&image, &halving);
 
     let lut = LanczosOrder::Three.lut();
@@ -832,7 +801,6 @@ fn a_halved_nyquist_grating_does_not_alias() {
     let sampler = FrameSampler::new(
         SampleRule {
             method: unstretched,
-            border: 0.0,
         },
         &source,
         None,
@@ -875,14 +843,7 @@ fn filters_reproduce_their_polynomials() {
     };
     let at = |method, image: &LinearImage, p: DVec2| {
         let source = SourceImage::of(image);
-        let sampler = FrameSampler::new(
-            SampleRule {
-                method,
-                border: 0.0,
-            },
-            &source,
-            None,
-        );
+        let sampler = FrameSampler::new(SampleRule { method }, &source, None);
         sample(IsaTier::portable(), &sampler, &[SourcePos::within(p, size)]).channels[0][0]
     };
     let (plane_image, quadratic_image) = (image(&plane), image(&quadratic));
@@ -934,14 +895,13 @@ fn filters_reproduce_their_polynomials() {
     for method in InterpolationMethod::ALL {
         let sample_method = SampleMethod::for_frame(
             WarpConfig::with_method(method),
-            &WarpTransform::new(Transform::identity()),
+            &WarpTransform::from(Transform::identity()),
             size,
         );
         let source = SourceImage::of(&constant);
         let sampler = FrameSampler::new(
             SampleRule {
                 method: sample_method,
-                border: 9.0,
             },
             &source,
             None,
@@ -954,7 +914,7 @@ fn filters_reproduce_their_polynomials() {
                     "{method:?}: {value} at coverage {coverage}"
                 );
             } else {
-                assert_eq!(value, 9.0, "{method:?}");
+                assert_eq!(value, 0.0, "{method:?}");
             }
         }
     }

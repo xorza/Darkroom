@@ -9,7 +9,7 @@ use imaginarium::PlanarDesc;
 use crate::error::Cancelled;
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_facts::FrameFacts;
-use crate::image::stackable_image::StackableImage;
+use crate::image::frame::{Frame, Samples};
 use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_admission::FrameAdmission;
 use crate::ingest::ingest_run::IngestRun;
@@ -43,7 +43,7 @@ pub(crate) struct IntakePlan {
 
 impl<'a> FrameIntake<'a> {
     /// The intake of `plan`'s frames under `run`.
-    pub(crate) fn new(plan: IntakePlan, run: &'a IngestRun) -> Self {
+    pub(crate) fn new(plan: IntakePlan, run: &'a IngestRun<'_>) -> Self {
         Self {
             admission: FrameAdmission::new(plan.desc, plan.frame_count, &run.ctx.cancel),
             ctx: run.ctx.for_decode_slots(plan.decode_slots.max(1)),
@@ -73,7 +73,7 @@ impl<'a> FrameIntake<'a> {
     pub(crate) fn admit(
         &self,
         idx: usize,
-        image: &impl StackableImage,
+        image: &Frame<impl Samples>,
     ) -> Result<Admitted, AdmissionError> {
         self.admission.admit(idx, image)
     }
@@ -83,7 +83,7 @@ impl<'a> FrameIntake<'a> {
     pub(crate) fn admit_measured(
         &self,
         idx: usize,
-        image: &impl StackableImage,
+        image: &Frame<impl Samples>,
         measured: Option<Admitted>,
     ) -> Result<Admitted, AdmissionError> {
         self.admission.admit_measured(idx, image, measured)

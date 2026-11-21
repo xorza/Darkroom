@@ -4,11 +4,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use common::fs::{self, PublicationMode};
-use common::{CancelToken, ErrorChain, FileIdentity};
+use common::{CancelToken, ErrorChain};
 use lumos::{
-    CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, IngestConfig, LoadCtx, MasterBuild,
-    MasterBuildError, MasterCache, MasterInputs, MasterRole, NoMasterCache, ProgressCallback,
-    ProgressMonitor, SigmaThreshold, WriteError,
+    CalibrationMasters, CalibrationSet, CfaImage, DecodeConfig, IngestConfig, LoadCtx,
+    MasterBuildError, MasterCache, MasterRole, MasterSlot, MastersConfig, ProgressMonitor,
+    SigmaThreshold, WriteError,
 };
 use scenarium::{
     DataType, DynamicValue, FloatSpan, Func, FuncId, InputDecl, Invocation, InvokeError,
@@ -21,15 +21,9 @@ use crate::astro::nodes::runtime;
 
 const BUILD_MASTERS_FUNC_ID: FuncId = FuncId::literal("f2f6f1ff-5b10-409c-900f-d6b48750a529");
 
-/// Why a master kept next to its frames could not be read or written.
+/// Why a master could not be kept next to its frames, which the build reports and carries on.
 #[derive(Debug, thiserror::Error)]
 enum CacheError {
-    #[error("failed to read metadata for '{path}'", path = .path.display())]
-    FrameMetadata {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
     #[error("failed to write cached calibration master '{path}'", path = .path.display())]
     WriteMaster {
         path: PathBuf,
@@ -45,8 +39,6 @@ enum CacheError {
     #[error("calibration cache requires one source directory, but '{first}' and '{other}' differ")]
     SourceDirs { first: PathBuf, other: PathBuf },
 }
-
-type BuildMastersError = MasterBuildError<CacheError>;
 
 /// Whether Build Masters keeps each master beside its frames, to reuse while they are unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,33 +57,24 @@ struct MastersRequest {
 }
 
 impl MastersRequest {
-    fn build(&self, cancel: &CancelToken) -> Result<CalibrationMasters, BuildMastersError> {
-        match self.caching {
-            Caching::Off => self
-                .build_with(&NoMasterCache, cancel)
-                .map_err(MasterBuildError::with_cache_error),
-            Caching::BesideFrames => self.build_with(&SourceDirCache { cancel }, cancel),
-        }
-    }
-
-    fn build_with<C: MasterCache<PathBuf>>(
-        &self,
-        cache: &C,
-        cancel: &CancelToken,
-    ) -> Result<CalibrationMasters, MasterBuildError<C::Error>> {
+    fn build(&self, cancel: &CancelToken) -> Result<CalibrationMasters, MasterBuildError> {
+        let cache = SourceDirCache { cancel };
         CalibrationMasters::build(
-            MasterBuild {
-                frames: CalibrationSet {
-                    dark: self.frames.dark.as_slice(),
-                    flat: self.frames.flat.as_slice(),
-                    bias: self.frames.bias.as_slice(),
-                    flat_dark: self.frames.flat_dark.as_slice(),
+            CalibrationSet {
+                dark: self.frames.dark.as_slice(),
+                flat: self.frames.flat.as_slice(),
+                bias: self.frames.bias.as_slice(),
+                flat_dark: self.frames.flat_dark.as_slice(),
+            },
+            &MastersConfig {
+                hot_sigma: self.sigma,
+                cache: match self.caching {
+                    Caching::Off => None,
+                    Caching::BesideFrames => Some(&cache),
                 },
-                sigma_threshold: self.sigma,
-                cache,
             },
             &IngestConfig::default(),
-            ProgressMonitor::new(ProgressCallback::default(), cancel.clone()),
+            ProgressMonitor::from(cancel.clone()),
         )
     }
 }
@@ -105,7 +88,7 @@ struct RoleCachePaths {
 impl RoleCachePaths {
     /// The master named `master_file` in the one directory `frames` share, and its marker beside
     /// it.
-    fn beside(frames: &[PathBuf], master_file: &str) -> Result<Self, CacheError> {
+    fn beside(frames: &[&Path], master_file: &str) -> Result<Self, CacheError> {
         let first = frames.first().expect("empty frame sets are not cached");
         let dir = first.parent().unwrap_or_else(|| Path::new(""));
         if let Some(other) = frames
@@ -114,8 +97,8 @@ impl RoleCachePaths {
             .find(|path| path.parent().unwrap_or_else(|| Path::new("")) != dir)
         {
             return Err(CacheError::SourceDirs {
-                first: first.clone(),
-                other: other.clone(),
+                first: first.to_path_buf(),
+                other: other.to_path_buf(),
             });
         }
         let master = dir.join(master_file);
@@ -209,81 +192,32 @@ fn frames_input(name: &str, what: &str) -> InputDecl {
         .description(format!("Camera-RAW {what} to stack."))
 }
 
-/// Each master kept next to its frames, which must share one directory, beside a marker that keys
-/// it by them, by the frames of each master subtracted from them, and by lumos's recipe for it, so
-/// a flat cached before its bias changed, or by an older lumos, is stacked again.
-///
-/// Caching off builds with lumos's `NoMasterCache` instead, which keys nothing: a key is a `stat`
-/// per frame, and one that fails would fail a build that never reads the cache.
+/// Each master kept next to its frames, which must share one directory, beside a marker that
+/// holds the [`MasterKey`](lumos::MasterKey) lumos keyed it by: its frames, the masters subtracted
+/// from them, and lumos's recipe for it, so a flat cached before its bias changed, or by an older
+/// lumos, is stacked again. A frame set that spans directories is not cached, and the build says
+/// so and carries on.
 #[derive(Debug)]
 struct SourceDirCache<'a> {
     cancel: &'a CancelToken,
 }
 
-/// Where a role's master is kept, and the marker its frames key it by as they were read before
-/// the stack.
-#[derive(Debug)]
-struct CachePlace {
-    paths: RoleCachePaths,
-    key: String,
-}
-
-impl CachePlace {
-    /// The place of `inputs`' master, keyed by its frames as they are now.
-    fn of(inputs: &MasterInputs<'_, PathBuf>) -> Result<Self, CacheError> {
-        let file = match inputs.role {
+impl SourceDirCache<'_> {
+    /// The paths `slot`'s master is kept at.
+    fn paths(slot: &MasterSlot<'_>) -> Result<RoleCachePaths, CacheError> {
+        let file = match slot.role {
             MasterRole::Dark => "master_dark.fits",
             MasterRole::Flat => "master_flat.fits",
             MasterRole::Bias => "master_bias.fits",
             MasterRole::FlatDark => "master_flat_dark.fits",
         };
-        let paths = RoleCachePaths::beside(inputs.frames, file)?;
-        let mut key = frame_set_key(inputs.frames)?;
-        key.push_str("\nrecipe ");
-        key.push_str(&inputs.recipe.to_string());
-        for subtracted in inputs.subtracted {
-            key.push_str("\nsubtract ");
-            key.push_str(&frame_set_key(subtracted.frames)?);
-        }
-        Ok(Self { paths, key })
-    }
-}
-
-impl MasterCache<PathBuf> for SourceDirCache<'_> {
-    type Error = CacheError;
-    type Key = CachePlace;
-
-    fn load(
-        &self,
-        inputs: &MasterInputs<'_, PathBuf>,
-    ) -> Result<CachedMaster<CachePlace>, CacheError> {
-        let place = CachePlace::of(inputs)?;
-        let marked =
-            fs::read_to_string(&place.paths.marker).is_ok_and(|marker| marker == place.key);
-        if marked && fs::is_file(&place.paths.master) {
-            let ctx = LoadCtx {
-                cancel: self.cancel.clone(),
-                ..Default::default()
-            };
-            match ctx.cfa(&place.paths.master) {
-                Ok(master) => return Ok(CachedMaster::Kept(Box::new(master))),
-                Err(error) => tracing::warn!(
-                    path = %place.paths.master.display(),
-                    error = %ErrorChain::new(&error),
-                    "failed to load calibration master cache; rebuilding from source frames"
-                ),
-            }
-        }
-        Ok(CachedMaster::Missing(place))
+        RoleCachePaths::beside(slot.frames, file)
     }
 
     /// The marker goes first, so a store that fails before its own marker is written leaves the
     /// master unmarked, never under the key of the master it replaced.
-    fn store(
-        &self,
-        CachePlace { paths, key }: CachePlace,
-        master: &CfaImage,
-    ) -> Result<(), CacheError> {
+    fn try_store(slot: &MasterSlot<'_>, master: &CfaImage) -> Result<(), CacheError> {
+        let paths = Self::paths(slot)?;
         match fs::remove_file(&paths.marker) {
             Err(source) if source.kind() != io::ErrorKind::NotFound => {
                 return Err(CacheError::Write {
@@ -299,37 +233,53 @@ impl MasterCache<PathBuf> for SourceDirCache<'_> {
                 path: paths.master.clone(),
                 source,
             })?;
-        fs::publish_bytes(&paths.marker, key.as_bytes(), PublicationMode::Cache).map_err(|source| {
-            CacheError::Write {
-                path: paths.marker,
-                source,
-            }
+        fs::publish_bytes(
+            &paths.marker,
+            slot.key.to_string().as_bytes(),
+            PublicationMode::Cache,
+        )
+        .map_err(|source| CacheError::Write {
+            path: paths.marker,
+            source,
         })
     }
 }
 
-fn frame_set_key(frames: &[PathBuf]) -> Result<String, CacheError> {
-    let mut hasher = blake3::Hasher::new();
-    for frame in frames {
-        let name = frame
-            .file_name()
-            .expect("raw frame path has a file name")
-            .as_encoded_bytes();
-        let identity = FileIdentity::of(frame).map_err(|source| CacheError::FrameMetadata {
-            path: frame.clone(),
-            source,
-        })?;
-        hasher.update(
-            &u64::try_from(name.len())
-                .expect("a file name's length fits u64")
-                .to_le_bytes(),
-        );
-        hasher.update(name);
-        identity.write_to(|bytes| {
-            hasher.update(bytes);
-        });
+impl MasterCache for SourceDirCache<'_> {
+    fn load(&self, slot: &MasterSlot<'_>) -> Option<CfaImage> {
+        let paths = Self::paths(slot)
+            .map_err(|error| {
+                tracing::warn!(
+                    error = %ErrorChain::new(&error),
+                    "calibration master not cached"
+                );
+            })
+            .ok()?;
+        let marked =
+            fs::read_to_string(&paths.marker).is_ok_and(|marker| marker == slot.key.to_string());
+        if !(marked && fs::is_file(&paths.master)) {
+            return None;
+        }
+        let ctx = LoadCtx::new(DecodeConfig::default(), self.cancel.clone());
+        ctx.cfa(&paths.master)
+            .map_err(|error| {
+                tracing::warn!(
+                    path = %paths.master.display(),
+                    error = %ErrorChain::new(&error),
+                    "failed to load calibration master cache; rebuilding from source frames"
+                );
+            })
+            .ok()
     }
-    Ok(hasher.finalize().to_hex().to_string())
+
+    fn store(&self, slot: &MasterSlot<'_>, master: &CfaImage) {
+        if let Err(error) = Self::try_store(slot, master) {
+            tracing::warn!(
+                error = %ErrorChain::new(&error),
+                "failed to keep a calibration master; the build uses it as stacked"
+            );
+        }
+    }
 }
 
 fn cache_marker_path(cache_path: &Path) -> PathBuf {

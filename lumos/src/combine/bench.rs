@@ -17,7 +17,6 @@ use crate::combine::frame_cache::core::CacheCore;
 use crate::combine::frame_cache::sample;
 use crate::combine::stack_config::StackConfig;
 use crate::combine::stack_config::combine::Combine;
-use crate::combine::stack_config::combine_method::CombineMethod;
 use crate::combine::{normalization, rejection, stack};
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
@@ -88,12 +87,18 @@ fn set(c: &mut Criterion) {
             );
         });
     }
-    for (name, rejection) in rejection::bench::rejections() {
-        let config = StackConfig {
-            combine: Combine {
-                method: CombineMethod::Mean(rejection),
-                ..Combine::mean()
+    let combines = rejection::bench::rejections().map(|(name, rejection)| {
+        (
+            name,
+            Combine::RejectedMean {
+                rejection,
+                small_n: None,
             },
+        )
+    });
+    for (name, combine) in [("none", Combine::Mean)].into_iter().chain(combines) {
+        let config = StackConfig {
+            combine,
             ..StackConfig::light()
         };
         group.bench_function(BenchmarkId::new(format!("{name}/resident"), &set), |b| {

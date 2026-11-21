@@ -1,7 +1,5 @@
 //! [`FlagCounts`]: how many pixels or samples hold each quality flag.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use common::par;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -89,32 +87,14 @@ impl FlagCounts {
     }
 }
 
-/// [`FlagCounts`] that parallel workers add their own into.
-#[derive(Debug, Default)]
-pub(crate) struct AtomicFlagCounts([AtomicU64; 8]);
-
-impl AtomicFlagCounts {
-    pub(crate) fn add(&self, local: &FlagCounts) {
-        for (total, &count) in self.0.iter().zip(&local.0) {
-            if count > 0 {
-                total.fetch_add(count, Ordering::Relaxed);
-            }
-        }
-    }
-
-    pub(crate) fn totals(&self) -> FlagCounts {
-        FlagCounts(self.0.each_ref().map(|count| count.load(Ordering::Relaxed)))
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::image::flags::flag_counts::{AtomicFlagCounts, FlagCounts};
+    use crate::image::flags::flag_counts::FlagCounts;
     use crate::image::flags::quality_flags::QualityFlags;
 
     /// Each flag a pixel holds counts once: of the bytes `[SATURATED | DEFECT, DEFECT, 0,
     /// COSMIC_RAY | DEFECT]`, DEFECT is in 3, SATURATED and COSMIC_RAY in 1 each, and NO_DATA in
-    /// none. Two workers' counts add up through the atomic form to twice each, and `any_of` sees a
+    /// none. Two workers' counts merge to twice each, and `any_of` sees a
     /// flag only where it was counted.
     #[test]
     fn each_flag_a_pixel_holds_counts_once() {
@@ -140,12 +120,9 @@ mod tests {
         assert!(!counts.any_of(QualityFlags::NO_DATA.union(QualityFlags::REPAIRED)));
         assert!(!FlagCounts::default().any());
 
-        let totals = AtomicFlagCounts::default();
-        totals.add(&counts);
-        totals.add(&counts);
-        assert_eq!(totals.totals(), counts.merged(counts));
+        let totals = counts.merged(counts);
         for (flag, count) in expected {
-            assert_eq!(totals.totals().count(flag), 2 * count, "{flag:?}");
+            assert_eq!(totals.count(flag), 2 * count, "{flag:?}");
         }
     }
 }

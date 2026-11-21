@@ -228,7 +228,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
         normalization: Normalization::None,
         ..StackConfig::light()
     }
-    .run_stacking(&cache)
+    .combine(&cache)
     .expect("this cache is never cancelled");
     assert_eq!(
         product.image.metadata.derived.quantization_sigma(),
@@ -791,6 +791,7 @@ fn a_pixel_hot_and_dead_counts_once() {
         cold,
         defective,
         photosites,
+        at_hot_cap: false,
     };
     assert_eq!(
         summary,
@@ -832,19 +833,23 @@ fn the_lower_tail_constant_is_the_reciprocal_normal_percentile() {
     assert!((cdf - 0.99).abs() < 1e-7, "{cdf}");
 }
 
-/// A dark where 10% of the pixels run hot — an uncooled sensor's warm population — still flags
-/// every one. Gaussian noise of σ 0.001 on a level of 0.01, and every tenth pixel 0.02 hotter:
-/// 20σ. The lower tail sees noise alone, so σ comes out near 0.001 and the 5σ cut near 0.005 above
-/// the median, far under the hot pixels and far over the noise (a 5σ excursion has odds 3e-7, and
-/// 3686 clean pixels give it about 1e-3 of a chance). The absolute 99th percentile sat among the
-/// hot pixels, at about 0.02, and put the cut near 0.039: it flagged none.
+/// A dark where 10% of the pixels run hot — an uncooled sensor's warm population — is held to the
+/// cap, its brightest kept. Gaussian noise of σ 0.001 on a level of 0.01, and every tenth pixel
+/// `0.02 + 0.01·k` hotter for the `k`-th: 20σ and up, each 10σ above the one before. The lower tail
+/// sees noise alone, so σ comes out near 0.001 and the 5σ cut near 0.005 above the median: all 410
+/// stand above it, past the 64 a color of 4096 photosites keeps, whose 1% is 40. The 64 kept are
+/// the last 64, and the summary says the color reached its cap.
 #[test]
-fn a_dense_warm_population_is_flagged() {
+fn a_dense_warm_population_is_held_to_the_cap() {
     let size = USize2::new(64, 64);
     let mut rng = TestRng::new(31);
     let pixels: Vec<f32> = (0..size.pixel_count())
         .map(|idx| {
-            let hot = if idx % 10 == 0 { 0.02 } else { 0.0 };
+            let hot = if idx % 10 == 0 {
+                0.02 + 0.01 * (idx / 10) as f32
+            } else {
+                0.0
+            };
             0.01 + 0.001 * rng.next_gaussian_f32() + hot
         })
         .collect();
@@ -856,8 +861,13 @@ fn a_dense_warm_population_is_flagged() {
             &CancelToken::never(),
         )
         .unwrap();
-    let expected: Vec<usize> = (0..size.pixel_count()).step_by(10).collect();
+    let expected: Vec<usize> = (346..410).map(|k| 10 * k).collect();
     assert_eq!(map.hot().idxs, expected.as_slice());
+    let ColorShares::Mono(defects) = map.summary(&CfaType::Mono).colors else {
+        unreachable!("a mono sensor has one color")
+    };
+    assert_eq!(defects.hot, 64);
+    assert!(defects.at_hot_cap);
 }
 
 /// The ring's plane reads a planar dark exactly where a pixel sits, in the interior and in a corner
@@ -959,4 +969,38 @@ fn a_defect_is_not_repaired_from_a_repair() {
         unmeasured.unwrap().get(4 * 10 + 4),
         "the defect joins the mask"
     );
+}
+
+/// A defect whose every neighbour of its color is masked has nothing to be repaired from: it keeps
+/// its value, flagged `DEFECT` alone, where one beside a measured neighbour takes it and is flagged
+/// `REPAIRED` too. A 3 × 3 mono frame whose eight outer pixels are hot and whose centre is clean:
+/// each hot pixel's eight nearest are the other hot ones and the centre at 1, so each takes the
+/// centre's 1; with the centre dead too, none is repaired.
+#[test]
+fn a_defect_with_every_neighbour_masked_is_not_repaired() {
+    let size = USize2::new(3, 3);
+    let outer: Vec<usize> = (0..9).filter(|&idx| idx != 4).collect();
+    let pixels = || {
+        let mut pixels = vec![9.0; 9];
+        pixels[4] = 1.0;
+        make_cfa(size, pixels, CfaType::Mono)
+    };
+    let defect = QualityFlags::DEFECT.byte();
+    let repaired = QualityFlags::DEFECT.union(QualityFlags::REPAIRED).byte();
+
+    let mut image = pixels();
+    DefectMap::from_lists(size, hot(outer.clone()), vec![])
+        .unwrap()
+        .correct(&mut image, None);
+    assert_eq!(image.data().pixels(), &[1.0; 9]);
+    let mut flags = vec![repaired; 9];
+    flags[4] = 0;
+    assert_eq!(image.flags().unwrap().bytes(), flags.as_slice());
+
+    let mut image = pixels();
+    DefectMap::from_lists(size, hot(outer), vec![4])
+        .unwrap()
+        .correct(&mut image, None);
+    assert_eq!(image.data().pixels(), pixels().data().pixels());
+    assert_eq!(image.flags().unwrap().bytes(), &[defect; 9]);
 }

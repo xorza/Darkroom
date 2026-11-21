@@ -14,7 +14,9 @@ pub struct Star {
     /// covariance `(JᵀWJ)⁻¹·χ²/(n − p)`, or from the windowed centroid's propagated pixel noise when
     /// no fit ran or it failed.
     pub pos_sigma: f64,
-    /// Total flux (sum of background-subtracted pixel values).
+    /// The background-subtracted flux within a circle of 1.75 FWHM — the FWHM the detection
+    /// expected, held to the stamp's 4 to 15 px — about the star's centre, each pixel weighed by
+    /// its area inside: 99.98% of a Gaussian star's, 91% of a β 2.5 Moffat's.
     pub flux: f32,
     /// The PSF's full width at half maximum, in pixels, before the pixel integrated it: the width
     /// the profile fits model, and the moments read once the pixel's own variance is removed. 0
@@ -24,7 +26,8 @@ pub struct Star {
     /// objects; 0 for a source the moments find narrower than a pixel on both axes, 1 for one
     /// narrower on one axis alone.
     pub eccentricity: f32,
-    /// Signal-to-noise ratio.
+    /// The signal-to-noise ratio of [`Self::flux`] by the CCD equation, its background noise
+    /// summed over the aperture's area.
     pub snr: f32,
     /// Peak pixel value above the sky.
     pub peak: f32,

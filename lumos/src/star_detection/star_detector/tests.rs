@@ -1,8 +1,11 @@
 use common::USize2;
-use glam::DVec2;
+use glam::{DVec2, Vec2};
 
 use crate::internals::images::mono_image;
+use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::Placement;
+use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::math::fwhm;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detection_config::fwhm_config::FwhmMode;
@@ -15,8 +18,8 @@ use crate::star_detection::tests::Scenario;
 /// touched, so the frame read as demosaiced and as measured gives the same star, bit for bit.
 ///
 /// Amplitude 1 on a sky of 0.1, the same in all three channels with a noise of 0.001. The flux
-/// is the rendered star's sum, 4.53, plus the noise over the 15 × 15 stamp of FWHM 4,
-/// 0.015 of standard deviation: within 5 of them.
+/// is the rendered star's sum, 4.53, plus the noise over the aperture of 1.75 · 4 = 7 px,
+/// under 0.015 of standard deviation: within 5 of them.
 #[test]
 fn a_demosaiced_frame_measures_its_stars_unfiltered() {
     use common::Buffer2;
@@ -297,4 +300,26 @@ fn auto_estimated_fwhm_is_used_for_final_measurement() {
             );
         }
     }
+}
+
+/// A frame smaller than one background tile still finds its star: 40 × 40 under the default
+/// 64 px tile, one Gaussian star of FWHM 4 at its centre over a sky of 0.1 with noise 0.001.
+#[test]
+fn a_frame_smaller_than_a_tile_finds_its_star() {
+    let size = USize2::new(40, 40);
+    let mut pixels = SyntheticStar::new(
+        Vec2::new(20.3, 19.6),
+        0.5,
+        StarProfile::gaussian(fwhm::to_sigma(4.0)),
+    )
+    .stamp(size, 0.1);
+    patterns::add_gaussian_noise(pixels.pixels_mut(), 0.001, 5);
+    let image = mono_image(size, pixels.into_vec());
+    let result = StarDetector::new(StarDetectionConfig::default()).detect(&image);
+    assert_eq!(result.stars.len(), 1);
+    assert!(
+        (result.stars[0].pos - DVec2::new(20.3, 19.6)).length() < 0.1,
+        "{}",
+        result.stars[0].pos
+    );
 }

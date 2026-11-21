@@ -18,7 +18,7 @@ use crate::image::metadata::fits_transfer_provenance::FitsHduProvenance;
 use crate::io::fits::CHUNK_BYTES;
 use crate::io::fits::decode::extension_chunks::ExtensionChunks;
 use crate::io::fits::decode::pixels::HduDecode;
-use crate::io::fits::decode::plan::{self, FitsDecodePlan, FitsHduDescription};
+use crate::io::fits::decode::plan::{self, FitsDecodePlan, FitsHduDescription, HduRule};
 use crate::io::fits::decode::{DecodedFitsImage, selection};
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::{FitsChecksumPolicy, FitsCubeInterpretation};
@@ -76,8 +76,8 @@ impl SelectedFits {
         ctx: &LoadCtx,
     ) -> Result<Self, FitsLoadError> {
         cfa::validate_container_format(reader.hdus().first().map(|hdu| &hdu.header))?;
-        let selected = selection::select_image_hdu(reader.hdus(), &ctx.fits.hdu)?;
-        Self::of(reader, selected, ctx.fits.cube, ctx)
+        let selected = selection::select_image_hdu(reader.hdus(), &ctx.decode.fits.hdu)?;
+        Self::of(reader, selected, ctx.decode.fits.cube, ctx)
     }
 
     /// The Lumos CFA image at HDU `idx` of `reader`, a calibration bundle; an HDU that is not
@@ -100,7 +100,7 @@ impl SelectedFits {
         ctx: &LoadCtx,
     ) -> Result<Self, FitsLoadError> {
         let selected = selection::selected_hdu(reader.hdus(), 0)?;
-        Self::of(reader, selected, ctx.fits.cube, ctx)
+        Self::of(reader, selected, ctx.decode.fits.cube, ctx)
     }
 
     fn of<R: Read + Seek>(
@@ -123,9 +123,13 @@ impl SelectedFits {
         let image = reader
             .image(selected.idx)
             .map_err(|source| not_an_image(source, selected.idx))?;
-        let plan = FitsHduDescription::of_image(&image, source_bytes).plan(
+        let rule = HduRule {
             cube,
-            ctx.fits.float_scale,
+            float_scale: ctx.decode.fits.float_scale,
+            data_max: ctx.decode.fits.data_max,
+        };
+        let plan = FitsHduDescription::of_image(&image, source_bytes).plan(
+            rule,
             image.tiles(),
             |regions| plan::reader_bytes(&image, regions),
         )?;
@@ -136,7 +140,7 @@ impl SelectedFits {
             metadata::read_cfa(
                 &hdu.header,
                 plan.desc.height(),
-                ctx.fits.unstated_bayer_pattern,
+                ctx.decode.fits.unstated_bayer_pattern,
             )?
         } else {
             None
@@ -205,18 +209,18 @@ impl SelectedFits {
 
     /// The sensor frame as its header states it, which a CFA load requires ([`Self::require_cfa`]).
     pub(super) fn cfa_frame_info(&self) -> Result<FrameInfo, FitsLoadError> {
-        Ok(self.frame_info(self.require_cfa()?))
+        Ok(self.frame_info(Some(self.require_cfa()?)))
     }
 
     /// The image as a linear load reads it, whose header declares no mosaic.
     pub(super) fn linear_frame_info(&self) -> FrameInfo {
         debug_assert!(!self.is_mosaic(), "a linear load refuses a mosaic");
-        self.frame_info(CfaType::Mono)
+        self.frame_info(None)
     }
 
     /// The frame as `cfa_type`: its dimensions, what its decode holds beside it over this file's
     /// extensions — see [`FitsDecodePlan::beside_frame_bytes`] — and the gain it reads.
-    fn frame_info(&self, cfa_type: CfaType) -> FrameInfo {
+    fn frame_info(&self, cfa_type: Option<CfaType>) -> FrameInfo {
         FrameInfo {
             desc: self.plan.desc,
             cfa_type,
@@ -254,7 +258,7 @@ impl SelectedFits {
                 let policy = if self.lumos_written {
                     FitsChecksumPolicy::RequireValid
                 } else {
-                    ctx.fits.checksum
+                    ctx.decode.fits.checksum
                 };
                 decode.read_stream(image, policy)?
             }

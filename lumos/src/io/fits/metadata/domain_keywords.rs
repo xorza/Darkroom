@@ -22,7 +22,8 @@ pub(crate) const PEDESTAL_LEVEL: Keyword = Keyword::new("LUMPEDLV");
 /// In the samples' own (normalized) units, so a reader takes it as it stands.
 const QUANTIZATION_SIGMA: Keyword = Keyword::new("LUMQSIG");
 /// That every saturated pixel is flagged in the image's flags extension. A calibrated frame has no
-/// level left to mark them by, so a reload learns it here; `DATAMAX` says it for a frame as decoded.
+/// level left to mark them by, so a reload learns it here; `SATURATE` says it for a frame as
+/// decoded.
 const SATURATION_FLAGGED: Keyword = Keyword::new("LUMSATF");
 
 const DECLARED: &str = "DECLARED";

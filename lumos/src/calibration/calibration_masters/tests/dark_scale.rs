@@ -168,9 +168,9 @@ fn the_fit_recovers_the_scale_of_the_lights_dark_signal() {
                     pixels,
                     standard_error,
                 },
-        }) = outcome.dark_scale
+        }) = outcome.dark.scale()
         else {
-            panic!("expected a fitted scale, got {:?}", outcome.dark_scale);
+            panic!("expected a fitted scale, got {:?}", outcome.dark);
         };
         assert!((235..=241).contains(&pixels), "{scale}: {pixels} kept");
         let energy: f64 = hot[10..251]
@@ -189,6 +189,7 @@ fn the_fit_recovers_the_scale_of_the_lights_dark_signal() {
         assert_eq!(
             outcome
                 .dark
+                .comparison()
                 .and_then(|dark| dark.temperature_difference)
                 .is_some(),
             temperature != -10.0
@@ -196,11 +197,12 @@ fn the_fit_recovers_the_scale_of_the_lights_dark_signal() {
     }
 }
 
-/// With 50 hot pixels, fewer than the 100 a fit needs, the dark is scaled by the exposures — 300 s
-/// over 300 s, then 750 s over 300 s — and the outcome says how many pixels the fit had.
+/// With 19 hot pixels, one fewer than the 20 whose residuals measure a fit's precision, the dark
+/// is scaled by the exposures — 300 s over 300 s, then 750 s over 300 s — and the outcome says how
+/// many pixels the fit had.
 #[test]
 fn too_few_hot_pixels_fall_back_to_the_exposures() {
-    let HotDark { dark, hot } = dark(50, 0);
+    let HotDark { dark, hot } = dark(19, 0);
     let masters = masters(dark);
     for (exposure, ratio) in [(300.0, 1.0), (750.0, 2.5)] {
         let mut light = Light {
@@ -211,10 +213,10 @@ fn too_few_hot_pixels_fall_back_to_the_exposures() {
         }
         .render(&hot);
         assert_eq!(
-            masters.calibrate(&mut light).unwrap().dark_scale,
+            masters.calibrate(&mut light).unwrap().dark.scale(),
             Some(DarkScale {
                 factor: ratio,
-                source: DarkScaleSource::Exposure { fit_pixels: 50 },
+                source: DarkScaleSource::Exposure { fit_pixels: 19 },
             })
         );
     }

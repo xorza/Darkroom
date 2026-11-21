@@ -14,40 +14,36 @@ use common::USize2;
 ///
 /// A sum type because the usual answer is a single number. When no frame carries a coverage map
 /// every pixel saw every frame, and spelling that out as a plane of `1.0` costs a full image-sized
-/// allocation — 240 MB at 60 MP — to carry one constant. Drizzle and warped stacks, where frames
+/// allocation — 240 MiB at 60 MP — to carry one constant. Drizzle and warped stacks, where frames
 /// genuinely cover different regions, produce [`Coverage::PerPixel`].
 #[derive(Debug)]
 pub enum Coverage {
-    /// Every pixel covered to the same degree.
-    Uniform {
-        value: f32,
-        /// Kept so the plane can still be materialized on demand.
-        size: USize2,
-    },
+    /// Every frame reached every pixel: a coverage of 1 throughout, at the image's size.
+    Full,
     /// Coverage measured per pixel: one plane every channel shares, or one per channel for a
     /// mosaic drizzled into the channels of its colors, which reach each channel at other pixels.
     PerPixel(QualityMap),
 }
 
 impl Coverage {
-    /// The coverage of image channel `channel`, materialized as a plane. Allocates for
-    /// [`Coverage::Uniform`] — the cost this type exists to let a caller avoid, so only reach for
-    /// it when a plane is genuinely what is wanted.
-    pub fn to_plane(&self, channel: usize) -> Buffer2<f32> {
+    /// The coverage of image channel `channel` of an image of `size`, materialized as a plane.
+    /// Allocates for [`Coverage::Full`] — the cost this type exists to let a caller avoid, so only
+    /// reach for it when a plane is genuinely what is wanted.
+    pub fn to_plane(&self, channel: usize, size: USize2) -> Buffer2<f32> {
         match self {
-            Self::Uniform { value, size } => Buffer2::new_filled(*size, *value),
-            Self::PerPixel(map) => map.channel(channel).clone(),
+            Self::Full => Buffer2::new_filled(size, 1.0),
+            Self::PerPixel(map) => {
+                debug_assert_eq!(map.channel(channel).size(), size);
+                map.channel(channel).clone()
+            }
         }
     }
-}
 
-impl From<Coverage> for LinearImage {
-    fn from(coverage: Coverage) -> Self {
-        match coverage {
-            Coverage::PerPixel(map) => map.into(),
-            uniform @ Coverage::Uniform { .. } => {
-                Self::from(PlanarImage::new_mono(uniform.to_plane(0)))
-            }
+    /// The coverage as an image of `size`: its planes, or one plane of 1 for [`Coverage::Full`].
+    pub fn into_image(self, size: USize2) -> LinearImage {
+        match self {
+            Self::Full => LinearImage::from(PlanarImage::new_mono(Buffer2::new_filled(size, 1.0))),
+            Self::PerPixel(map) => map.into(),
         }
     }
 }
@@ -62,21 +58,21 @@ pub(crate) mod internals {
     use crate::stack_product::coverage::Coverage;
 
     impl Coverage {
-        /// The measured planes, or `None` when coverage is uniform and no plane exists.
+        /// The measured planes, or `None` when coverage is full and no plane exists.
         pub(crate) const fn per_pixel(&self) -> Option<&QualityMap> {
             match self {
-                Self::Uniform { .. } => None,
+                Self::Full => None,
                 Self::PerPixel(map) => Some(map),
             }
         }
 
-        /// The one plane every channel shares, or the constant of a uniform coverage.
+        /// The one plane every channel shares, or the 1 of a full coverage.
         ///
         /// # Panics
         /// For a coverage per channel, which has no one plane to read.
         fn shared(&self, read: impl FnOnce(&Buffer2<f32>) -> &f32) -> &f32 {
             match self {
-                Self::Uniform { value, .. } => value,
+                Self::Full => &1.0,
                 Self::PerPixel(QualityMap::Shared(plane)) => read(plane),
                 Self::PerPixel(QualityMap::PerChannel(_)) => {
                     panic!("a coverage per channel has no one plane to index")
@@ -86,7 +82,7 @@ pub(crate) mod internals {
     }
 
     /// Indexes like the one plane it stands for, by flat sample or by `(x, y)` — a uniform
-    /// coverage answers with its constant rather than materializing anything.
+    /// coverage answers with its 1 rather than materializing anything.
     impl Index<usize> for Coverage {
         type Output = f32;
 

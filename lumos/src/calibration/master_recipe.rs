@@ -25,18 +25,25 @@ const MASTER_VERSION: u64 = fnv1a::hash(
 /// decode options, and the role. Two masters of equal frames stack alike only under one recipe.
 /// It displays as 16 hex digits, for a key in text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MasterRecipe(u64);
+pub(crate) struct MasterRecipe(u64);
 
 impl MasterRecipe {
     /// The recipe of `role`'s master stacked by this lumos under `ingest`, as
     /// [`CalibrationMasters::build`](crate::CalibrationMasters::build) hands it to a cache.
-    pub fn of(role: MasterRole, ingest: &IngestConfig) -> Self {
-        let options = ingest.decode_params().digest();
+    pub(crate) fn of(role: MasterRole, ingest: &IngestConfig) -> Self {
+        let options = ingest.decode.digest();
         let hash = fnv1a::hash(
             fnv1a::hash(MASTER_VERSION, &options.to_le_bytes()),
             role.extname().as_bytes(),
         );
         Self(hash)
+    }
+}
+
+impl MasterRecipe {
+    /// The recipe's bytes, for a key that digests it.
+    pub(crate) const fn to_bytes(self) -> [u8; 8] {
+        self.0.to_le_bytes()
     }
 }
 
@@ -60,7 +67,7 @@ mod tests {
     fn the_recipe_follows_the_options_and_the_role() {
         let plain = IngestConfig::default();
         let mut strict = IngestConfig::default();
-        strict.fits.checksum = FitsChecksumPolicy::RequireValid;
+        strict.decode.fits.checksum = FitsChecksumPolicy::RequireValid;
         let mut elsewhere = IngestConfig::with_cache_dir("/elsewhere".into());
         elsewhere.memory_override = Some(1 << 30);
         let dark = MasterRecipe::of(MasterRole::Dark, &plain);

@@ -8,20 +8,21 @@ use imaginarium::PlanarDesc;
 
 use crate::frame::admitted::Admitted;
 use crate::frame_store::file_set::Loaded;
+use crate::frame_store::run_shape::PlannedTier;
 use crate::frame_store::run_storage::RunStorage;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
-use crate::memory::run_plan::RunPlan;
 use crate::pipeline::align_stack_config::{AlignStackConfig, Reference, ReferenceCandidate};
 use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::detected_frame::{DetectedFrame, DetectedLight};
 use crate::pipeline::error::AlignStackError;
-use crate::pipeline::frame_parking::StagePlan;
+use crate::pipeline::frame_parking::{FrameParking, StagePlan};
 use crate::pipeline::frame_registrar::{FrameRegistrar, LightSet, ParkedLight};
 use crate::pipeline::light_files::LightFiles;
 use crate::pipeline::light_shape::LightShape;
 use crate::pipeline::light_source::LightSource;
+use crate::pipeline::light_worker::LightWorker;
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
@@ -36,8 +37,8 @@ use crate::star_detection::star_detector::detection_result::DetectionResult;
 pub(super) struct AlignStackRun<'a> {
     pub(super) config: &'a AlignStackConfig,
     /// The registration configuration, checked where the run was built.
-    pub(super) registrar: Registrar<'a>,
-    pub(super) ingest: IngestRun,
+    pub(super) registrar: Registrar,
+    pub(super) ingest: IngestRun<'a>,
 }
 
 /// The detected lights, and the memory decisions the register-warp stage reads.
@@ -45,14 +46,6 @@ pub(super) struct AlignStackRun<'a> {
 struct DetectedLights {
     lights: Vec<DetectedLight>,
     stage: StagePlan,
-}
-
-/// What a worker of a single pass carries from one light to the next: its detector's warmed
-/// buffers, and the set its lights warp into.
-#[derive(Debug)]
-struct PassWorker {
-    detector: StarDetector,
-    warped: Option<WarpResult>,
 }
 
 /// How each light is taken in: admitted to the set, then its stars detected.
@@ -138,16 +131,17 @@ impl AlignStackRun<'_> {
         debug_assert!(count > 0, "each entry refuses an empty set");
         let budget = ingest.budget;
         let shape = lights.shape(ingest)?;
-        let plan = RunPlan::of(
-            count,
-            &shape.found_reference(config, budget.workers()),
-            budget,
-        );
         let storage = match &lights {
-            LightSource::Held(_) => RunStorage::holding(&ingest.storage),
+            LightSource::Held(_) => RunStorage::holding(ingest.config),
             LightSource::Files(files) => files.storage(),
         };
-        let stage = shape.stage_plan(&plan, LightShape::WARP, storage)?;
+        let PlannedTier { tier, plan } = shape
+            .run_shape(shape.found_reference(config, budget.workers()))
+            .tier(budget, storage)?;
+        let stage = StagePlan {
+            parking: FrameParking::new(tier),
+            warp_width: plan.width(LightShape::WARP),
+        };
         let slots = plan.width(LightShape::PREPARE);
         tracing::info!(
             lights = count,
@@ -161,15 +155,15 @@ impl AlignStackRun<'_> {
         // whole working set. The RAW decode is the one step that cannot stop midway, so the bound
         // is also what a cancel has to drain.
         let intake = self.intake(shape.desc, count, slots);
-        let mut detectors = self.detectors(slots);
+        let mut workers = LightWorker::slots(&self.config.detection, slots);
         let lights = match lights {
             // A held light stays where the caller put it, whatever the tier.
             LightSource::Held(frames) => {
                 intake
                     .intake
-                    .map_owned(frames, &mut detectors, |detector, idx, image| {
+                    .map_owned(frames, &mut workers, |worker, idx, image| {
                         let DetectedLight { frame, diagnostics } =
-                            intake.detect(detector, idx, image, None)?;
+                            intake.detect(&mut worker.detector, idx, image, None)?;
                         intake.intake.complete_one();
                         Ok::<_, AlignStackError>(DetectedLight {
                             frame: frame.resident(),
@@ -178,20 +172,18 @@ impl AlignStackRun<'_> {
                     })?
             }
             LightSource::Files(files) => {
-                intake
-                    .intake
-                    .map(0..count, &mut detectors, |detector, idx| {
-                        let Loaded {
-                            image,
-                            kept,
-                            measured,
-                        } = files.prepare(idx, intake.intake.ctx())?;
-                        let DetectedLight { frame, diagnostics } =
-                            intake.detect(detector, idx, image, measured)?;
-                        let frame = frame.parked(&stage.parking, kept)?;
-                        intake.intake.complete_one();
-                        Ok::<_, AlignStackError>(DetectedLight { frame, diagnostics })
-                    })?
+                intake.intake.map(0..count, &mut workers, |worker, idx| {
+                    let Loaded {
+                        image,
+                        kept,
+                        measured,
+                    } = files.prepare(idx, intake.intake.ctx(), &mut worker.cosmic_ray)?;
+                    let DetectedLight { frame, diagnostics } =
+                        intake.detect(&mut worker.detector, idx, image, measured)?;
+                    let frame = frame.parked(&stage.parking, kept)?;
+                    intake.intake.complete_one();
+                    Ok::<_, AlignStackError>(DetectedLight { frame, diagnostics })
+                })?
             }
         };
         Ok(DetectedLights { lights, stage })
@@ -239,7 +231,7 @@ impl AlignStackRun<'_> {
         let reference = self
             .config
             .reference
-            .select(&candidates, self.required_stars())?;
+            .select(&candidates, self.registrar.config().model.required_stars());
         let metadata = frames[reference].image.metadata().clone();
         let desc = frames[reference].image.desc();
         let registrar = FrameRegistrar::new(
@@ -251,7 +243,7 @@ impl AlignStackRun<'_> {
                 reference,
                 reference_stars: mem::take(&mut frames[reference].stars),
             },
-        );
+        )?;
         // Counted once a light is parked; the reference is not registered, so not among them.
         let registering =
             StageCounter::new(&self.ingest.progress, StackingStage::Registering, count - 1);
@@ -276,7 +268,6 @@ impl AlignStackRun<'_> {
                 .zip(detection)
                 .map(|(parked, detection)| ParkedLight { parked, detection })
                 .collect(),
-            reference,
             metadata,
             desc,
             parking,
@@ -298,15 +289,11 @@ impl AlignStackRun<'_> {
         let count = files.len();
         let budget = ingest.budget;
         let shape = files.shape(ingest)?;
-        let plan = RunPlan::of(
-            count,
-            &shape.named_reference(config, budget.workers()),
-            budget,
-        );
-        let StagePlan {
-            parking,
-            warp_width: workers,
-        } = shape.stage_plan(&plan, LightShape::PASS, files.storage())?;
+        let PlannedTier { tier, plan } = shape
+            .run_shape(shape.named_reference(config, budget.workers()))
+            .tier(budget, files.storage())?;
+        let parking = FrameParking::new(tier);
+        let workers = plan.width(LightShape::PASS);
         tracing::info!(
             lights = count,
             reference,
@@ -317,14 +304,7 @@ impl AlignStackRun<'_> {
         );
         let slots = workers.min(count);
         let intake = self.intake(shape.desc, count, slots);
-        let mut workers: Vec<PassWorker> = self
-            .detectors(slots)
-            .into_iter()
-            .map(|detector| PassWorker {
-                detector,
-                warped: None,
-            })
-            .collect();
+        let mut workers = LightWorker::slots(&self.config.detection, slots);
 
         if self.cancel().is_cancelled() {
             return Err(AlignStackError::Cancelled);
@@ -334,16 +314,11 @@ impl AlignStackRun<'_> {
             image,
             kept,
             measured,
-        } = files.prepare(reference, &ingest.ctx)?;
+        } = files.prepare(reference, &ingest.ctx, &mut workers[0].cosmic_ray)?;
         let DetectedLight {
             frame: mut first,
             diagnostics,
         } = intake.detect(&mut workers[0].detector, reference, image, measured)?;
-        ReferenceCandidate {
-            stars: first.stars.len(),
-            median_fwhm: diagnostics.median_fwhm,
-        }
-        .check(reference, self.required_stars())?;
         let metadata = first.image.metadata.clone();
         let desc = first.image.desc();
         let registrar = FrameRegistrar::new(
@@ -355,7 +330,7 @@ impl AlignStackRun<'_> {
                 reference,
                 reference_stars: mem::take(&mut first.stars),
             },
-        );
+        )?;
         let reference_light = ParkedLight {
             parked: registrar.park(
                 &mut workers[0].warped,
@@ -370,7 +345,7 @@ impl AlignStackRun<'_> {
         let mut lights = intake.intake.map(others, &mut workers, |worker, idx| {
             let Loaded {
                 image, measured, ..
-            } = files.prepare(idx, intake.intake.ctx())?;
+            } = files.prepare(idx, intake.intake.ctx(), &mut worker.cosmic_ray)?;
             let DetectedLight { frame, diagnostics } =
                 intake.detect(&mut worker.detector, idx, image, measured)?;
             let parked = registrar.park(&mut worker.warped, idx, frame.resident())?;
@@ -389,7 +364,6 @@ impl AlignStackRun<'_> {
 
         RegisteredSet {
             lights,
-            reference,
             metadata,
             desc,
             parking,
@@ -411,20 +385,5 @@ impl AlignStackRun<'_> {
             ),
             count,
         }
-    }
-
-    /// One detector for each of `slots` lights in flight, each carrying its warmed buffers from
-    /// one light to the next it picks up, under the configuration the run validated at its start.
-    fn detectors(&self, slots: usize) -> Vec<StarDetector> {
-        debug_assert!(slots > 0, "a run detects one light at a time at least");
-        (0..slots)
-            .map(|_| StarDetector::new(self.config.detection.clone()))
-            .collect()
-    }
-
-    /// The stars a reference needs for the others to register to it.
-    fn required_stars(&self) -> usize {
-        let registration = &self.config.registration;
-        registration.matching.required_stars(registration.model)
     }
 }

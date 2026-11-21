@@ -37,8 +37,8 @@ fn a_row_is_what_apply_gives_pixel_by_pixel() {
     }
     .fitted_under(&affine, &reference, &target);
     let transforms = [
-        WarpTransform::new(affine),
-        WarpTransform::new(Transform::homography([
+        WarpTransform::from(affine),
+        WarpTransform::from(Transform::homography([
             1.02, 0.01, 30.0, -0.015, 0.98, -4.0, 4e-5, -3e-5,
         ])),
         WarpTransform::with_sip(affine, sip),
@@ -52,7 +52,7 @@ fn a_row_is_what_apply_gives_pixel_by_pixel() {
             for (x, &pos) in row.poss().iter().enumerate() {
                 let exact = transform.apply(DVec2::new(x as f64, y as f64));
                 let expected = SourcePos::within(exact, source);
-                if transform.has_sip() {
+                if transform.sip().is_some() {
                     assert_eq!(pos.is_some(), expected.is_some(), "x = {x}, y = {y}");
                     if let Some(p) = pos {
                         let split = DVec2::new(

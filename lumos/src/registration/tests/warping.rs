@@ -25,7 +25,7 @@ fn do_warp(
 }
 
 fn warp_with(input: &Buffer2<f32>, transform: &Transform, params: WarpConfig) -> Buffer2<f32> {
-    params.warp_plane(input, &WarpTransform::new(transform.inverse()))
+    params.warp_plane(input, &WarpTransform::from(transform.inverse()))
 }
 
 /// Peak signal-to-noise ratio between two images of peak `max_val`, in dB; infinite for equal ones.
@@ -264,7 +264,7 @@ fn warp_preserves_output_metadata() {
         ..Default::default()
     };
     let warped = warp_config
-        .warp(&image, &WarpTransform::new(transform))
+        .warp(&image, &WarpTransform::from(transform))
         .image;
 
     // Verify the input's metadata is carried into the warped output (warp only
@@ -375,9 +375,8 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
     };
-    assert_eq!(config.border_value, 0.0, "test assumes a zero border");
 
-    let result = config.warp(&image, &WarpTransform::new(transform));
+    let result = config.warp(&image, &WarpTransform::from(transform));
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
@@ -421,7 +420,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
         ..Default::default()
     };
 
-    let result = config.warp(&image, &WarpTransform::new(transform));
+    let result = config.warp(&image, &WarpTransform::from(transform));
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();

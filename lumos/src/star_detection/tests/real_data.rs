@@ -17,8 +17,9 @@ use crate::internals::init_tracing;
 use crate::internals::real_data::{LightPair, dataset_path, first_and_last_lights};
 use crate::io::error::RasterLoadError;
 use crate::io::raster;
+use crate::registration::registrar::Registrar;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::transform_model::TransformModel;
+use crate::registration::transform_model::{ModelChoice, TransformModel};
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::measurement_config::CentroidMethod;
 use crate::star_detection::star_detector::StarDetector;
@@ -232,19 +233,17 @@ fn weighted_fit_registration_rms() {
         let s1 = detector.detect(&img1).stars;
         let s2 = detector.detect(&img2).stars;
         let mut reg_config = RegistrationConfig {
-            model: TransformModel::Auto { sip: None },
+            model: TransformModel::Plain(ModelChoice::Auto),
             ..RegistrationConfig::default()
         };
         // Seeded, so the two runs differ only in their centroids.
         reg_config.ransac.seed = 0x5EED;
-        let r = reg_config
-            .registrar()
-            .unwrap()
+        let r = Registrar::new(reg_config)
             .register(&s1, &s2)
             .expect("registration should succeed");
         Registered {
-            rms: r.rms_error(),
-            inliers: r.inlier_count(),
+            rms: r.rms_error_px(),
+            inliers: r.matches().len(),
         }
     };
 

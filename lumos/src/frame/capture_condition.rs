@@ -12,8 +12,14 @@ use crate::frame::error::ConditionMismatch;
 const EXPOSURE_TOLERANCE: f64 = 0.01;
 
 /// Sensor temperatures within this many degrees count as one: a regulated cooler holds its set
-/// point to a few tenths of a degree, and dark current changes by about 12% per degree.
-const TEMPERATURE_TOLERANCE: f64 = 1.0;
+/// point to a few tenths of a degree, and dark current changes by about
+/// [`DARK_CURRENT_PER_DEGREE`] per degree.
+pub(crate) const TEMPERATURE_TOLERANCE: f64 = 1.0;
+
+/// The relative change of a silicon sensor's dark current per degree near room temperature and
+/// below: it doubles every 5.5–6.3 °C (Widenhorn et al., *Temperature dependence of dark current
+/// in a CCD*, Proc. SPIE 4669, 2002), `2^(1/6)` − 1 = 12% a degree.
+pub(crate) const DARK_CURRENT_PER_DEGREE: f64 = 0.12;
 
 /// A condition a frame is taken under, which the frames of a dark master have to share.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +30,16 @@ pub enum CaptureCondition {
     Temperature,
     /// The camera body's temperature, in degrees Celsius.
     CameraTemperature,
+    /// The sensor's gain setting, in the camera's own units.
+    Gain,
+    /// The ISO speed a camera body read the sensor at.
+    Iso,
+    /// The sensor's offset setting, in the camera's own units.
+    Offset,
+    /// The binning along a row.
+    XBinning,
+    /// The binning along a column.
+    YBinning,
 }
 
 impl fmt::Display for CaptureCondition {
@@ -32,26 +48,48 @@ impl fmt::Display for CaptureCondition {
             Self::Exposure => "exposure (s)",
             Self::Temperature => "sensor temperature (°C)",
             Self::CameraTemperature => "camera temperature (°C)",
+            Self::Gain => "gain",
+            Self::Iso => "ISO",
+            Self::Offset => "offset",
+            Self::XBinning => "x binning",
+            Self::YBinning => "y binning",
         })
     }
 }
 
 impl CaptureCondition {
-    /// This condition's value in `conditions`.
-    const fn of(self, conditions: CaptureConditions) -> Option<f64> {
+    /// The sensor setting's conditions, in the order a comparison reports the first difference.
+    pub(crate) const SETTINGS: [Self; 5] = [
+        Self::Gain,
+        Self::Iso,
+        Self::Offset,
+        Self::XBinning,
+        Self::YBinning,
+    ];
+
+    /// This condition's value in `conditions`: every integer setting is exact in f64.
+    pub(crate) fn of(self, conditions: CaptureConditions) -> Option<f64> {
+        let setting = conditions.setting;
         match self {
             Self::Exposure => conditions.exposure_time,
             Self::Temperature => conditions.ccd_temp,
             Self::CameraTemperature => conditions.camera_temp,
+            Self::Gain => setting.gain,
+            Self::Iso => setting.iso.map(f64::from),
+            Self::Offset => setting.offset.map(f64::from),
+            Self::XBinning => setting.xbinning.map(f64::from),
+            Self::YBinning => setting.ybinning.map(f64::from),
         }
     }
 
-    /// Whether `low ≤ high` count as one value of this condition.
+    /// Whether `low ≤ high` count as one value of this condition: within its tolerance for the
+    /// exposure and the temperatures, equal for a setting, which a camera reports as it was set.
     pub(crate) fn agree(self, low: f64, high: f64) -> bool {
         debug_assert!(low <= high);
         match self {
             Self::Exposure => high - low <= EXPOSURE_TOLERANCE * high,
             Self::Temperature | Self::CameraTemperature => high - low <= TEMPERATURE_TOLERANCE,
+            Self::Gain | Self::Iso | Self::Offset | Self::XBinning | Self::YBinning => low == high,
         }
     }
 

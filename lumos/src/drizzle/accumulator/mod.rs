@@ -29,7 +29,7 @@ use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::DropPlanes;
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
-use crate::image::stackable_image::StackableImage;
+use crate::image::frame::{Frame, Samples};
 use crate::ingest::error::AdmissionError;
 use crate::recycled::Recycled;
 use crate::scratch_pool::ScratchPool;
@@ -105,7 +105,7 @@ pub(crate) struct DrizzledPlanes {
 impl Drizzler {
     /// The drizzle of frames shaped as `image` — of its dimensions, and its samples reaching the
     /// output as its own do — onto `grid` by `plan`.
-    pub(crate) fn new(image: &impl StackableImage, plan: KernelPlan, grid: OutputGrid) -> Self {
+    pub(crate) fn new(image: &Frame<impl Samples>, plan: KernelPlan, grid: OutputGrid) -> Self {
         let input_desc = image.desc();
         Self {
             input_desc,
@@ -126,7 +126,7 @@ impl Drizzler {
     /// As [`Self::scatter`].
     pub(crate) fn drizzle(
         &mut self,
-        frame: &DrizzleFrame<impl StackableImage>,
+        frame: &DrizzleFrame<Frame<impl Samples>>,
         idx: usize,
     ) -> Result<DrizzledPlanes, DrizzleError> {
         let mut sums = self.sums();
@@ -157,7 +157,7 @@ impl Drizzler {
     /// not finite. `sums` is unchanged on error.
     pub(crate) fn scatter(
         &mut self,
-        frame: &DrizzleFrame<impl StackableImage>,
+        frame: &DrizzleFrame<Frame<impl Samples>>,
         idx: usize,
         sums: &mut OutputSums,
     ) -> Result<usize, DrizzleError> {
@@ -169,7 +169,7 @@ impl Drizzler {
     /// on the band height, which the band-invariance test holds to.
     fn scatter_in_bands(
         &mut self,
-        frame: &DrizzleFrame<impl StackableImage>,
+        frame: &DrizzleFrame<Frame<impl Samples>>,
         idx: usize,
         sums: &mut OutputSums,
         band_rows: usize,
@@ -239,7 +239,7 @@ impl Drizzler {
     /// checked of frame `idx`.
     fn validate(
         &self,
-        frame: &DrizzleFrame<impl StackableImage>,
+        frame: &DrizzleFrame<Frame<impl Samples>>,
         idx: usize,
     ) -> Result<(), DrizzleError> {
         // Admitted before it reached here, as every frame of a drizzle is: of the set's shape and
@@ -386,7 +386,7 @@ pub(crate) mod internals {
     use crate::registration::warp_transform::WarpTransform;
     use crate::stack_product::StackProduct;
     use crate::stack_product::run_report::RunReport;
-    use crate::stack_product::weight_kind::WeightKind;
+    use crate::stack_product::weight_plane::{WeightKind, WeightPlane};
 
     /// The single-pass drizzle a test holds the per-frame one to: every frame added scattered into
     /// one set of sums.
@@ -408,13 +408,13 @@ pub(crate) mod internals {
         ///
         /// Returns an error when `config` is invalid.
         pub(crate) fn new(
-            image: &impl StackableImage,
+            image: &Frame<impl Samples>,
             config: DrizzleConfig,
             first_frame: usize,
         ) -> Result<Self, DrizzleError> {
             config.validate()?;
-            let grid = OutputGrid::new(config.scale, image.desc().size());
-            let plan = KernelPlan::new(config.kernel, config.pixfrac, config.scale);
+            let grid = OutputGrid::new(config.sampling.scale(), image.desc().size());
+            let plan = KernelPlan::new(config.sampling);
             let drizzler = Drizzler::new(image, plan, grid);
             let sums = drizzler.sums();
             Ok(Self {
@@ -433,7 +433,7 @@ pub(crate) mod internals {
         /// As [`Drizzler::scatter`].
         pub(crate) fn add_frame(
             &mut self,
-            frame: &DrizzleFrame<impl StackableImage>,
+            frame: &DrizzleFrame<Frame<impl Samples>>,
         ) -> Result<(), DrizzleError> {
             self.unconverged_points +=
                 self.drizzler
@@ -453,13 +453,13 @@ pub(crate) mod internals {
         /// written in — so the frame carries its inverse, the warp registration would report.
         pub(crate) fn add_image(
             &mut self,
-            image: impl StackableImage,
+            image: Frame<impl Samples>,
             transform: &Transform,
             pixel_weights: Option<&Buffer2<f32>>,
         ) {
             self.add_frame(&DrizzleFrame {
                 source: image,
-                warp: WarpTransform::new(transform.inverse()),
+                warp: WarpTransform::from(transform.inverse()),
                 pixel_weight_map: pixel_weights.cloned(),
             })
             .expect("test frame must be coherent with the accumulator");
@@ -550,8 +550,10 @@ pub(crate) mod internals {
                     data.into_iter().map(Buffer2::into_vec),
                 ),
                 coverage: None,
-                weight: Some(weight),
-                weight_kind: WeightKind::Count,
+                weight: Some(WeightPlane {
+                    map: weight,
+                    kind: WeightKind::Count,
+                }),
                 inverse_variance: None,
                 dispersion: None,
                 cfa_type: None,

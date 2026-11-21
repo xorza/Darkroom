@@ -2,14 +2,12 @@ use std::io::{Seek, Write};
 use std::path::Path;
 
 use common::fs;
-use fits_well::FitsWriter;
 use fits_well::header::Header;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::io::error::WriteError;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
-use crate::io::fits::flags_extension;
-use crate::io::fits::gain_extension;
+use crate::io::fits::frame_file;
 use crate::io::fits::linear::LINEAR_FITS_FORMAT;
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD, domain_keywords};
@@ -75,17 +73,7 @@ pub(crate) fn write(image: &CfaImage, out: impl Write + Seek) -> Result<(), Writ
             prepared: false,
         },
     )?;
-    let flags = flags_extension::encode(image.flags(), None, 1)?;
-    let gain = gain_extension::encode(image.flat_gain().map(|gain| &**gain), None)?;
-    let mut writer = FitsWriter::new(out).with_checksums();
-    primary.write(&mut writer)?;
-    if let Some(flags) = &flags {
-        flags.write(&mut writer)?;
-    }
-    if let Some(gain) = &gain {
-        gain.write(&mut writer)?;
-    }
-    Ok(())
+    frame_file::write(&primary, image, out)
 }
 
 /// The HDU of `cfa`, with the per-HDU `hdu_metadata`: its mosaic, `NO_DATA` backed out as NaN, the
@@ -109,7 +97,12 @@ pub(crate) fn hdu<'a>(
     }
     metadata::write_image(&mut header, &cfa.metadata, hdu_metadata.image_type)?;
     metadata::write_row_order(&mut header, &cfa.metadata)?;
-    metadata::write_cfa(&mut header, &cfa.metadata, cfa.cfa_type())?;
+    metadata::write_cfa(
+        &mut header,
+        &cfa.metadata,
+        cfa.cfa_type(),
+        cfa.data().height(),
+    )?;
     Ok(PlaneHdu {
         header,
         shape: [cfa.data().width(), cfa.data().height()]

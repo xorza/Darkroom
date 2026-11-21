@@ -5,8 +5,9 @@ use imaginarium::PlanarDesc;
 use std::path::Path;
 
 use crate::calibration::cosmic_ray;
+use crate::calibration::cosmic_ray::cosmic_ray_detector::CosmicRayDetector;
 use crate::frame::frame_stats::FrameStats;
-use crate::frame_store::file_set::{FileSet, Loaded, SetPeek};
+use crate::frame_store::file_set::{FileSet, FilesPeek, Loaded};
 use crate::frame_store::run_storage::RunStorage;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_run::IngestRun;
@@ -15,7 +16,7 @@ use crate::io::decoder::linear_decoder::LinearDecoder;
 use crate::io::load_ctx::LoadCtx;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::light_shape::LightShape;
-use crate::pipeline::mosaic_preparation::MosaicPreparation;
+use crate::pipeline::mosaic_preparation::{MosaicLight, MosaicPreparation};
 
 /// Lights read from files, each through what it goes through before its stars are detected, as
 /// the decoder that preparation reads them with takes them.
@@ -48,14 +49,14 @@ impl<'a> LightFiles<'a> {
     pub(super) fn new(
         paths: &'a [&'a Path],
         preparation: Preparation<'a>,
-        run: &IngestRun,
+        run: &IngestRun<'_>,
     ) -> Result<Self, AlignStackError> {
         Ok(match preparation {
             Preparation::Calibrate(mosaic) => Self::Calibrate {
-                files: FileSet::new(paths, &run.storage, &run.ctx)?,
+                files: FileSet::new(paths, run)?,
                 mosaic,
             },
-            Preparation::Linear => Self::Linear(FileSet::new(paths, &run.storage, &run.ctx)?),
+            Preparation::Linear => Self::Linear(FileSet::new(paths, run)?),
         })
     }
 
@@ -78,35 +79,29 @@ impl<'a> LightFiles<'a> {
     /// decode — which that light's preparation then takes ([`FileSet::peek`]), with the source gains
     /// the lights share and the bytes the lights the decode cache does not hold yet write to it,
     /// a gain each at the most.
-    pub(super) fn shape(&self, run: &IngestRun) -> Result<LightShape, AlignStackError> {
+    pub(super) fn shape(&self, run: &IngestRun<'_>) -> Result<LightShape, AlignStackError> {
         let workers = run.budget.workers();
         let (files, mosaic) = match self {
             Self::Calibrate { files, mosaic } => (files, mosaic),
             Self::Linear(files) => {
-                let SetPeek {
-                    info, held, gains, ..
-                } = files.peek(&run.ctx)?;
+                let peek = files.peek(&run.ctx)?;
                 return Ok(LightShape {
-                    kept_writes: kept_writes(
-                        files.uncached(),
-                        info.decoded().kept + info.gain_bytes,
-                    ),
-                    peeked: held,
-                    gains,
-                    ..LightShape::decoded(info, files.len(), workers)
+                    kept_write_bytes: peek.kept_write_bytes(),
+                    peeked_bytes: peek.held_bytes,
+                    gains_bytes: peek.gains_bytes,
+                    ..LightShape::decoded(peek.info, files.len(), workers)
                 });
             }
         };
-        let SetPeek {
-            idx,
-            info,
-            held,
-            gains,
-        } = files.peek(&run.ctx)?;
+        let peek = files.peek(&run.ctx)?;
+        let FilesPeek { idx, info, .. } = peek;
         let size = info.desc.size();
+        let cfa_type = info
+            .cfa_type
+            .expect("a mosaic light's header states its pattern");
         // Refused here, before any light is prepared, when the pass cannot run on this sensor.
         let cosmic_ray = match mosaic.cosmic_ray {
-            Some(_) => cosmic_ray::heap_bytes(&info.cfa_type, size).map_err(|source| {
+            Some(_) => cosmic_ray::heap_bytes(&cfa_type, size).map_err(|source| {
                 AlignStackError::CosmicRay {
                     path: files.path(idx).to_path_buf(),
                     source,
@@ -114,13 +109,13 @@ impl<'a> LightFiles<'a> {
             })?,
             None => 0,
         };
-        let desc = PlanarDesc::new(size, info.cfa_type.color_layout());
+        let desc = PlanarDesc::new(size, cfa_type.color_layout());
         // The decode; the cosmic-ray pass over the mosaic; the demosaic; the statistics, or the
         // detection's noise estimate, beside the demosaiced frame.
         let prepared = info
             .demosaiced(
                 info.decoded().beside(cosmic_ray),
-                run.ctx.xtrans_passes,
+                run.ctx.decode.xtrans_passes,
                 workers,
             )
             .beside(FrameStats::heap_bytes(desc, None, workers));
@@ -128,10 +123,10 @@ impl<'a> LightFiles<'a> {
             count: files.len(),
             desc,
             prepared,
-            held: 0,
-            peeked: held,
-            gains,
-            kept_writes: kept_writes(files.uncached(), info.decoded().kept + info.gain_bytes),
+            held_bytes: 0,
+            peeked_bytes: peek.held_bytes,
+            gains_bytes: peek.gains_bytes,
+            kept_write_bytes: peek.kept_write_bytes(),
         })
     }
 
@@ -142,19 +137,22 @@ impl<'a> LightFiles<'a> {
         &self,
         idx: usize,
         ctx: &LoadCtx,
+        cosmic_ray: &mut CosmicRayDetector,
     ) -> Result<Loaded<LinearImage>, AlignStackError> {
         match self {
             Self::Calibrate { files, mosaic } => Ok(Loaded {
-                image: mosaic.prepare(files.decode(idx, ctx)?.image, files.path(idx), ctx)?,
+                image: mosaic.prepare(
+                    files.decode(idx, ctx)?.image,
+                    MosaicLight {
+                        path: files.path(idx),
+                        ctx,
+                        cosmic_ray,
+                    },
+                )?,
                 kept: None,
                 measured: None,
             }),
             Self::Linear(files) => Ok(files.decode(idx, ctx)?),
         }
     }
-}
-
-/// The bytes `uncached` lights add to the decode cache, `frame_bytes` each.
-const fn kept_writes(uncached: usize, frame_bytes: usize) -> u64 {
-    (uncached as u64).saturating_mul(frame_bytes as u64)
 }

@@ -235,11 +235,21 @@ fn combine_channels(image: &LinearImage, output: &mut Buffer2<f32>) {
         });
 }
 
-/// Each channel's white noise, by the multiresolution estimator over the pixels no flag names: the
-/// noise stacking weighs by, and not the MAD, which a red nebula inflates in red. `None` for a
-/// channel whose pixels all hold one value — a dead channel, or one a narrowband mapping left
-/// empty — which carries no star and no noise: nothing to detect in.
+/// Each channel's white noise: the noise stacking weighs by, and not the MAD, which a red nebula
+/// inflates in red. A demosaiced frame's is its mosaic's per color, as the metadata states it, where
+/// no flat amplified it and raised to its quantization σ — measured on the photosites, not on the
+/// pixels the demosaic interpolated, as [`FrameStats`](crate::frame::frame_stats::FrameStats)
+/// reads it. Any other frame's is measured by the multiresolution estimator over the pixels no flag
+/// names. `None` for a channel whose pixels all hold one value — a dead channel, or one a
+/// narrowband mapping left empty — which carries no star and no noise: nothing to detect in.
 fn channel_noise(image: &LinearImage) -> [Option<f32>; 3] {
+    if let Some(mosaic) = image.metadata.derived.mosaic_noise() {
+        let floor = mosaic.quantization_sigma.unwrap_or(0.0);
+        // A color whose photosites hold one value measured no noise: a dead one.
+        return mosaic
+            .bg
+            .map(|bg| (bg.sigma() > 0.0).then(|| bg.sigma().max(floor)));
+    }
     let flags = image.flags();
     let excluded = |idx: usize| flags.is_some_and(|flags| flags.is_flagged(idx));
     [0, 1, 2].map(|channel| {
@@ -302,7 +312,7 @@ fn inverse_variance_weights(sigmas: [Option<f32>; 3]) -> [f32; 3] {
 /// any input channel reaches its metadata's saturation level. Per channel, before the channels are
 /// combined: a star clipped in green alone, (0.6, 1.0, 0.6), combines to 0.8.
 fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
-    if image.metadata.derived.saturation_flagged() {
+    let Some(level) = image.metadata.derived.unflagged_saturation() else {
         match image.flags() {
             Some(flags) => {
                 mask.fill_from_predicate(|idx| flags.at(idx).intersects(QualityFlags::SATURATED));
@@ -310,8 +320,7 @@ fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
             None => mask.fill(false),
         }
         return;
-    }
-    let level = image.metadata.header.saturation_level();
+    };
     let channels: ArrayVec<&[f32], 3> = (0..image.channel_count())
         .map(|channel| image.channel(channel).pixels())
         .collect();

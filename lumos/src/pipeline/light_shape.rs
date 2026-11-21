@@ -4,16 +4,14 @@ use imaginarium::PlanarDesc;
 
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::planned_normalization::SetCoverage;
-use crate::combine::stack::planned_combine::{PlannedCombine, PlannedFrames};
+use crate::combine::stack::planned_combine::PlannedFrames;
 use crate::frame::frame_info::FrameInfo;
-use crate::frame_store::run_storage::{RunStorage, RunWrites};
+use crate::frame_store::run_shape::RunShape;
+use crate::frame_store::run_storage::RunWrites;
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::memory::footprint::Footprint;
-use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{Stage, Units};
 use crate::pipeline::align_stack_config::AlignStackConfig;
-use crate::pipeline::error::AlignStackError;
-use crate::pipeline::frame_parking::{FrameParking, StagePlan};
 use crate::registration::resample::WarpScratch;
 use crate::star_detection::resources::DetectionResources;
 
@@ -27,10 +25,10 @@ pub(super) struct LightShape {
     pub(super) count: usize,
     pub(super) desc: PlanarDesc,
     pub(super) prepared: Footprint,
-    pub(super) held: usize,
-    pub(super) peeked: usize,
-    pub(super) gains: usize,
-    pub(super) kept_writes: u64,
+    pub(super) held_bytes: usize,
+    pub(super) peeked_bytes: usize,
+    pub(super) gains_bytes: usize,
+    pub(super) kept_write_bytes: u64,
 }
 
 impl LightShape {
@@ -46,7 +44,7 @@ impl LightShape {
     pub(super) fn held(peek: FrameInfo, count: usize, workers: usize) -> Self {
         let decoded = Self::decoded(peek, count, workers);
         Self {
-            held: decoded.prepared.kept,
+            held_bytes: decoded.prepared.kept,
             ..decoded
         }
     }
@@ -58,10 +56,10 @@ impl LightShape {
             count,
             desc: peek.desc,
             prepared: peek.footprint(workers),
-            held: 0,
-            peeked: 0,
-            gains: 0,
-            kept_writes: 0,
+            held_bytes: 0,
+            peeked_bytes: 0,
+            gains_bytes: 0,
+            kept_write_bytes: 0,
         }
     }
 
@@ -77,25 +75,18 @@ impl LightShape {
         (self.warped() as u64).saturating_mul(self.count as u64)
     }
 
-    /// Where `plan` parks the lights on `storage`, and the width of its stage `warp`, which warps
-    /// them; the disk checked for room for what the lights write to the decode cache and the spill.
-    pub(super) fn stage_plan(
-        &self,
-        plan: &RunPlan,
-        warp: usize,
-        storage: RunStorage<'_>,
-    ) -> Result<StagePlan, AlignStackError> {
-        let tier = storage.tier(
-            plan,
-            RunWrites {
-                kept: self.kept_writes,
-                spilled: self.spill_bytes(),
+    /// The run of these lights through `stages`: what they write to the decode cache and the
+    /// spill, and the source gains they hold beside the combine.
+    pub(super) const fn run_shape<const N: usize>(&self, stages: [Stage; N]) -> RunShape<N> {
+        RunShape {
+            frame_count: self.count,
+            stages,
+            writes: RunWrites {
+                kept_bytes: self.kept_write_bytes,
+                spilled_bytes: self.spill_bytes(),
             },
-        )?;
-        Ok(StagePlan {
-            parking: FrameParking::new(tier.holding_beside(self.gains)),
-            warp_width: plan.width(warp),
-        })
+            beside_bytes: self.gains_bytes,
+        }
     }
 
     /// What each worker's detector holds throughout, its filters' bands on `workers`: its pool of
@@ -114,19 +105,19 @@ impl LightShape {
     /// prepared and detected; then warped, the light it warps from and the warp's planes in hand;
     /// the normalization; the combine.
     pub(super) fn found_reference(&self, config: &AlignStackConfig, workers: usize) -> [Stage; 4] {
-        let warped = self.warped() - self.held;
+        let warped = self.warped() - self.held_bytes;
         let [normalize, combine] = self.combined(warped, config, workers);
         [
             Stage {
-                kept: self.prepared.kept - self.held,
-                held: self.peeked + self.gains,
-                in_flight: self.prepared.transient() + self.detector_bytes(workers),
+                kept_bytes: self.prepared.kept - self.held_bytes,
+                held_bytes: self.peeked_bytes + self.gains_bytes,
+                in_flight_bytes: self.prepared.transient() + self.detector_bytes(workers),
                 units: Units::Frames,
             },
             Stage {
-                kept: warped,
-                held: self.gains,
-                in_flight: self.prepared.kept + self.warp_bytes(workers),
+                kept_bytes: warped,
+                held_bytes: self.gains_bytes,
+                in_flight_bytes: self.prepared.kept + self.warp_bytes(workers),
                 units: Units::Frames,
             },
             normalize,
@@ -139,14 +130,14 @@ impl LightShape {
     /// the warped light, and holds its detector and its warp's planes from one light to the next;
     /// the normalization; the combine.
     pub(super) fn named_reference(&self, config: &AlignStackConfig, workers: usize) -> [Stage; 3] {
-        debug_assert_eq!(self.held, 0, "a single pass decodes its own lights");
+        debug_assert_eq!(self.held_bytes, 0, "a single pass decodes its own lights");
         let warped = self.warped();
         let [normalize, combine] = self.combined(warped, config, workers);
         [
             Stage {
-                kept: warped,
-                held: self.peeked + self.gains,
-                in_flight: self.prepared.peak
+                kept_bytes: warped,
+                held_bytes: self.peeked_bytes + self.gains_bytes,
+                in_flight_bytes: self.prepared.peak
                     + self.detector_bytes(workers)
                     + self.warp_bytes(workers),
                 units: Units::Frames,
@@ -160,11 +151,7 @@ impl LightShape {
     /// source gains: every warped light covers only the pixels its warp reached.
     fn combined(&self, kept: usize, config: &AlignStackConfig, workers: usize) -> [Stage; 2] {
         let desc = self.desc;
-        let stages = PlannedCombine {
-            normalization: config.stack.normalization,
-            quality: config.stack.quality,
-        }
-        .stages(
+        let stages = config.stack.planned().stages(
             PlannedFrames {
                 count: self.count,
                 desc,
@@ -176,7 +163,7 @@ impl LightShape {
             kept,
         );
         stages.map(|stage| Stage {
-            held: stage.held + self.gains,
+            held_bytes: stage.held_bytes + self.gains_bytes,
             ..stage
         })
     }
@@ -189,7 +176,6 @@ mod tests {
     use crate::combine::normalization::Normalization;
     use crate::combine::stack_config::StackConfig;
     use crate::frame::frame_info::{DecoderBytes, FrameInfo};
-    use crate::image::cfa::cfa_type::CfaType;
     use crate::memory::stage::{Stage, Units};
     use crate::pipeline::align_stack_config::AlignStackConfig;
     use crate::pipeline::light_shape::LightShape;
@@ -220,7 +206,7 @@ mod tests {
     fn a_light_is_kept_as_each_stage_leaves_it() {
         let peek = FrameInfo {
             desc: PlanarDesc::new((4, 4), ChannelLayout::Mono),
-            cfa_type: CfaType::Mono,
+            cfa_type: None,
             decoder: DecoderBytes::default(),
             gain_bytes: 0,
         };
@@ -233,9 +219,9 @@ mod tests {
             ..AlignStackConfig::default()
         };
         let stage = |kept, held, in_flight, units| Stage {
-            kept,
-            held,
-            in_flight,
+            kept_bytes: kept,
+            held_bytes: held,
+            in_flight_bytes: in_flight,
             units,
         };
         let tail = |kept| {
@@ -262,7 +248,7 @@ mod tests {
         // A file the plan's read left for a light's preparation stays beside the preparing,
         // until the light is taken: on each route's first stage.
         let peeked = LightShape {
-            peeked: 30,
+            peeked_bytes: 30,
             ..LightShape::decoded(peek, 3, 1)
         };
         assert_eq!(
@@ -275,12 +261,12 @@ mod tests {
         );
         // The source gains the lights share, 16 B, stay beside every stage of either route.
         let gained = LightShape {
-            gains: 16,
+            gains_bytes: 16,
             ..LightShape::decoded(peek, 3, 1)
         };
         let [normalize, combine] = tail(224);
         let beside = |stage: Stage| Stage {
-            held: stage.held + 16,
+            held_bytes: stage.held_bytes + 16,
             ..stage
         };
         assert_eq!(

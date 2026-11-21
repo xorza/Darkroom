@@ -13,7 +13,7 @@ use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
-use crate::image::stackable_image::StackableImage;
+use crate::image::frame::{Frame, Samples};
 use crate::ingest::error::AdmissionError;
 
 /// The checks one frame of a set must pass, reporting their failures against its `idx` and
@@ -26,7 +26,7 @@ pub(crate) struct FrameCheck<'a> {
 
 impl FrameCheck<'_> {
     /// Every sample of a decoded image is finite.
-    pub(crate) fn samples(self, image: &impl StackableImage) -> Result<(), AdmissionError> {
+    pub(crate) fn samples(self, image: &Frame<impl Samples>) -> Result<(), AdmissionError> {
         self.sample_channels(
             (0..image.desc().channel_count()).map(|channel| image.channel(channel).pixels()),
         )

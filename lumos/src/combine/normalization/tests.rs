@@ -474,7 +474,7 @@ fn stacked_frames_land_on_the_reference_level() {
         ),
     ] {
         let product = (StackConfig {
-            combine: Combine::mean(),
+            combine: Combine::Mean,
             normalization,
             weighting: Weighting::Equal,
             ..StackConfig::light()
@@ -640,15 +640,70 @@ fn global_norms_are_fitted_against_the_selected_reference() {
     }
 }
 
+/// The stack takes its scale from the frame least noisy once normalized, not as recorded. Frame 1
+/// is frame 0 at half the signal, as thin cloud leaves it, its noise a MAD of 0.8 against frame
+/// 0's 1: the fit pairs every frame with frame 1, the quieter as recorded, and frame 0 lands on it
+/// at gain 1/2. Normalized, frame 0's noise is 1/2 and frame 1's 0.8, so the norms are re-expressed
+/// on frame 0: the identity, and frame 1 at gain 2, each exact.
+#[test]
+fn the_norms_are_rebased_on_the_least_noisy_frame_once_normalized() {
+    let desc = PlanarDesc::new((5, 1), ChannelLayout::Mono);
+    let clear = [100.0, 110.0, 120.0, 130.0, 140.0];
+    let frames: Vec<StoredFrame> = [(1.0f32, 1.0), (0.5, 0.8)]
+        .into_iter()
+        .map(|(transmission, mad)| {
+            StoredFrame::from_memory(
+                LinearImage::from_interleaved(
+                    desc,
+                    clear.map(|value| value * transmission).to_vec(),
+                ),
+                FrameQuality::None,
+                frame_stats(120.0 * transmission, mad),
+            )
+        })
+        .collect();
+    assert_eq!(
+        select_reference_frame(&frames, &[DomainMap::IDENTITY; 2]),
+        1,
+        "the fit's reference is the hazy frame, or this proves nothing"
+    );
+    for (normalization, expected) in [
+        (Normalization::Global, [(1.0, 0.0), (2.0, 0.0)]),
+        (Normalization::Multiplicative, [(1.0, 0.0), (2.0, 0.0)]),
+    ] {
+        let norms = FrameNorm::measure(
+            SlotPlanes {
+                frames: &frames,
+                desc,
+                slots: Slots::of_frames(&frames, desc),
+                cancel: &CancelToken::never(),
+            },
+            normalization,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            norms
+                .iter()
+                .map(|norm| (norm.slots[0].gain, norm.slots[0].offset))
+                .collect::<Vec<_>>(),
+            expected,
+            "{normalization:?}"
+        );
+    }
+}
+
 /// Multiplicative and global norms over the common domain, per frame and channel in order, and a
 /// cancel honoured. The domain is pixels 1..=3, where the channels' medians are frame 0: 3, 30, 7;
-/// frame 1: 30, 3, 70; frame 2: 9, 300, 40. Every frame carries the same source noise, so frame 0
-/// is the reference. Each frame is an exact affine image of it, so the global fit has nothing to
-/// window and returns the ratio of spreads, and its offset puts the medians together.
+/// frame 1: 30, 3, 70; frame 2: 9, 300, 40. Frames 0 and 1 carry the least source noise, a MAD of
+/// 1 against frame 2's 5, and frame 0 takes the tie; once normalized it stays the least noisy, its
+/// `Σ(g·σ)²` 3 against frame 2's `(1/9 + 1/100 + 49/1600)·25` = 3.8, so it is the reference. Each
+/// frame is an exact affine image of it, so the global fit has nothing to window and returns the
+/// ratio of spreads, and its offset puts the medians together.
 #[test]
 fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
     let desc = PlanarDesc::new((5, 1), ChannelLayout::Rgb);
-    let frames = affine_rgb_frames([1.0; 3]);
+    let frames = affine_rgb_frames([1.0, 1.0, 5.0]);
     let norms = |normalization| {
         FrameNorm::measure(
             SlotPlanes {
@@ -1034,13 +1089,14 @@ fn twilight_flats_normalize_per_color() {
         assert_eq!(norms[frame].slots.as_slice(), slots, "frame {frame}");
     }
 
-    let product = StackConfig::flat().run_stacking(&cache).unwrap();
+    let product = StackConfig::flat().combine(&cache).unwrap();
     assert_eq!(product.image.channel(0).pixels(), reference);
     let weight = product
         .weight
         .expect("the flat preset keeps the weight plane");
     assert!(
         weight
+            .map
             .channel(0)
             .pixels()
             .iter()
@@ -1173,7 +1229,8 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
 /// Global fits each pair's exact line: gain `1/a` and offset `−b/a` for a frame at `a·r + b`, so
 /// (0.5, −0.5) and (2, 0.5). Multiplicative divides the pair's medians, the middle pixel of each
 /// three: `r_mid / (a·r_mid + b)`. Each frame's spread is its noise and its source median 0, so no
-/// frame has a scale or a level of its own and the pairs stand alone.
+/// frame has a scale or a level of its own and the pairs stand alone. Frame 2, of MAD 1 against
+/// the others' 3, stays the least noisy once normalized: frame 0's gain of 1/2 leaves it 3/2.
 #[test]
 fn per_channel_frames_are_normalized_pair_by_pair() {
     let desc = PlanarDesc::new((8, 1), ChannelLayout::Rgb);
@@ -1216,7 +1273,7 @@ fn per_channel_frames_are_normalized_pair_by_pair() {
                     }
                 })
                 .collect();
-            let mad = if frame == 2 { 1.0 } else { 2.0 };
+            let mad = if frame == 2 { 1.0 } else { 3.0 };
             let mut admitted = channel_stats(&[(0.0, mad); 3]);
             let stats = &mut admitted.stats;
             stats.spread = Some(

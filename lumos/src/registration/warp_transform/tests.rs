@@ -9,8 +9,8 @@ const EPSILON: f64 = 1e-10;
 #[test]
 fn warp_transform_new() {
     let t = Transform::translation(DVec2::new(10.0, 5.0));
-    let wt = WarpTransform::new(t);
-    assert!(!wt.has_sip());
+    let wt = WarpTransform::from(t);
+    assert!(wt.sip().is_none());
 
     let p = wt.apply(DVec2::new(1.0, 2.0));
     assert_close!(p.x, 11.0, EPSILON);
@@ -44,7 +44,7 @@ fn warp_transform_with_sip() {
     .fitted_under(&transform, &reference, &target);
 
     let wt = WarpTransform::with_sip(transform, sip.clone());
-    assert!(wt.has_sip());
+    assert!(wt.sip().is_some());
     for p in [
         DVec2::ZERO,
         DVec2::new(37.5, 81.25),
@@ -64,7 +64,7 @@ fn warp_transform_with_sip() {
 #[test]
 fn warp_transform_apply_no_sip_matches_transform() {
     let t = Transform::similarity(DVec2::new(3.0, -2.0), 0.5, 1.1);
-    let wt = WarpTransform::new(t);
+    let wt = WarpTransform::from(t);
 
     for &p in &[
         DVec2::new(0.0, 0.0),

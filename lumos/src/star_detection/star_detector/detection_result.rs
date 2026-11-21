@@ -16,8 +16,6 @@ pub struct DetectionResult {
 /// Rejection counts produced by the quality-filtering stage.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QualityFilterDiagnostics {
-    /// Number of stars rejected as saturated.
-    pub saturated: usize,
     /// Number of stars rejected for low SNR.
     pub low_snr: usize,
     /// Number of stars rejected for high eccentricity.

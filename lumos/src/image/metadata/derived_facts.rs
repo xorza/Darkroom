@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::image::flags::quality_flags::SATURATION_FRACTION;
 use crate::image::metadata::calibration_state::CalibrationState;
 use crate::image::metadata::dark_comparison::DarkComparison;
 use crate::image::metadata::image_provenance::{DemosaicProvenance, ImageProvenance, RowOrder};
@@ -38,9 +39,10 @@ pub struct DerivedFacts {
     /// frame would understate. Set by the demosaic; `None` for any frame not demosaiced, and for a
     /// master, which the combine made.
     mosaic_noise: Option<MosaicNoise>,
-    /// Whether every saturated pixel is flagged in the image's flags. A RAW decode and a FITS with
-    /// a `DATAMAX` flag them, and calibration flags them before it moves the samples; anything else
-    /// leaves a consumer to test the samples itself.
+    /// Whether every saturated pixel is flagged in the image's flags. A RAW decode and a FITS that
+    /// states a saturation level flag them, and calibration flags them before it moves the
+    /// samples; anything else leaves a consumer to test the samples itself, against
+    /// [`Self::unflagged_saturation`].
     saturation_flagged: bool,
     /// The parts of the signal calibration removed: set by `CalibrationMasters::calibrate` on a
     /// light, and by a calibration stack that subtracts a master from each frame. It guards
@@ -141,6 +143,18 @@ impl DerivedFacts {
 
     pub const fn saturation_flagged(&self) -> bool {
         self.saturation_flagged
+    }
+
+    /// The level a consumer flags saturation at in samples whose decoder flagged none:
+    /// [`SATURATION_FRACTION`] of the normalized full scale. `None` once every saturated pixel is
+    /// flagged. It describes the samples as decoded, before any calibration moves them, which
+    /// flags against it first.
+    pub(crate) const fn unflagged_saturation(&self) -> Option<f32> {
+        if self.saturation_flagged {
+            None
+        } else {
+            Some(SATURATION_FRACTION)
+        }
     }
 
     /// Once calibration flagged every saturated pixel, before it moved the samples.

@@ -9,9 +9,8 @@ use crate::combine::reducer::pixel_samples::PixelSamples;
 use crate::combine::reducer::sample_quality::SampleQuality;
 use crate::combine::rejection::sorted_samples::SortedSamples;
 use crate::combine::rejection::*;
-use crate::combine::stack::mean_combine::MeanCombine;
+use crate::combine::stack::rejected_mean::{RejectedMean, mean_of_all};
 use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
-use crate::combine::stack_config::small_n::SmallN;
 use crate::internals::invariance::Affine;
 use crate::internals::test_rng::TestRng;
 use crate::math::{normal, students_t};
@@ -60,17 +59,21 @@ fn all_but(count: usize, dropped: &[usize]) -> Vec<usize> {
     (0..count).filter(|i| !dropped.contains(i)).collect()
 }
 
-/// [`MeanCombine::reducer`] over `values` with `weights`, every sample its own frame, and no noise.
-fn combine(rejection: Rejection, values: &[f32], weights: &[f32]) -> CombinedSample {
+/// The mean of `values` with `weights` under `rejection`, or of every sample under none, every
+/// sample its own frame, and no noise.
+fn combine(rejection: Option<Rejection>, values: &[f32], weights: &[f32]) -> CombinedSample {
     let mut values = values.to_vec();
-    mean(rejection, SampleQuality::Measured)(
-        PixelSamples {
-            values: &mut values,
-            weights,
-            noise: None,
-        },
-        &mut ScratchBuffers::default(),
-    )
+    let samples = PixelSamples {
+        values: &mut values,
+        weights,
+        noise: None,
+    };
+    match rejection {
+        Some(rejection) => {
+            mean(rejection, SampleQuality::Measured)(samples, &mut ScratchBuffers::default())
+        }
+        None => mean_of_all(&samples, SampleQuality::Measured),
+    }
 }
 
 /// The reducer of a mean under `rejection`, with no small-sample fallback.
@@ -78,9 +81,9 @@ fn mean(
     rejection: Rejection,
     quality: SampleQuality,
 ) -> impl Fn(PixelSamples<'_>, &mut ScratchBuffers) -> CombinedSample {
-    MeanCombine {
+    RejectedMean {
         rejection,
-        small_n: SmallN::none(),
+        small_n: None,
         min_survivors: DEFAULT_MIN_SURVIVORS,
         quality,
     }
@@ -121,37 +124,46 @@ fn rejection_configs_default_and_construct_as_documented() {
     assert_eq!(
         TrimConfig::default(),
         TrimConfig {
-            low_percent: 10.0,
-            high_percent: 10.0
+            percent: TrimBounds {
+                low: 10.0,
+                high: 10.0
+            }
         }
     );
     assert_eq!(
         GesdConfig::default(),
         GesdConfig {
             alpha: 0.05,
-            max_outliers: None
+            outliers_percent: 30.0
         }
     );
     for (shorthand, expected) in [
         (
-            Rejection::default(),
-            Rejection::SigmaClip(SigmaClipConfig::default()),
-        ),
-        (
             Rejection::sigma_clip(2.0),
-            Rejection::SigmaClip(SigmaClipConfig::new(SigmaBounds::symmetric(2.0), 3)),
+            Rejection::SigmaClip(SigmaClipConfig {
+                sigma: SigmaBounds::symmetric(2.0),
+                max_iterations: 3,
+                ..SigmaClipConfig::DEFAULT
+            }),
         ),
         (
             Rejection::winsorized(3.0),
-            Rejection::Winsorized(WinsorizedClipConfig::new(SigmaBounds::symmetric(3.0))),
+            Rejection::Winsorized(WinsorizedClipConfig {
+                sigma: SigmaBounds::symmetric(3.0),
+            }),
         ),
         (
             Rejection::linear_fit(2.5),
-            Rejection::LinearFit(LinearFitClipConfig::new(SigmaBounds::symmetric(2.5), 4)),
+            Rejection::LinearFit(LinearFitClipConfig {
+                sigma: SigmaBounds::symmetric(2.5),
+                max_iterations: 4,
+            }),
         ),
         (
             Rejection::trim(15.0),
-            Rejection::Trim(TrimConfig::new(15.0, 15.0)),
+            Rejection::Trim(TrimConfig {
+                percent: TrimBounds::symmetric(15.0),
+            }),
         ),
         (Rejection::gesd(), Rejection::Gesd(GesdConfig::default())),
     ] {
@@ -159,7 +171,8 @@ fn rejection_configs_default_and_construct_as_documented() {
     }
 }
 
-/// The automatic GESD cap is `⌊0.3·n⌋`, in integers; an explicit one is taken as given.
+/// The GESD cap is `⌊p·n/100⌋`, exact: by default `⌊0.3·n⌋`, and 63 for 42% of 150, where
+/// `0.42·150` in f32 floors to 62.
 #[test]
 fn the_gesd_cap_is_three_tenths_of_the_samples() {
     for (count, expected) in [(0, 0), (3, 0), (4, 1), (10, 3), (20, 6), (25, 7), (100, 30)] {
@@ -170,8 +183,14 @@ fn the_gesd_cap_is_three_tenths_of_the_samples() {
         );
     }
     assert_eq!(
-        GesdConfig::new(0.05, Some(11)).max_outliers_for_size(44),
-        11
+        [(25.0, 44, 11), (12.5, 8, 1), (42.0, 150, 63)].map(|(outliers_percent, count, _)| {
+            GesdConfig {
+                outliers_percent,
+                ..GesdConfig::DEFAULT
+            }
+            .max_outliers_for_size(count)
+        }),
+        [11, 1, 63]
     );
 }
 
@@ -215,37 +234,61 @@ fn sigma_clip_keeps_exactly_the_samples_its_bands_hold() {
         (
             "ramp 2σ",
             &ramp[..],
-            SigmaClipConfig::new(SigmaBounds::symmetric(2.0), 3),
+            SigmaClipConfig {
+                sigma: SigmaBounds::symmetric(2.0),
+                max_iterations: 3,
+                ..SigmaClipConfig::DEFAULT
+            },
             all_but(8, &[7]),
         ),
         (
             "ramp 2.5σ",
             &ramp,
-            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3),
+            SigmaClipConfig {
+                sigma: SigmaBounds::symmetric(2.5),
+                max_iterations: 3,
+                ..SigmaClipConfig::DEFAULT
+            },
             all_but(8, &[7]),
         ),
         (
             "ramp 4σ low, 2σ high",
             &ramp,
-            SigmaClipConfig::new(SigmaBounds::asymmetric(4.0, 2.0), 3),
+            SigmaClipConfig {
+                sigma: SigmaBounds::asymmetric(4.0, 2.0),
+                max_iterations: 3,
+                ..SigmaClipConfig::DEFAULT
+            },
             all_but(8, &[7]),
         ),
         (
             "low kept",
             &[-5.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 50.0],
-            SigmaClipConfig::new(SigmaBounds::asymmetric(10.0, 2.0), 5),
+            SigmaClipConfig {
+                sigma: SigmaBounds::asymmetric(10.0, 2.0),
+                max_iterations: 5,
+                ..SigmaClipConfig::DEFAULT
+            },
             all_but(10, &[9]),
         ),
         (
             "three high",
             &[1.0, 1.5, 2.0, 2.5, 3.0, 50.0, 80.0, 100.0],
-            SigmaClipConfig::new(SigmaBounds::symmetric(2.0), 3),
+            SigmaClipConfig {
+                sigma: SigmaBounds::symmetric(2.0),
+                max_iterations: 3,
+                ..SigmaClipConfig::DEFAULT
+            },
             all_but(8, &[5, 6, 7]),
         ),
         (
             "clean",
             &[1.0, 1.125, 1.25, 0.875, 1.0625],
-            SigmaClipConfig::new(SigmaBounds::symmetric(3.0), 3),
+            SigmaClipConfig {
+                sigma: SigmaBounds::symmetric(3.0),
+                max_iterations: 3,
+                ..SigmaClipConfig::DEFAULT
+            },
             all_but(5, &[]),
         ),
         (
@@ -254,19 +297,31 @@ fn sigma_clip_keeps_exactly_the_samples_its_bands_hold() {
                 7990.0, 8000.0, 8010.0, 7995.0, 8005.0, 8000.0, 7990.0, 8010.0, 8000.0, 7995.0,
                 8005.0, 8000.0, 7990.0, 8010.0, 9000.0,
             ],
-            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3),
+            SigmaClipConfig {
+                sigma: SigmaBounds::symmetric(2.5),
+                max_iterations: 3,
+                ..SigmaClipConfig::DEFAULT
+            },
             all_but(15, &[14]),
         ),
         (
             "two levels",
             &two_levels,
-            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3),
+            SigmaClipConfig {
+                sigma: SigmaBounds::symmetric(2.5),
+                max_iterations: 3,
+                ..SigmaClipConfig::DEFAULT
+            },
             all_but(100, &[94, 95, 96, 97, 98, 99]),
         ),
         (
             "hot",
             &hot,
-            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3),
+            SigmaClipConfig {
+                sigma: SigmaBounds::symmetric(2.5),
+                max_iterations: 3,
+                ..SigmaClipConfig::DEFAULT
+            },
             all_but(20, &[19]),
         ),
         (
@@ -285,7 +340,11 @@ fn sigma_clip_keeps_exactly_the_samples_its_bands_hold() {
     // The asymmetric form at equal thresholds is the symmetric one.
     assert_eq!(
         kept(
-            Rejection::SigmaClip(SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3)),
+            Rejection::SigmaClip(SigmaClipConfig {
+                sigma: SigmaBounds::symmetric(2.5),
+                max_iterations: 3,
+                ..SigmaClipConfig::DEFAULT
+            }),
             &ramp
         ),
         kept(Rejection::sigma_clip(2.5), &ramp)
@@ -408,25 +467,37 @@ fn linear_fit_keeps_exactly_the_samples_near_its_line() {
         (
             "off line",
             &[1.0, 2.0, 3.0, 4.0, 100.0, 6.0][..],
-            LinearFitClipConfig::new(SigmaBounds::symmetric(2.0), 4),
+            LinearFitClipConfig {
+                sigma: SigmaBounds::symmetric(2.0),
+                max_iterations: 4,
+            },
             all_but(6, &[4]),
         ),
         (
             "top",
             &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 100.0],
-            LinearFitClipConfig::new(SigmaBounds::symmetric(2.0), 4),
+            LinearFitClipConfig {
+                sigma: SigmaBounds::symmetric(2.0),
+                max_iterations: 4,
+            },
             all_but(8, &[7]),
         ),
         (
             "middle",
             &[1.0, 2.0, 3.0, 50.0, 5.0, 6.0, 7.0, 4.0],
-            LinearFitClipConfig::new(SigmaBounds::symmetric(2.0), 4),
+            LinearFitClipConfig {
+                sigma: SigmaBounds::symmetric(2.0),
+                max_iterations: 4,
+            },
             all_but(8, &[3]),
         ),
         (
             "one pass",
             &[10.0, 10.5, 11.0, 10.2, 10.8, 10.3, 10.7, 50.0],
-            LinearFitClipConfig::new(SigmaBounds::symmetric(3.0), 2),
+            LinearFitClipConfig {
+                sigma: SigmaBounds::symmetric(3.0),
+                max_iterations: 2,
+            },
             all_but(8, &[7]),
         ),
         (
@@ -438,13 +509,19 @@ fn linear_fit_keeps_exactly_the_samples_near_its_line() {
         (
             "trend",
             &[1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0],
-            LinearFitClipConfig::new(SigmaBounds::symmetric(2.0), 4),
+            LinearFitClipConfig {
+                sigma: SigmaBounds::symmetric(2.0),
+                max_iterations: 4,
+            },
             all_but(8, &[]),
         ),
         (
             "ramp",
             &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 5.0],
-            LinearFitClipConfig::new(SigmaBounds::symmetric(2.0), 4),
+            LinearFitClipConfig {
+                sigma: SigmaBounds::symmetric(2.0),
+                max_iterations: 4,
+            },
             all_but(10, &[]),
         ),
         (
@@ -456,13 +533,19 @@ fn linear_fit_keeps_exactly_the_samples_near_its_line() {
         (
             "long",
             &long,
-            LinearFitClipConfig::new(SigmaBounds::symmetric(3.0), 4),
+            LinearFitClipConfig {
+                sigma: SigmaBounds::symmetric(3.0),
+                max_iterations: 4,
+            },
             all_but(100, &[50]),
         ),
         (
             "fit only",
             &fit_only,
-            LinearFitClipConfig::new(SigmaBounds::symmetric(3.0), 4),
+            LinearFitClipConfig {
+                sigma: SigmaBounds::symmetric(3.0),
+                max_iterations: 4,
+            },
             all_but(11, &[10]),
         ),
     ] {
@@ -726,37 +809,49 @@ fn winsorized_keeps_exactly_the_samples_its_band_holds() {
         (
             "ramp",
             &[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0][..],
-            WinsorizedClipConfig::new(SigmaBounds::symmetric(2.0)),
+            WinsorizedClipConfig {
+                sigma: SigmaBounds::symmetric(2.0),
+            },
             all_but(8, &[7]),
         ),
         (
             "high",
             &[1.0, 1.1, 1.2, 0.9, 1.0, 50.0],
-            WinsorizedClipConfig::new(SigmaBounds::asymmetric(3.0, 2.0)),
+            WinsorizedClipConfig {
+                sigma: SigmaBounds::asymmetric(3.0, 2.0),
+            },
             all_but(6, &[5]),
         ),
         (
             "clean",
             &[2.0, 2.125, 2.25, 1.875, 2.0625],
-            WinsorizedClipConfig::new(SigmaBounds::symmetric(3.0)),
+            WinsorizedClipConfig {
+                sigma: SigmaBounds::symmetric(3.0),
+            },
             all_but(5, &[]),
         ),
         (
             "mild at 10σ",
             &mild,
-            WinsorizedClipConfig::new(SigmaBounds::symmetric(10.0)),
+            WinsorizedClipConfig {
+                sigma: SigmaBounds::symmetric(10.0),
+            },
             all_but(9, &[]),
         ),
         (
             "mild at 2σ",
             &mild,
-            WinsorizedClipConfig::new(SigmaBounds::symmetric(2.0)),
+            WinsorizedClipConfig {
+                sigma: SigmaBounds::symmetric(2.0),
+            },
             all_but(9, &[8]),
         ),
         (
             "three of ten",
             &[-1.5, -1.0, -0.5, 0.0, 0.0, 0.5, 1.0, 10.0, 10.0, 10.0],
-            WinsorizedClipConfig::new(SigmaBounds::symmetric(3.0)),
+            WinsorizedClipConfig {
+                sigma: SigmaBounds::symmetric(3.0),
+            },
             all_but(10, &[7, 8, 9]),
         ),
         (
@@ -825,13 +920,20 @@ fn trim_drops_exact_counts_from_each_end() {
         [2, 3, 4]
     );
     assert_eq!(
-        TrimConfig::new(42.0, 10.0).counts(150),
+        TrimConfig {
+            percent: TrimBounds::asymmetric(42.0, 10.0)
+        }
+        .counts(150),
         trim_config::TrimCounts { low: 63, high: 15 }
     );
     assert_eq!((0.42f32 * 150.0).floor(), 62.0);
     for (percent, count, expected) in [(20.0, 10, 2), (49.0, 5, 2), (10.0, 1, 0), (12.5, 8, 1)] {
         assert_eq!(
-            TrimConfig::new(percent, percent).counts(count).low,
+            TrimConfig {
+                percent: TrimBounds::symmetric(percent)
+            }
+            .counts(count)
+            .low,
             expected,
             "{percent}% of {count}"
         );
@@ -870,15 +972,21 @@ fn gesd_drops_an_outlier_and_keeps_clean_sets() {
 /// is 30/20 = 1.5 and the sum of squares 16.32 + 17·2.25 + 3·8.5² = 271.32, so the first statistic
 /// is 8.5/√(271.32/19) = 2.249, under its critical value 2.708: the three mask each other. The
 /// second removal reaches 2.717 against 2.681, and the third 3.700 against 2.652. The automatic cap
-/// ⌊0.3·20⌋ = 6 reaches the third and drops all three; a cap of 2 would stop at the second and
-/// keep one 10.
+/// ⌊0.3·20⌋ = 6 reaches the third and drops all three; a cap of 10%, 2, stops at the second and
+/// keeps one 10.
 #[test]
 fn gesd_tests_far_enough_to_unmask_three_outliers() {
     let mut values: Vec<f32> = (0..17).map(|i| -1.6 + 0.2 * i as f32).collect();
     values.extend([10.0; 3]);
     assert_eq!(kept(Rejection::gesd(), &values), all_but(20, &[17, 18, 19]));
     assert_eq!(
-        kept(Rejection::Gesd(GesdConfig::new(0.05, Some(2))), &values),
+        kept(
+            Rejection::Gesd(GesdConfig {
+                outliers_percent: 10.0,
+                ..GesdConfig::DEFAULT
+            }),
+            &values
+        ),
         all_but(20, &[18, 19])
     );
 }
@@ -906,7 +1014,11 @@ fn gesd_matches_nist_reference_example() {
         (2.101, 3.094),
         (2.067, 3.085),
     ];
-    let config = GesdConfig::new(0.05, Some(10));
+    // ⌊20·54/100⌋ = 10 candidates.
+    let config = GesdConfig {
+        outliers_percent: 20.0,
+        ..GesdConfig::DEFAULT
+    };
     let mut scratch = ScratchBuffers::default();
     scratch.sorted.fill(&values);
     let statistics = config.statistics(&Pass {
@@ -965,7 +1077,11 @@ fn gesd_is_sign_symmetric() {
         10.0,
     ];
     let mirrored = values.map(|value: f32| -value);
-    let rejection = Rejection::Gesd(GesdConfig::new(0.05, Some(2)));
+    // ⌊15·17/100⌋ = 2 candidates.
+    let rejection = Rejection::Gesd(GesdConfig {
+        outliers_percent: 15.0,
+        ..GesdConfig::DEFAULT
+    });
     assert_eq!(kept(rejection, &values), all_but(17, &[15, 16]));
     assert_eq!(kept(rejection, &mirrored), all_but(17, &[15, 16]));
 }
@@ -983,7 +1099,10 @@ fn gesd_gaussian_false_positive_rate_matches_alpha() {
     let mut rng = ChaCha8Rng::seed_from_u64(0x947e_4d3a_7c16_b205);
     let mut scratch = ScratchBuffers::default();
     for count in [15, 25, 50, 100] {
-        let rejection = Rejection::Gesd(GesdConfig::new(ALPHA, Some(count / 4)));
+        let rejection = Rejection::Gesd(GesdConfig {
+            alpha: ALPHA,
+            outliers_percent: 25.0,
+        });
         let mut false_positives = 0usize;
         let mut values = vec![0.0f32; count];
         for _ in 0..TRIALS {
@@ -1055,7 +1174,10 @@ fn the_driver_keeps_the_minimum_nearest_the_centre() {
             Rejection::sigma_clip(0.5),
             Rejection::winsorized(0.5),
             Rejection::linear_fit(0.5),
-            Rejection::Gesd(GesdConfig::new(0.5, Some(10))),
+            Rejection::Gesd(GesdConfig {
+                alpha: 0.5,
+                outliers_percent: 50.0,
+            }),
             Rejection::trim(45.0),
         ] {
             for _ in 0..20 {
@@ -1108,71 +1230,85 @@ fn a_mean_weighs_each_survivor_by_its_own_weight() {
     for (name, rejection, values, weights, expected) in [
         (
             "none",
-            Rejection::None,
+            None,
             &[1.0, 2.0, 3.0, 4.0, 5.0][..],
             vec![1.0; 5],
             3.0,
         ),
         (
             "none, weighted",
-            Rejection::None,
+            None,
             &[1.0, 2.0, 3.0, 4.0, 5.0],
             heavy_first(5, 10.0, 1.0),
             24.0 / 14.0,
         ),
         (
             "sigma clip",
-            Rejection::sigma_clip(2.0),
+            Some(Rejection::sigma_clip(2.0)),
             &ramp,
             vec![1.0; 8],
             2.5,
         ),
         (
             "asymmetric sigma clip, weighted",
-            Rejection::SigmaClip(SigmaClipConfig::new(SigmaBounds::asymmetric(4.0, 2.0), 3)),
+            Some(Rejection::SigmaClip(SigmaClipConfig {
+                sigma: SigmaBounds::asymmetric(4.0, 2.0),
+                max_iterations: 3,
+                ..SigmaClipConfig::DEFAULT
+            })),
             &ramp,
             heavy_first(8, 10.0, 1.0),
             26.5 / 16.0,
         ),
-        ("trim", Rejection::trim(20.0), &tenths, vec![1.0; 10], 5.5),
+        (
+            "trim",
+            Some(Rejection::trim(20.0)),
+            &tenths,
+            vec![1.0; 10],
+            5.5,
+        ),
         (
             "trim, weighted",
-            Rejection::trim(20.0),
+            Some(Rejection::trim(20.0)),
             &tenths,
             heavy_eighth,
             7.0,
         ),
         (
             "winsorized",
-            Rejection::winsorized(2.0),
+            Some(Rejection::winsorized(2.0)),
             &quarters,
             vec![1.0; 6],
             1.5,
         ),
         (
             "winsorized, weighted",
-            Rejection::winsorized(2.0),
+            Some(Rejection::winsorized(2.0)),
             &quarters,
             heavy_first(6, 10.0, 1.0),
             16.5 / 14.0,
         ),
         (
             "sigma clip, weighted",
-            Rejection::sigma_clip(2.0),
+            Some(Rejection::sigma_clip(2.0)),
             &[2.0, 100.0, 3.0, 2.5, 2.25, 1.75, 2.75, 2.5],
             heavy_first(8, 8.0, 0.125),
             (16.0 + 14.75 / 8.0) / (8.0 + 6.0 / 8.0),
         ),
         (
             "linear fit, weighted",
-            Rejection::linear_fit(3.0),
+            Some(Rejection::linear_fit(3.0)),
             &[1.0, 1.125, 1.25, 1.375, 100.0, 1.5],
             heavy_first(6, 8.0, 0.125),
             (8.0 + 5.25 / 8.0) / (8.0 + 4.0 / 8.0),
         ),
         (
             "gesd, weighted",
-            Rejection::Gesd(GesdConfig::new(0.05, Some(3))),
+            // ⌊40·8/100⌋ = 3 candidates.
+            Some(Rejection::Gesd(GesdConfig {
+                outliers_percent: 40.0,
+                ..GesdConfig::DEFAULT
+            })),
             &[1.0, 1.125, 0.875, 1.0, 1.25, 0.75, 1.0, 100.0],
             heavy_first(8, 8.0, 0.125),
             1.0,
@@ -1191,9 +1327,10 @@ fn a_mean_weighs_each_survivor_by_its_own_weight() {
 ///
 /// The inverse variance is `(Σw)²/Σw²·v` with each sample's model taken at the combined value
 /// 17.5/7 = 2.5: background 1/4 plus `(2.5 − 1/2)·1/4` above the sky, 3/4, so 49/(7·3/4) = 28/3,
-/// exact up to its one rounding. The survivors lie ±0.5, ±1 and ±1.5 about 2.5, squares summing to
-/// 7, so the dispersion is 7 / (6·7) = 1/6, exact up to its one rounding, before the band's
-/// correction multiplies it by 1/0.9545 = 1.0477, the inverse of a unit normal's variance in ±2σ.
+/// exact up to its one rounding, before the band's correction multiplies it by 0.7737, a unit
+/// normal's variance truncated to ±2σ, the cost of choosing the survivors from the data. The
+/// survivors lie ±0.5, ±1 and ±1.5 about 2.5, squares summing to 7, so the dispersion is
+/// 7 / (6·7) = 1/6, exact up to its one rounding, before the correction divides it by 0.7737².
 #[test]
 fn the_survivors_make_the_sample() {
     let ramp = [4.0, 1.0, 100.0, 3.5, 1.5, 2.0, 3.0, 2.5];
@@ -1215,22 +1352,47 @@ fn the_survivors_make_the_sample() {
     );
     assert_eq!(sample.value, 2.5);
     assert_eq!(sample.weight, 7.0);
-    assert_eq!(sample.inverse_variance, 28.0 / 3.0);
+    let band_variance = 0.773_741_303_549_923_2;
+    assert_eq!(
+        rejection.band_variance(),
+        Some(band_variance),
+        "a unit normal's variance in ±2σ"
+    );
+    assert_eq!(
+        sample.inverse_variance,
+        (28.0f32 / 3.0) * band_variance as f32
+    );
     assert_eq!(
         sample.dispersion,
-        1.0 / 6.0 * rejection.dispersion_correction()
+        (1.0f32 / 6.0) * (1.0 / (band_variance * band_variance)) as f32
     );
 
     let mut values = ramp;
-    let all = mean(Rejection::None, SampleQuality::Measured)(
-        PixelSamples {
+    let all = mean_of_all(
+        &PixelSamples {
             values: &mut values,
             weights: &[1.0; 8],
             noise: None,
         },
-        &mut scratch,
+        SampleQuality::Measured,
     );
     assert_eq!(all.weight, 8.0);
+
+    // The sums round once: four weights of 2⁻²⁵ beside a 1 each fall away from an f32 running
+    // sum, half an ulp of 1 rounding to even, and sum to 2⁻²³, one ulp, in f64. The values tie, so
+    // the dispersion is 0.
+    let mut values = [3.0; 5];
+    let tiny = f32::EPSILON / 4.0;
+    let rounded_once = mean_of_all(
+        &PixelSamples {
+            values: &mut values,
+            weights: &[1.0, tiny, tiny, tiny, tiny],
+            noise: None,
+        },
+        SampleQuality::Measured,
+    );
+    assert_eq!(rounded_once.weight, 1.0 + f32::EPSILON);
+    assert_eq!(rounded_once.dispersion, 0.0);
 }
 
 /// The background columns become the floor as their root mean square: four samples of variance
@@ -1285,9 +1447,11 @@ fn the_ccd_model_reads_photon_noise_the_mad_cannot_see() {
     let kept_under = |scale| {
         let mut scratch = ScratchBuffers::default();
         scratch.sorted.fill(&values);
-        let rejection = Rejection::SigmaClip(
-            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3).with_scale(scale),
-        );
+        let rejection = Rejection::SigmaClip(SigmaClipConfig {
+            sigma: SigmaBounds::symmetric(2.5),
+            scale,
+            ..SigmaClipConfig::DEFAULT
+        });
         rejection
             .surviving_window(&mut scratch, Some(noise), DEFAULT_MIN_SURVIVORS)
             .len()
@@ -1315,9 +1479,11 @@ fn the_ccd_model_rejects_each_sample_by_its_own_noise() {
     let survivors = |scale| {
         let mut scratch = ScratchBuffers::default();
         scratch.sorted.fill(&values);
-        let window = Rejection::SigmaClip(
-            SigmaClipConfig::new(SigmaBounds::symmetric(2.5), 3).with_scale(scale),
-        )
+        let window = Rejection::SigmaClip(SigmaClipConfig {
+            sigma: SigmaBounds::symmetric(2.5),
+            scale,
+            ..SigmaClipConfig::DEFAULT
+        })
         .surviving_window(&mut scratch, Some(noise), DEFAULT_MIN_SURVIVORS);
         let kept = scratch.sorted.values()[window.clone()].to_vec();
         assert!(kept.is_sorted(), "{scale:?}: {kept:?}");

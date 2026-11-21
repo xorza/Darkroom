@@ -30,7 +30,7 @@ use crate::io::fits::flags_extension;
 use crate::io::fits::gain_extension;
 use crate::io::fits::linear;
 use crate::io::fits::lumos_extension::{
-    DescribedImage, LumosExtension, QUALITY_FORMAT, QUALITY_VERSION,
+    DescribedImage, LumosExtension, QUALITY_FORMAT, QUALITY_VERSION, WeightUnits,
 };
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::plane_hdu::{FloatPlanes, NoDataMask, PlaneHdu, PlaneSource};
@@ -38,12 +38,15 @@ use crate::io::load_ctx::LoadCtx;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::fits::error::{ProductError, ProductRefusal};
-use crate::stack_product::weight_kind::WeightKind;
+use crate::stack_product::weight_plane::{WeightKind, WeightPlane};
 use common::USize2;
 
 /// 1: the report in the primary header, the quality planes in `CCDData`'s layout. 2: what the
-/// frame weights of the weight plane were, which a plane of inverse variances is scaled by.
-const PRODUCT_VERSION: i64 = 2;
+/// frame weights of the weight plane were, which a plane of inverse variances is scaled by. 3: the
+/// weights' kind only beside their plane, a full coverage a logical, and the report in groups, the
+/// calibration's and the drizzle's present for a run that had them. 4: the calibration group counts
+/// the settings it could not compare and the flats of another filter.
+const PRODUCT_VERSION: i64 = 4;
 /// The `UTYPE` astropy names an inverse-variance uncertainty by: its class's name.
 const INVERSE_VARIANCE: &str = "InverseVariance";
 
@@ -51,15 +54,16 @@ const INVERSE_VARIANCE: &str = "InverseVariance";
 const PRODUCT_KEYWORD: Keyword = Keyword::new("LUMPRODV");
 /// The keyword astropy's `CCDData` reads an uncertainty's kind from.
 const UNCERTAINTY_TYPE: Keyword = Keyword::new("UTYPE");
-/// The primary header's keyword for a coverage of one value at every pixel, which no plane holds.
-const UNIFORM_COVERAGE: Keyword = Keyword::new("LUMCOVU");
-/// The primary header's keyword for what the frame weights the `WEIGHT` plane sums were.
+/// The primary header's keyword for a coverage of 1 at every pixel, which no plane holds: `T`
+/// where the coverage is [`Coverage::Full`], absent otherwise.
+const FULL_COVERAGE: Keyword = Keyword::new("LUMCOVU");
+/// The primary header's keyword for what the frame weights the `WEIGHT` plane sums were, present
+/// with the plane alone.
 const WEIGHT_KIND: Keyword = Keyword::new("LUMWGTK");
 /// Each [`WeightKind`] by the value [`WEIGHT_KIND`] names it with.
-const WEIGHT_KINDS: [(WeightKind, &str); 3] = [
+const WEIGHT_KINDS: [(WeightKind, &str); 2] = [
     (WeightKind::Count, "COUNT"),
     (WeightKind::InverseVariance, "INVERSE_VARIANCE"),
-    (WeightKind::Relative, "RELATIVE"),
 ];
 
 /// The planes after the flags and gain, in the order the file holds them: `CCDData`'s two first.
@@ -85,11 +89,13 @@ pub(crate) fn write(product: &StackProduct, out: impl Write + Seek) -> Result<()
     let mut primary = linear::hdu(image, product.cfa_type)?;
     primary.header.set(PRODUCT_KEYWORD, PRODUCT_VERSION)?;
     report_keywords::write(&mut primary.header, &product.report)?;
-    primary
-        .header
-        .set(WEIGHT_KIND, weight_kind_name(product.weight_kind))?;
-    if let Some(Coverage::Uniform { value, .. }) = &product.coverage {
-        primary.header.set(UNIFORM_COVERAGE, f64::from(*value))?;
+    if let Some(weight) = &product.weight {
+        primary
+            .header
+            .set(WEIGHT_KIND, weight_kind_name(weight.kind))?;
+    }
+    if matches!(product.coverage, Some(Coverage::Full)) {
+        primary.header.set(FULL_COVERAGE, true)?;
     }
     let flags = flags_extension::encode(image.flags(), None, 1)?;
     let gain = gain_extension::encode(image.flat_gain().map(|gain| &**gain), None)?;
@@ -97,7 +103,10 @@ pub(crate) fn write(product: &StackProduct, out: impl Write + Seek) -> Result<()
         size: image.desc().size(),
         channels: image.channel_count(),
         scale: image_scale(image),
-        weight_units: product.weight_kind.units(),
+        weight_units: product
+            .weight
+            .as_ref()
+            .map_or(WeightUnits::Unitless, |weight| weight.kind.units()),
     };
     let mask = image
         .flags()
@@ -120,10 +129,13 @@ pub(crate) fn write(product: &StackProduct, out: impl Write + Seek) -> Result<()
             LumosExtension::Coverage,
             match &product.coverage {
                 Some(Coverage::PerPixel(map)) => Some(map),
-                Some(Coverage::Uniform { .. }) | None => None,
+                Some(Coverage::Full) | None => None,
             },
         ),
-        (LumosExtension::Weight, product.weight.as_ref()),
+        (
+            LumosExtension::Weight,
+            product.weight.as_ref().map(|weight| &weight.map),
+        ),
         (LumosExtension::Dispersion, product.dispersion.as_ref()),
     ]
     .into_iter()
@@ -152,7 +164,7 @@ pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, ProductEr
         .map_err(ReadFailure::from)
         .and_then(|file| read(file, ctx))
         .map_err(|failure| match failure {
-            ReadFailure::Fits(error) => ImageError::fits_load(path, error).into(),
+            ReadFailure::Fits(error) => ImageError::new(path, error).into(),
             ReadFailure::Refused(refusal) => ProductError::Refused {
                 path: path.to_path_buf(),
                 refusal,
@@ -192,20 +204,16 @@ pub(crate) fn read(source: impl Read + Seek, ctx: &LoadCtx) -> Result<StackProdu
         }));
     }
     let report = report_keywords::read(&primary)?;
-    let weight_kind = read_weight_kind(&primary)?;
-    let uniform_coverage = primary
-        .get_real(UNIFORM_COVERAGE)?
-        .map(|value| {
-            let coverage = value as f32;
-            if f64::from(coverage) == value && (0.0..=1.0).contains(&coverage) {
-                Ok(coverage)
-            } else {
-                Err(FitsRefusal::KeywordOutOfRange {
-                    keyword: UNIFORM_COVERAGE.to_string(),
-                })
-            }
-        })
-        .transpose()?;
+    let full_coverage = match primary.get_logical(FULL_COVERAGE)? {
+        None => false,
+        Some(true) => true,
+        Some(false) => {
+            return Err(FitsLoadError::from(FitsRefusal::KeywordOutOfRange {
+                keyword: FULL_COVERAGE.to_string(),
+            })
+            .into());
+        }
+    };
 
     let selected = SelectedFits::primary(&mut reader, ctx)?;
     let cfa_type = selected.cfa_type();
@@ -220,11 +228,15 @@ pub(crate) fn read(source: impl Read + Seek, ctx: &LoadCtx) -> Result<StackProdu
             found.push(Found { extension, idx });
         }
     }
+    let has_weight = found
+        .iter()
+        .any(|found| found.extension == LumosExtension::Weight);
+    let weight_kind = read_weight_kind(&primary, has_weight)?;
     let described = DescribedImage {
         size: image.desc().size(),
         channels: image.channel_count(),
         scale: image_scale(&image),
-        weight_units: weight_kind.units(),
+        weight_units: weight_kind.map_or(WeightUnits::Unitless, WeightKind::units),
     };
     let mut planes = QualityPlanesRead::default();
     let mut mask = None;
@@ -249,16 +261,19 @@ pub(crate) fn read(source: impl Read + Seek, ctx: &LoadCtx) -> Result<StackProdu
     check_mask(mask, &image).map_err(ReadFailure::Refused)?;
     let size = image.desc().size();
     let map = |stored: Option<StoredPlanes<f32>>| stored.map(|stored| quality_map(stored, size));
-    let coverage = match (uniform_coverage, map(planes.coverage)) {
-        (Some(_), Some(_)) => return Err(ReadFailure::Refused(ProductRefusal::CoverageTwice)),
-        (Some(value), None) => Some(Coverage::Uniform { value, size }),
-        (None, plane) => plane.map(Coverage::PerPixel),
+    let coverage = match (full_coverage, map(planes.coverage)) {
+        (true, Some(_)) => return Err(ReadFailure::Refused(ProductRefusal::CoverageTwice)),
+        (true, None) => Some(Coverage::Full),
+        (false, plane) => plane.map(Coverage::PerPixel),
     };
+    let weight = map(planes.weight).map(|map| WeightPlane {
+        map,
+        kind: weight_kind.expect("a weight plane's kind is read beside it"),
+    });
     Ok(StackProduct {
         image,
         coverage,
-        weight: map(planes.weight),
-        weight_kind,
+        weight,
         inverse_variance: map(planes.inverse_variance),
         dispersion: map(planes.dispersion),
         cfa_type,
@@ -294,22 +309,26 @@ fn weight_kind_name(kind: WeightKind) -> &'static str {
         .expect("every weight kind has a name")
 }
 
-/// The weight kind `header` states, refused when it states none or one no product names.
-fn read_weight_kind(header: &Header) -> Result<WeightKind, FitsLoadError> {
-    let name = header
-        .get_text(WEIGHT_KIND)?
-        .ok_or_else(|| FitsRefusal::MissingKeyword {
+/// The weight kind `header` states beside a weight plane, `None` without one: refused when a
+/// plane's kind is missing or one no product names, and when a kind stands without its plane.
+fn read_weight_kind(header: &Header, has_weight: bool) -> Result<Option<WeightKind>, ReadFailure> {
+    let refusal = match (header.get_text(WEIGHT_KIND)?, has_weight) {
+        (None, false) => return Ok(None),
+        (Some(_), false) => return Err(ReadFailure::Refused(ProductRefusal::WeightKindAlone)),
+        (None, true) => FitsRefusal::MissingKeyword {
             keyword: WEIGHT_KIND.to_string(),
-        })?;
-    WEIGHT_KINDS
-        .into_iter()
-        .find_map(|(kind, named)| (named == name).then_some(kind))
-        .ok_or_else(|| {
-            FitsRefusal::KeywordOutOfRange {
+        },
+        (Some(name), true) => match WEIGHT_KINDS
+            .into_iter()
+            .find_map(|(kind, named)| (named == name).then_some(kind))
+        {
+            Some(kind) => return Ok(Some(kind)),
+            None => FitsRefusal::KeywordOutOfRange {
                 keyword: WEIGHT_KIND.to_string(),
-            }
-            .into()
-        })
+            },
+        },
+    };
+    Err(refusal.into())
 }
 
 /// Multiply a sample of the image by this to recover the source's value: its domain's scale.

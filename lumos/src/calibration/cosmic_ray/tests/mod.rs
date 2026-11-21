@@ -9,13 +9,17 @@ use common::{Buffer2, PerWorker};
 use glam::{USizeVec2, Vec2};
 
 use crate::bg_mesh::color_mesh::LocalBg;
+use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;
+use crate::calibration::cosmic_ray::cosmic_ray_detector::CosmicRayDetector;
 use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
 use crate::calibration::cosmic_ray::mono::internals::median_window;
 use crate::calibration::cosmic_ray::mono::{PixelRepair, WindowScratch};
-use crate::calibration::cosmic_ray::noise_model::PixelBg;
+use crate::calibration::cosmic_ray::noise_model::{PixelBg, PixelBgSource};
 use crate::calibration::cosmic_ray::*;
+use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::internals::assertions::bits;
 use crate::internals::cfa::{XTRANS_PATTERN, cfa_from_plane};
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField, SkyNoise};
@@ -26,6 +30,11 @@ use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
 /// (FWHM≈3 px). Unclamped, because the tests inject cosmic rays above the ceiling afterwards.
+/// `image` cleaned by a detector of its own: what one frame of a run's first light meets.
+fn reject(image: &mut CfaImage, config: &CosmicRayConfig) -> Result<usize, CosmicRayError> {
+    CosmicRayDetector::new().reject(image, config)
+}
+
 fn synthetic_field() -> SkyField {
     let sky = Sky {
         level: 0.05,
@@ -384,16 +393,16 @@ fn a_repair_matches_a_snapshot_reference() {
 
     let sky = 0.5;
     let want = repair_via_snapshot(&pixels, &mask, sky);
-    let local = |_| PixelBg {
+    let local = PixelBgSource::Flat(PixelBg {
         local: LocalBg { sky, noise: 1.0 },
         flat_gain: 1.0,
-    };
+    });
     let repair = |pixels: &Buffer2<f32>, mask: &BitBuffer2| {
         let mut got = pixels.clone();
         PixelRepair {
             flagged: mask,
             unread: None,
-            local: &local,
+            local,
         }
         .apply(
             &mut got,
@@ -839,4 +848,48 @@ fn the_local_recompute_is_the_full_one() {
     );
     assert_eq!(found_local, found_full);
     assert_eq!(bits(&local), bits(&full));
+}
+
+/// A detector kept from frame to frame cleans each as a fresh one does, bit for bit, whatever came
+/// before it: a mono plane, then a Bayer mosaic of another size, then the mono plane again — the
+/// buffers it keeps reshape to each frame, and nothing of the last detection leaks into the next.
+#[test]
+fn a_kept_detector_cleans_each_frame_as_a_fresh_one_does() {
+    let frame = |size: USize2, cfa_type: CfaType| {
+        let mut data = Buffer2::new_filled(size, 0.05f32);
+        data[size.idx_of(USizeVec2::new(size.width / 2, size.height / 2))] = 0.95;
+        data[size.idx_of(USizeVec2::new(7, 9))] = 0.8;
+        cfa_from_plane(data, cfa_type)
+    };
+    let frames = [
+        frame(USize2::new(64, 64), CfaType::Mono),
+        frame(
+            USize2::new(48, 40),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
+        ),
+        frame(USize2::new(64, 64), CfaType::Mono),
+    ];
+    let config = CosmicRayConfig::default();
+    let mut kept = CosmicRayDetector::new();
+    for (idx, frame) in frames.iter().enumerate() {
+        let mut fresh = frame.clone();
+        let fresh_count = reject(&mut fresh, &config).unwrap();
+        let mut reused = frame.clone();
+        let reused_count = kept.reject(&mut reused, &config).unwrap();
+        assert!(
+            fresh_count > 0,
+            "frame {idx}: the fixture must in-paint something"
+        );
+        assert_eq!(reused_count, fresh_count, "frame {idx}");
+        assert_eq!(
+            bits(reused.data().pixels()),
+            bits(fresh.data().pixels()),
+            "frame {idx}"
+        );
+        assert_eq!(
+            reused.flags().map(PixelFlags::bytes),
+            fresh.flags().map(PixelFlags::bytes),
+            "frame {idx}"
+        );
+    }
 }

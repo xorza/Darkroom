@@ -71,7 +71,7 @@ fn each_input_offers_its_variants_under_their_labels() {
     );
     assert_eq!(
         names(offered::<RegistrationPreset>()),
-        ["default", "fast", "precise", "wide_field", "mosaic"]
+        ["default", "fast", "precise", "wide_field", "wide_scale"]
     );
     assert_eq!(
         names(offered::<CombineMethodChoice>()),
@@ -142,7 +142,10 @@ fn each_pick_builds_the_preset_it_names() {
             RegistrationPreset::WideField,
             RegistrationConfig::wide_field(),
         ),
-        (RegistrationPreset::Mosaic, RegistrationConfig::mosaic()),
+        (
+            RegistrationPreset::WideScale,
+            RegistrationConfig::wide_scale(),
+        ),
     ] {
         same(&pick.config(), &preset);
     }
@@ -161,8 +164,8 @@ fn each_pick_builds_the_preset_it_names() {
             CombineMethodChoice::Winsorized,
             Combine::winsorized(StackConfig::LIGHT_SIGMA),
         ),
-        (CombineMethodChoice::Median, Combine::median()),
-        (CombineMethodChoice::Mean, Combine::mean()),
+        (CombineMethodChoice::Median, Combine::Median),
+        (CombineMethodChoice::Mean, Combine::Mean),
     ] {
         assert_eq!(
             pick.config(),

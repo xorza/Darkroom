@@ -22,7 +22,7 @@ use crate::io::fits::metadata::dark_comparison_keywords::DarkComparisonKeywords;
 /// The keyword that names the Lumos format of an HDU, as `CFAIMAGE` or `LUMFLAGS`'s `PIXFLAGS`.
 pub(crate) const FORMAT_KEYWORD: Keyword = Keyword::new("LUMOSFMT");
 /// The root of the six keywords that state an X-Trans pattern, a row each: `XTRNROW0` to
-/// `XTRNROW5`.
+/// `XTRNROW5`, the phase of the rows as stored, whatever `ROWORDER` says.
 const XTRANS_ROW: Keyword = Keyword::new("XTRNROW");
 /// The keyword that states the version of an HDU's Lumos format.
 pub(crate) const VERSION_KEYWORD: Keyword = Keyword::new("LUMOSVER");
@@ -54,6 +54,7 @@ pub(super) enum MetadataField {
     PixelSizeX,
     PixelSizeY,
     DataMax,
+    Saturate,
 }
 
 /// No temperature lies at or below it.
@@ -87,6 +88,7 @@ impl MetadataField {
             Self::PixelSizeX => &["XPIXSZ", "XPIXELSZ", "PIXSIZE1", "PIXSIZEX", "XPIXSIZE"],
             Self::PixelSizeY => &["YPIXSZ", "YPIXELSZ", "PIXSIZE2", "PIXSIZEY", "YPIXSIZE"],
             Self::DataMax => &["DATAMAX"],
+            Self::Saturate => &["SATURATE"],
         }
     }
 
@@ -108,7 +110,8 @@ impl MetadataField {
             // sec z: 1 at the zenith, more toward the horizon.
             Self::Airmass => value >= 1.0,
             Self::Iso | Self::XBinning | Self::YBinning => value >= 1.0,
-            Self::DataMax => is_saturation_level(value),
+            // A non-positive one, a common "not computed" placeholder, would flag the whole frame.
+            Self::DataMax | Self::Saturate => value > 0.0,
             Self::Offset
             | Self::Object
             | Self::Instrument
@@ -193,8 +196,6 @@ pub(super) fn read(header: &Header, sample_type: SampleType) -> ImageMetadata {
             dec_deg: read_dec_deg(header),
             pixel_size_x: MetadataField::PixelSizeX.real(header),
             pixel_size_y: MetadataField::PixelSizeY.real(header),
-            // The decoder fills these: they depend on the decode plan as well as the header.
-            data_max: None,
         },
         derived: DerivedFacts::builder()
             .calibration(read_calibration(header))
@@ -221,16 +222,16 @@ fn read_flags<const N: usize>(header: &Header, keywords: [&str; N]) -> [bool; N]
     keywords.map(|keyword| optional(keyword, header.get_logical(keyword)).unwrap_or(false))
 }
 
-/// Whether a finite `DATAMAX` is a saturation level. The decode flags every sample at or above 95 %
-/// of it, so a non-positive one, a common "not computed" placeholder, would flag the whole frame.
-pub(super) const fn is_saturation_level(value: f64) -> bool {
-    value > 0.0
-}
-
 /// The header's `DATAMAX`, in the file's sample units; `None`, with the reason logged, when it is
 /// absent or given in a form it cannot have.
 pub(super) fn read_data_max(header: &Header) -> Option<f64> {
     MetadataField::DataMax.real(header)
+}
+
+/// The header's `SATURATE`, the level samples saturate at in the file's sample units; `None`,
+/// with the reason logged, when it is absent or given in a form it cannot have.
+pub(super) fn read_saturate(header: &Header) -> Option<f64> {
+    MetadataField::Saturate.real(header)
 }
 
 /// An optional keyword's value, or `None` — with the reason logged — when the header gives it in
@@ -299,14 +300,6 @@ pub(super) fn write_image(
     header.set_optional("DEC", metadata.header.dec_deg)?;
     header.set_optional(Field::PixelSizeX.keyword(), metadata.header.pixel_size_x)?;
     header.set_optional(Field::PixelSizeY.keyword(), metadata.header.pixel_size_y)?;
-    // DATAMAX is a physical value, so it carries the `BSCALE` the samples are written with.
-    header.set_optional(
-        Field::DataMax.keyword(),
-        metadata
-            .header
-            .data_max
-            .map(|data_max| data_max * domain_keywords::scaling(metadata).bscale),
-    )?;
     let CalibrationState {
         bias,
         thermal,
@@ -322,26 +315,30 @@ pub(super) fn write_image(
     Ok(())
 }
 
-/// Write the rows' order: the order this writer holds them in, and the source's.
+/// The order the rows of an image of `metadata` are written in: the order its source stored them
+/// in, as no step reorders them, and first row first for an image this crate synthesized.
+fn written_row_order(metadata: &ImageMetadata) -> RowOrder {
+    metadata.derived.row_order().unwrap_or(RowOrder::TopDown)
+}
+
+/// Write the rows' order: the source's, which is the order they go out in, so a reader that takes
+/// `ROWORDER` for the display orientation shows the frame as its source did.
 pub(super) fn write_row_order(
     header: &mut Header,
     metadata: &ImageMetadata,
 ) -> fits_well::Result<()> {
-    // Always `TOP-DOWN`: the rows go out in the order this writer holds them, the pattern already
-    // converted, and anything else would have a reload correct the phase twice. `LUMROWO` carries
-    // the source's order, omitted for a frame this crate synthesized.
-    header.set("ROWORDER", RowOrder::TopDown.keyword())?;
-    if let Some(row_order) = metadata.derived.row_order() {
-        header.set(SOURCE_ROW_ORDER, row_order.keyword())?;
-    }
+    header.set("ROWORDER", written_row_order(metadata).keyword())?;
     Ok(())
 }
 
-/// Write the `cfa_type` mosaic of an image of `metadata`, and the camera's white balance.
+/// Write the `cfa_type` mosaic of an image of `metadata`, `height` rows high, and the camera's white
+/// balance. `BAYERPAT` goes out in the convention `ROWORDER` sets, the reverse of what
+/// [`Bayerpat::read_cfa`] does, so a reload converts it once.
 pub(super) fn write_cfa(
     header: &mut Header,
     metadata: &ImageMetadata,
     cfa_type: CfaType,
+    height: usize,
 ) -> fits_well::Result<()> {
     match cfa_type {
         CfaType::Mono => {
@@ -349,6 +346,7 @@ pub(super) fn write_cfa(
         }
         CfaType::Mosaic(Mosaic::Bayer(pattern)) => {
             header.set("CFATYPE", "BAYER")?;
+            let pattern = top_down_phase(pattern, written_row_order(metadata), height);
             header.set("BAYERPAT", pattern.bayerpat())?;
         }
         CfaType::Mosaic(Mosaic::XTrans(pattern)) => {
@@ -401,28 +399,25 @@ pub(super) fn read_cfa(
     Bayerpat::Optional.read_cfa(header, height, unstated_bayer_pattern)
 }
 
-/// Where a Lumos-written file records the row order its *source* had: `ROWORDER` must say
-/// `TOP-DOWN` there, as the Bayer pattern is already converted, so it cannot say which way up the
-/// sky is, which is what two frames have to agree on.
-const SOURCE_ROW_ORDER: Keyword = Keyword::new("LUMROWO");
-
-/// Which way up the stored rows actually are: [`SOURCE_ROW_ORDER`] where this writer left one,
-/// `ROWORDER` otherwise. The one the combine holds frames to agreeing on: it is about the sky, not
-/// the pattern.
+/// Which way up the stored rows are, as `ROWORDER` declares it: the frame the Bayer pattern beside
+/// it is expressed in, and what the combine holds frames to agreeing on. The FITS standard has no
+/// `ROWORDER`; a file without it is read as first row first, as its writers mean it.
 pub(super) fn read_row_order(header: &Header) -> Result<RowOrder, FitsLoadError> {
-    if let Some(recorded) = header.get_text(SOURCE_ROW_ORDER)? {
-        return Ok(row_order_of(recorded));
-    }
-    read_declared_row_order(header)
-}
-
-/// What `ROWORDER` itself declares, the frame the Bayer pattern beside it is expressed in. The
-/// FITS standard has no `ROWORDER`; a file without it is read as first row first, as its writers
-/// mean it.
-pub(super) fn read_declared_row_order(header: &Header) -> Result<RowOrder, FitsLoadError> {
     Ok(header
         .get_text("ROWORDER")?
         .map_or(RowOrder::TopDown, row_order_of))
+}
+
+/// `pattern`, the phase of an image's first stored row, as the phase of its first row top-down,
+/// for an image of `height` rows stored in `order`: the convention `BAYERPAT` is written in. File
+/// row `f` of a `BOTTOM-UP` frame is displayed row `H - 1 - f`, so the two differ only when `H` is
+/// even. The map is its own inverse, so it converts either way.
+fn top_down_phase(pattern: BayerPattern, order: RowOrder, height: usize) -> BayerPattern {
+    if order == RowOrder::BottomUp && height.is_multiple_of(2) {
+        pattern.flip_vertical()
+    } else {
+        pattern
+    }
 }
 
 /// Anything a keyword does not spell as `BOTTOM-UP` is top-down, the order a writer that says
@@ -477,14 +472,10 @@ impl Bayerpat {
             }
         };
 
-        // `BAYERPAT` describes the top-down image and the rows stay in file order, so file row `f`
-        // of a `BOTTOM-UP` frame has the phase of displayed row `H - 1 - f`: the opposite only
-        // when `H` is even. For odd `H` (LibRaw reports 4015 for the EOS 1500D) the pattern
-        // already matches the stored rows, and flipping would mis-debayer the frame. `ROWORDER`
-        // rather than the resolved order: the pattern is expressed against the rows as stored.
-        if read_declared_row_order(header)? == RowOrder::BottomUp && height.is_multiple_of(2) {
-            pattern = pattern.flip_vertical();
-        }
+        // `BAYERPAT` describes the top-down image and the rows stay in file order. For odd `H`
+        // (LibRaw reports 4015 for the EOS 1500D) the pattern already matches the stored rows, and
+        // flipping would mis-debayer the frame.
+        pattern = top_down_phase(pattern, read_row_order(header)?, height);
 
         // The offsets are in the stored image's coordinates, so they compose onto the pattern
         // after the row-order correction has put it in file-order terms.
@@ -634,7 +625,7 @@ mod internals {
     use crate::io::fits::metadata::MetadataField;
 
     impl MetadataField {
-        pub(crate) const ALL: [Self; 22] = [
+        pub(crate) const ALL: [Self; 23] = [
             Self::Object,
             Self::Instrument,
             Self::Telescope,
@@ -657,6 +648,7 @@ mod internals {
             Self::PixelSizeX,
             Self::PixelSizeY,
             Self::DataMax,
+            Self::Saturate,
         ];
     }
 }

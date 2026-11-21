@@ -23,7 +23,10 @@ pub(crate) fn atomic(c: &mut Criterion) {
     ] {
         group.bench_function(BenchmarkId::new(name, FRAME.width), |b| {
             let pair: &Pair = pair.get_or_init(Pair::typical);
-            let warp = pair.fit(pair.model(transform, correction)).warp;
+            let warp = pair
+                .fit(pair.model(transform, correction))
+                .result
+                .into_warp();
             let mut poss = RowPoss::default();
             b.iter(|| poss.fill(FRAME.height / 2, &warp, FRAME));
         });

@@ -11,9 +11,8 @@ pub(super) const FWHM_TIGHT: f32 = 1.34;
 /// FWHM for typical stars: `σ_max` = 1.0 px, a recovery radius of `√χ²₀.₉₉(2)` = 3.03 px.
 pub(super) const FWHM_NORMAL: f32 = 2.0;
 
-pub(super) fn matching_config(min_stars: usize, min_matches: usize) -> RegistrationMatchingConfig {
+pub(super) fn matching_config(min_matches: usize) -> RegistrationMatchingConfig {
     RegistrationMatchingConfig {
-        min_stars: Some(min_stars),
         min_matches,
         ..Default::default()
     }

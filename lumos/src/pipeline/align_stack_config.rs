@@ -41,20 +41,16 @@ pub(super) struct ReferenceCandidate {
 }
 
 impl Reference {
-    /// The index of the reference (alignment anchor) among `candidates`, one per light, which must
-    /// have the `required` stars registration needs. An [`Self::Idx`] is in range: the run
-    /// validated it against the lights.
+    /// The index of the reference (alignment anchor) among `candidates`, one per light. An
+    /// [`Self::Idx`] is in range: the run validated it against the lights.
     ///
-    /// `Auto` takes the sharpest frame among those with `required` stars: the lowest median FWHM,
-    /// as Siril chooses, ties to the lowest index. Every other frame is warped onto it, so its
-    /// seeing is what the stack is resampled to; the star count only has to clear the gate
-    /// registration needs. When no frame clears it, the one with the most stars is reported.
-    pub(super) fn select(
-        self,
-        candidates: &[ReferenceCandidate],
-        required: usize,
-    ) -> Result<usize, AlignStackError> {
-        let idx = match self {
+    /// `Auto` takes the sharpest frame among those with the `required` stars registration needs:
+    /// the lowest median FWHM, as Siril chooses, ties to the lowest index. Every other frame is
+    /// warped onto it, so its seeing is what the stack is resampled to; the star count only has to
+    /// clear the gate. When no frame clears it, the one with the most stars, which the reference
+    /// catalog then refuses with the count.
+    pub(super) fn select(self, candidates: &[ReferenceCandidate], required: usize) -> usize {
+        match self {
             Self::Idx(idx) => {
                 debug_assert!(idx < candidates.len());
                 idx
@@ -79,24 +75,7 @@ impl Reference {
                     },
                     |(i, _)| i,
                 ),
-        };
-        candidates[idx].check(idx, required)?;
-        Ok(idx)
-    }
-}
-
-impl ReferenceCandidate {
-    /// This candidate, light `idx`, as the reference: refused without the `required` stars
-    /// registration needs.
-    pub(super) const fn check(self, idx: usize, required: usize) -> Result<(), AlignStackError> {
-        if self.stars < required {
-            return Err(AlignStackError::ReferenceInsufficientStars {
-                idx,
-                found: self.stars,
-                required,
-            });
         }
-        Ok(())
     }
 }
 
@@ -110,10 +89,6 @@ pub struct AlignStackConfig {
     /// How the registered lights combine: [`StackConfig::light`] by default.
     pub stack: StackConfig,
     pub reference: Reference,
-    /// Optional single-frame cosmic-ray rejection after calibration and before demosaic, for mono
-    /// and Bayer lights; X-Trans lights are refused (see
-    /// [`CosmicRayError::XTransUnsupported`](crate::CosmicRayError::XTransUnsupported)).
-    pub cosmic_ray: Option<CosmicRayConfig>,
 }
 
 impl Default for AlignStackConfig {
@@ -125,7 +100,6 @@ impl Default for AlignStackConfig {
             warp: WarpConfig::default(),
             stack: StackConfig::light(),
             reference: Reference::default(),
-            cosmic_ray: None,
         }
     }
 }
@@ -136,6 +110,11 @@ impl Default for AlignStackConfig {
 pub struct CalibratedLights<'a, P> {
     pub paths: &'a [P],
     pub masters: &'a CalibrationMasters,
+    /// Optional single-frame cosmic-ray rejection after calibration and before demosaic, for mono
+    /// and Bayer lights; X-Trans lights are refused (see
+    /// [`CosmicRayError::XTransUnsupported`](crate::CosmicRayError::XTransUnsupported)). A light
+    /// already linear has no mosaic to reject them on, so only this entry takes the pass.
+    pub cosmic_ray: Option<&'a CosmicRayConfig>,
 }
 
 /// Copied whatever its type parameters are, as it holds references alone: a derive would ask each
@@ -169,7 +148,6 @@ impl AlignStackConfig {
         ingest: &IngestConfig,
         monitor: ProgressMonitor,
     ) -> Result<AlignStackResult, AlignStackError> {
-        self.linear()?;
         self.begin(lights.len(), ingest, monitor)?
             .stack(LightSource::Held(lights))
     }
@@ -189,7 +167,6 @@ impl AlignStackConfig {
         ingest: &IngestConfig,
         monitor: ProgressMonitor,
     ) -> Result<AlignStackResult, AlignStackError> {
-        self.linear()?;
         let light_paths: Vec<&Path> = light_paths.iter().map(AsRef::as_ref).collect();
         let run = self.begin(light_paths.len(), ingest, monitor)?;
         run.stack(LightSource::Files(Box::new(LightFiles::new(
@@ -226,13 +203,19 @@ impl AlignStackConfig {
         let CalibratedLights {
             paths: light_paths,
             masters,
+            cosmic_ray,
         } = lights;
+        if let Some(cosmic_ray) = cosmic_ray {
+            cosmic_ray
+                .validate()
+                .map_err(AlignStackConfigError::CosmicRay)?;
+        }
         let light_paths: Vec<&Path> = light_paths.iter().map(AsRef::as_ref).collect();
         let run = self.begin(light_paths.len(), ingest, monitor)?;
         let notes = CalibrationNotes::default();
         let preparation = Preparation::Calibrate(MosaicPreparation {
             masters,
-            cosmic_ray: self.cosmic_ray.as_ref(),
+            cosmic_ray,
             notes: &notes,
         });
         let mut result = run.stack(LightSource::Files(Box::new(LightFiles::new(
@@ -240,7 +223,7 @@ impl AlignStackConfig {
             preparation,
             &run.ingest,
         )?)))?;
-        notes.report_into(&mut result.product.report, masters);
+        result.product.report.calibration = Some(notes.report(masters));
         Ok(result)
     }
 
@@ -250,19 +233,20 @@ impl AlignStackConfig {
     /// # Errors
     ///
     /// [`AlignStackError::NoFrames`], or a configuration [`Self::validate`] refuses.
-    fn begin(
-        &self,
+    fn begin<'a>(
+        &'a self,
         count: usize,
-        ingest: &IngestConfig,
+        ingest: &'a IngestConfig,
         monitor: ProgressMonitor,
-    ) -> Result<AlignStackRun<'_>, AlignStackError> {
+    ) -> Result<AlignStackRun<'a>, AlignStackError> {
         if count == 0 {
             return Err(AlignStackError::NoFrames);
         }
         self.validate(count)?;
         Ok(AlignStackRun {
             config: self,
-            registrar: Registrar::new(&self.registration),
+            registrar: Registrar::checked(self.registration.clone())
+                .map_err(AlignStackConfigError::Registration)?,
             ingest: IngestRun::new(ingest, monitor),
         })
     }
@@ -275,11 +259,9 @@ impl AlignStackConfig {
         self.detection
             .validate()
             .map_err(AlignStackConfigError::Detection)?;
-        self.registration
+        self.stack
             .validate()
-            .map_err(AlignStackConfigError::Registration)?;
-        self.warp.validate().map_err(AlignStackConfigError::Warp)?;
-        self.stack.validate(frame_count)?;
+            .map_err(AlignStackConfigError::Stack)?;
         if let Reference::Idx(idx) = self.reference
             && idx >= frame_count
         {
@@ -287,19 +269,6 @@ impl AlignStackConfig {
                 idx,
                 count: frame_count,
             });
-        }
-        if let Some(cosmic_ray) = &self.cosmic_ray {
-            cosmic_ray
-                .validate()
-                .map_err(AlignStackConfigError::CosmicRay)?;
-        }
-        Ok(())
-    }
-
-    /// Refuse a cosmic-ray pass for lights already linear, which no such pass can run on.
-    const fn linear(&self) -> Result<(), AlignStackConfigError> {
-        if self.cosmic_ray.is_some() {
-            return Err(AlignStackConfigError::CosmicRayOnLinearLights);
         }
         Ok(())
     }
@@ -313,7 +282,6 @@ mod tests {
     use crate::pipeline::align_stack_config::{AlignStackConfig, Reference, ReferenceCandidate};
     use crate::pipeline::error::{AlignStackConfigError, AlignStackError};
     use crate::progress::progress_monitor::ProgressMonitor;
-    use crate::registration::resample::warp_config::WarpConfig;
 
     /// `Auto` takes the lowest median FWHM among the frames with the stars registration needs:
     /// frame 2 at 2.5 of 2.5, 3.0 and 3.5; a tie goes to the lowest index; a frame below the gate
@@ -334,17 +302,10 @@ mod tests {
         let auto = |counts: &[usize], fwhms: &[f32]| {
             Reference::Auto.select(&candidates(counts, fwhms), 40)
         };
-        assert_eq!(auto(&[50, 80, 60], &[3.0, 3.5, 2.5]).unwrap(), 2);
-        assert_eq!(auto(&[50, 80, 60], &[2.5, 3.0, 2.5]).unwrap(), 0);
-        assert_eq!(auto(&[50, 30, 60], &[3.0, 2.0, 3.5]).unwrap(), 0);
-        assert!(matches!(
-            auto(&[10, 20, 15], &[3.0, 2.0, 3.5]),
-            Err(AlignStackError::ReferenceInsufficientStars {
-                idx: 1,
-                found: 20,
-                required: 40
-            })
-        ));
+        assert_eq!(auto(&[50, 80, 60], &[3.0, 3.5, 2.5]), 2);
+        assert_eq!(auto(&[50, 80, 60], &[2.5, 3.0, 2.5]), 0);
+        assert_eq!(auto(&[50, 30, 60], &[3.0, 2.0, 3.5]), 0);
+        assert_eq!(auto(&[10, 20, 15], &[3.0, 2.0, 3.5]), 1);
     }
 
     /// A reference index must lie among the lights, and is checked before any light is decoded:
@@ -367,18 +328,5 @@ mod tests {
             ))
         ));
         assert!(config.validate(2).is_ok());
-        let error = AlignStackConfig {
-            warp: WarpConfig {
-                border_value: f32::NAN,
-                ..WarpConfig::default()
-            },
-            ..AlignStackConfig::default()
-        }
-        .validate(2)
-        .unwrap_err();
-        assert!(
-            matches!(&error, AlignStackConfigError::Warp(invalid) if invalid.field == "warp border_value"),
-            "{error:?}"
-        );
     }
 }

@@ -1,5 +1,8 @@
+use std::io::Cursor;
+
+use fits_well::FitsReader;
 use fits_well::header::Header;
-use fits_well::image::SampleType;
+use fits_well::image::{Image, SampleType};
 
 use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -12,12 +15,13 @@ use crate::image::metadata::image_provenance::RowOrder;
 use crate::image::metadata::observation_header::ObservationHeader;
 use crate::image::metadata::temperature_difference::TemperatureDifference;
 use crate::image::metadata::temperature_source::TemperatureSource;
-use crate::internals::fits::fits_refusal;
+use crate::internals::fits::{fits_bytes, fits_refusal, load_cfa};
+use crate::io::fits::cfa;
 use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::metadata::{
-    self, Bayerpat, SOURCE_ROW_ORDER, domain_keywords, parse_sexagesimal,
-    read_camera_white_balance, read_declared_row_order, read_row_order,
+    self, Bayerpat, domain_keywords, parse_sexagesimal, read_camera_white_balance, read_row_order,
 };
+use crate::io::load_ctx::LoadCtx;
 
 /// A minimal Bayer image header, with `ROWORDER` omitted when `roworder` is `None`.
 fn bayer_header(bayerpat: &str, roworder: Option<&str>) -> Header {
@@ -119,31 +123,66 @@ fn row_order_is_read_from_the_header_and_defaults_to_top_down() {
     }
 }
 
+/// A bottom-up mosaic is written as its source stored it: `ROWORDER` says `BOTTOM-UP`, and
+/// `BAYERPAT` is the top-down phase, so a reload converts it once. Third-party RGGB rows of a
+/// bottom-up file read as GBRG at an even height and as RGGB at an odd one, and `YBAYROFF = 1`
+/// shifts each by a row: GBRG becomes RGGB, RGGB becomes GBRG. Each loads, writes and loads again
+/// to the same pattern, rows, samples and order, and its written `BAYERPAT` is the top-down phase
+/// of the stored one with no offset left to apply.
 #[test]
-fn a_lumos_written_header_separates_the_pattern_frame_from_the_sky_orientation() {
-    // What this writer emits for a bottom-up source: `ROWORDER` says the pattern applies to the
-    // rows as written, and `LUMROWO` that the sky is upside-down in them.
-    let mut header = Header::new();
-    header.set("BAYERPAT", "GBRG").unwrap();
-    header.set("ROWORDER", RowOrder::TopDown.keyword()).unwrap();
-    header
-        .set(SOURCE_ROW_ORDER, RowOrder::BottomUp.keyword())
+fn a_bottom_up_mosaic_round_trips_with_its_row_order_and_phase() {
+    for (height, yoff, stored, bayerpat) in [
+        (4, 0, BayerPattern::Gbrg, "RGGB"),
+        (5, 0, BayerPattern::Rggb, "RGGB"),
+        (4, 1, BayerPattern::Rggb, "GBRG"),
+        (5, 1, BayerPattern::Gbrg, "GBRG"),
+    ] {
+        let label = format!("height {height}, YBAYROFF {yoff}");
+        let samples: Vec<u16> = (0..2 * height).map(|idx| 1000 * (idx as u16 + 1)).collect();
+        let image = Image::from_u16(vec![2, height], &samples).unwrap();
+        let mut header = bayer_header("RGGB", Some("BOTTOM-UP"));
+        header.set("YBAYROFF", i64::from(yoff)).unwrap();
+        let loaded = load_cfa(
+            &fits_bytes(image.view(), Some(&header)),
+            &LoadCtx::default(),
+        )
         .unwrap();
+        assert_eq!(
+            loaded.cfa_type(),
+            CfaType::Mosaic(Mosaic::Bayer(stored)),
+            "{label}"
+        );
+        assert_eq!(
+            loaded.metadata.derived.row_order(),
+            Some(RowOrder::BottomUp)
+        );
 
-    // The pattern is taken as written: reading `LUMROWO` here would flip it twice.
-    assert_eq!(read_declared_row_order(&header).unwrap(), RowOrder::TopDown);
-    assert_eq!(pattern_of(&header, 4), BayerPattern::Gbrg);
+        let mut file = Cursor::new(Vec::new());
+        cfa::write(&loaded, &mut file).unwrap();
+        let bytes = file.into_inner();
+        let reader = FitsReader::from_bytes(&bytes).unwrap();
+        let primary = &reader.hdus()[0].header;
+        assert_eq!(
+            primary.get_text("ROWORDER").unwrap(),
+            Some("BOTTOM-UP"),
+            "{label}"
+        );
+        assert_eq!(
+            primary.get_text("BAYERPAT").unwrap(),
+            Some(bayerpat),
+            "{label}"
+        );
+        assert_eq!(primary.get_integer("YBAYROFF").unwrap(), None, "{label}");
 
-    // The orientation the combine compares survives the trip.
-    assert_eq!(read_row_order(&header).unwrap(), RowOrder::BottomUp);
-
-    // A file from anyone else has only `ROWORDER`, and then the two answers coincide.
-    let third_party = bayer_header("RGGB", Some(RowOrder::BottomUp.keyword()));
-    assert_eq!(
-        read_declared_row_order(&third_party).unwrap(),
-        RowOrder::BottomUp
-    );
-    assert_eq!(read_row_order(&third_party).unwrap(), RowOrder::BottomUp);
+        let reloaded = load_cfa(&bytes, &LoadCtx::default()).unwrap();
+        assert_eq!(reloaded.cfa_type(), loaded.cfa_type(), "{label}");
+        assert_eq!(reloaded.data().pixels(), loaded.data().pixels(), "{label}");
+        assert_eq!(
+            reloaded.metadata.derived.row_order(),
+            Some(RowOrder::BottomUp),
+            "{label}"
+        );
+    }
 }
 
 /// The parity comes from the decoded height, never from `NAXIS2`. A tile-compressed HDU is a binary
@@ -272,7 +311,7 @@ fn optional_keywords_of_the_wrong_type_are_absent() {
 /// through to a valid second one (`FOCALLEN = -5`, `FOCAL = 400` → 400).
 #[test]
 fn numeric_keywords_hold_their_ranges() {
-    use crate::io::fits::metadata::{MetadataField as Field, read_data_max};
+    use crate::io::fits::metadata::{MetadataField as Field, read_data_max, read_saturate};
 
     let read = |header: &Header, field: Field| -> Option<f64> {
         let metadata = metadata::read(header, SampleType::U16);
@@ -288,6 +327,7 @@ fn numeric_keywords_hold_their_ranges() {
             Field::PixelSizeX => metadata.header.pixel_size_x,
             Field::PixelSizeY => metadata.header.pixel_size_y,
             Field::DataMax => read_data_max(header),
+            Field::Saturate => read_saturate(header),
             Field::Iso => metadata.header.iso.map(f64::from),
             Field::XBinning => metadata.header.xbinning.map(f64::from),
             Field::YBinning => metadata.header.ybinning.map(f64::from),
@@ -306,8 +346,9 @@ fn numeric_keywords_hold_their_ranges() {
         (Field::Airmass, 1.0, 0.99),
         (Field::PixelSizeX, 3.76, 0.0),
         (Field::PixelSizeY, 3.76, -3.76),
-        // A saturation level of 0, a "not computed" placeholder, would flag every sample.
+        // A level of 0, a "not computed" placeholder, would flag every sample.
         (Field::DataMax, 0.5, 0.0),
+        (Field::Saturate, 0.5, 0.0),
     ];
     for (field, kept, refused) in reals {
         let mut header = Header::new();
@@ -366,7 +407,7 @@ fn wcs_pointing_follows_the_axis_types() {
 /// `PIXSIZE1`, `FRAMETYP`, `FILT-1`, `BLKLEVEL`, …) all land where the standard keyword does.
 #[test]
 fn every_alias_reads_into_its_field() {
-    use crate::io::fits::metadata::{MetadataField, read_data_max};
+    use crate::io::fits::metadata::{MetadataField, read_data_max, read_saturate};
 
     let read = |header: &Header, field: MetadataField| -> Option<String> {
         let metadata = metadata::read(header, SampleType::U16);
@@ -392,6 +433,7 @@ fn every_alias_reads_into_its_field() {
             MetadataField::PixelSizeX => real(metadata.header.pixel_size_x),
             MetadataField::PixelSizeY => real(metadata.header.pixel_size_y),
             MetadataField::DataMax => real(read_data_max(header)),
+            MetadataField::Saturate => real(read_saturate(header)),
             MetadataField::Iso => integer(metadata.header.iso.map(i64::from)),
             MetadataField::XBinning => integer(metadata.header.xbinning.map(i64::from)),
             MetadataField::YBinning => integer(metadata.header.ybinning.map(i64::from)),

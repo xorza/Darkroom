@@ -57,8 +57,10 @@ impl PipelineCase<'_> {
     /// - **every one well above the threshold is found**, within 1 px: a noiseless residual peak
     ///   `A` of at least `2·(k + 5)`σ at the `k`σ threshold keeps ≥ 12 of its pixels above it
     ///   through 5σ of noise (`the_threshold_decides_per_star`), and 5σ below the saturation level;
-    /// - **every saturated one is rejected**: its noiseless peak stands 5σ past the level, so its
-    ///   peak pixel reads saturated, and the filter drops a saturated star whole.
+    /// - **every saturated one is reported flagged, or not at all**: its noiseless peak stands 5σ
+    ///   past the level, so its core reads saturated, and the detector keeps it for its position
+    ///   while every measure of shape leaves it out. One whose plateau's highest pixel lies far
+    ///   from its centre can fail the windowed centroid, as any star started that far off can.
     ///
     /// And **nothing is found away from a true source** at a threshold of 4σ or more, past
     /// [`BLEND_REACH`] from every one: sky noise does not make 5 connected pixels past 4σ, and an
@@ -97,6 +99,11 @@ impl PipelineCase<'_> {
         );
 
         let found: Vec<DVec2> = stars.iter().map(|star| star.pos).collect();
+        let saturated: Vec<DVec2> = stars
+            .iter()
+            .filter(|star| star.saturated)
+            .map(|star| star.pos)
+            .collect();
         let sources: Vec<DVec2> = truth.iter().map(|source| source.pos).collect();
         let others: Vec<DVec2> = sources
             .iter()
@@ -110,7 +117,12 @@ impl PipelineCase<'_> {
             )
             .collect();
         let bg = bg_map::estimate(pixels, &config.bg);
-        let saturation = frame.image.metadata.header.saturation_level();
+        let saturation = frame
+            .image
+            .metadata
+            .derived
+            .unflagged_saturation()
+            .expect("a synthetic frame flags no saturation");
         let k = config.extraction.sigma_threshold;
         let (sky, noise) = (bg.bg.plane(), bg.sky.noise.plane());
         let sigma_at = |x: usize, y: usize| noise[(x, y)].max(bg.sky.floor);
@@ -168,10 +180,15 @@ impl PipelineCase<'_> {
             let clean = frame.truth.clean[(x, y)];
             let sigma = sigma_at(x, y);
             if clean >= saturation + 5.0 * sigma {
+                let reported = near(star, &found, BLEND_REACH);
+                assert!(
+                    reported <= 1,
+                    "{label}: the saturated star at {star} was split"
+                );
                 assert_eq!(
-                    near(star, &found, BLEND_REACH),
-                    0,
-                    "{label}: the saturated star at {star} was reported"
+                    near(star, &saturated, BLEND_REACH),
+                    reported,
+                    "{label}: the saturated star at {star} was reported unflagged"
                 );
                 decided += 1;
             } else if clean <= saturation - 5.0 * sigma

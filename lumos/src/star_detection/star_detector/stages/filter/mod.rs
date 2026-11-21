@@ -19,7 +19,6 @@ pub(crate) struct FilterOutcome {
 /// Why a star fails the quality filter, by the test that caught it, in the order they run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FilterRejection {
-    Saturated,
     LowSnr,
     Eccentric,
     CosmicRay,
@@ -30,11 +29,10 @@ impl FilterRejection {
     /// The first quality test `star` fails under `config`, or `None` when it passes them all.
     ///
     /// The one statement of the per-star criteria: the filter stage counts by it, and FWHM
-    /// estimation measures only the stars it passes.
+    /// estimation measures only the stars it passes. A saturated star is kept, flagged: its
+    /// position still registers a frame, and every measure of its shape leaves it out.
     pub(crate) fn of(star: &Star, config: &FilterConfig) -> Option<Self> {
-        if star.saturated {
-            Some(Self::Saturated)
-        } else if star.snr < config.min_snr {
+        if star.snr < config.min_snr {
             Some(Self::LowSnr)
         } else if star.eccentricity > config.max_eccentricity {
             Some(Self::Eccentric)
@@ -71,7 +69,6 @@ impl FilterOutcome {
                 return true;
             };
             *match rejection {
-                FilterRejection::Saturated => &mut diagnostics.saturated,
                 FilterRejection::LowSnr => &mut diagnostics.low_snr,
                 FilterRejection::Eccentric => &mut diagnostics.high_eccentricity,
                 FilterRejection::CosmicRay => &mut diagnostics.cosmic_rays,
@@ -110,7 +107,9 @@ struct FwhmScratch<'a> {
 }
 
 /// Remove the stars whose FWHM lies over `max_deviation` σ above the brighter half's median, σ
-/// from their MAD ([`FwhmSpread`]).
+/// from their MAD ([`FwhmSpread`]), of the unsaturated stars alone: a clipped core widens a star's
+/// FWHM, which says nothing of the seeing, so a saturated star neither sets the median nor is
+/// removed by it.
 fn filter_fwhm_outliers(
     stars: &mut Vec<Star>,
     max_deviation: f32,
@@ -121,19 +120,26 @@ fn filter_fwhm_outliers(
         max_deviation > 0.0,
         "validated positive; `None` skips the call"
     );
-    if stars.len() < 5 {
+    let measured = stars.iter().filter(|s| !s.saturated).count();
+    if measured < 5 {
         return 0;
     }
 
-    // `stars.len() >= 5` past the early return, so `max(len/2, 5) <= len` — no upper clamp needed.
-    let reference_count = (stars.len() / 2).max(5);
+    // `measured >= 5` past the early return, so `max(measured/2, 5) <= measured`.
+    let reference_count = (measured / 2).max(5);
     values.clear();
-    values.extend(stars.iter().take(reference_count).map(|s| s.fwhm));
+    values.extend(
+        stars
+            .iter()
+            .filter(|s| !s.saturated)
+            .take(reference_count)
+            .map(|s| s.fwhm),
+    );
     let reference = FwhmSpread::of(values, deviations);
     let max_fwhm = reference.median + max_deviation * reference.sigma;
 
     let before_count = stars.len();
-    stars.retain(|s| s.fwhm <= max_fwhm);
+    stars.retain(|s| s.saturated || s.fwhm <= max_fwhm);
     before_count - stars.len()
 }
 

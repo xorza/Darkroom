@@ -55,10 +55,6 @@ impl WinsorizedClipConfig {
     };
 
     /// One clip to `sigma` about the winsorized centre.
-    pub const fn new(sigma: SigmaBounds) -> Self {
-        Self { sigma }
-    }
-
     /// Validate the clip thresholds.
     pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
         self.sigma.validate()

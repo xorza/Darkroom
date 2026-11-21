@@ -4,7 +4,7 @@ mod synthetic;
 
 use std::io::Cursor;
 
-use common::{TempDir, USize2, fs};
+use common::{CancelToken, TempDir, USize2, fs};
 use fits_well::image::SampleType;
 use imaginarium::{
     ChannelLayout, ColorFormat, InterleavedDesc, InterleavedImage, PlanarDesc, RasterFormat,
@@ -15,9 +15,10 @@ use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
 use crate::image::metadata::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::internals::assertions::assert_close;
+use crate::io::decode_config::DecodeConfig;
 use crate::io::decoder::Decoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
-use crate::io::error::{ImageError, RasterLoadError, ScientificRefusal, WriteError};
+use crate::io::error::{ImageError, LoadError, RasterLoadError, ScientificRefusal, WriteError};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::{NullPolicy, NullSamples};
 use crate::io::raster;
@@ -122,10 +123,13 @@ fn a_float_tiffs_nulls_follow_the_load_policy() {
     assert_eq!(flags.at(1), QualityFlags::NO_DATA);
     assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
 
-    let strict = LoadCtx {
-        nulls: NullPolicy::Reject,
-        ..LoadCtx::default()
-    };
+    let strict = LoadCtx::new(
+        DecodeConfig {
+            nulls: NullPolicy::Reject,
+            ..DecodeConfig::default()
+        },
+        CancelToken::never(),
+    );
     let refused = raster::linear(tiff(&image), RasterFormat::Tiff, &strict).unwrap_err();
     assert!(
         matches!(
@@ -194,7 +198,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
             LinearDecoder::load(path, &LoadCtx::default(), &SharedGains::default()).unwrap_err(),
         ] {
             assert!(
-                matches!(&error, ImageError::ScientificInputRejected { reason, .. } if *reason == refusal),
+                matches!(&error, ImageError { kind: LoadError::Refused(reason), .. } if *reason == refusal),
                 "{path:?}: {error:?}"
             );
         }
@@ -211,8 +215,8 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     raster::write_image(&alpha_path, &alpha_image).unwrap();
     assert!(matches!(
         LoadCtx::default().linear(&alpha_path),
-        Err(ImageError::ScientificInputRejected {
-            reason: ScientificRefusal::AlphaChannel,
+        Err(ImageError {
+            kind: LoadError::Refused(ScientificRefusal::AlphaChannel),
             ..
         })
     ));
@@ -230,8 +234,8 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let nonexistent_raw = dir.join("nonexistent.dng");
     assert!(matches!(
         LoadCtx::default().linear(&nonexistent_raw),
-        Err(ImageError::ScientificInputRejected {
-            reason: ScientificRefusal::CameraRaw,
+        Err(ImageError {
+            kind: LoadError::Refused(ScientificRefusal::CameraRaw),
             ..
         })
     ));

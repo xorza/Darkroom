@@ -42,7 +42,7 @@ fn the_unrejected_combine_is_the_single_pass_drizzle() {
     let images: Vec<LinearImage> = (0..FRAMES).map(|f| textured_image(size, f)).collect();
     let x_max = 2.0;
     let bound = (2.0 * (FRAMES as f32 + 1.0) * MAX_DEPOSITS + 5.0) * f32::EPSILON * x_max;
-    for kernel in DrizzleKernel::ALL {
+    for kernel in Kernel::ALL {
         let config = DrizzleConfig {
             fill_value: -1.0,
             ..usual_config(kernel)
@@ -53,7 +53,7 @@ fn the_unrejected_combine_is_the_single_pass_drizzle() {
         }
         let single = acc.finalize();
         let combined = drizzle_plain(drizzle_frames(images.clone(), &transforms), &config).unwrap();
-        let lobes = if kernel == DrizzleKernel::Lanczos {
+        let lobes = if kernel == Kernel::Lanczos {
             LOBE_EXCESS
         } else {
             1.0
@@ -93,7 +93,7 @@ fn a_sliver_frame_weighs_in_by_its_sliver() {
                 Transform::translation(DVec2::new(0.9, 0.0)),
             ],
         ),
-        &kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
+        &kernel_config(Kernel::Turbo, 1.0, 1.0),
     )
     .unwrap();
     let out = product.image.channel(0);
@@ -150,7 +150,7 @@ fn a_satellite_trail_in_one_frame_is_rejected() {
         .collect();
     let config = DrizzleConfig {
         fill_value: -1.0,
-        ..usual_config(DrizzleKernel::Turbo)
+        ..usual_config(Kernel::Turbo)
     };
     let stack = StackConfig {
         normalization: Normalization::None,

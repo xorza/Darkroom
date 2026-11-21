@@ -9,7 +9,6 @@ use crate::star_detection::bg::bg_estimate::BgEstimate;
 use crate::star_detection::detection_filter::FilterSource;
 use crate::star_detection::detection_plane::{DetectionPlane, PlaneSpec};
 use crate::star_detection::resources::DetectionResources;
-use crate::star_detection::star_detection_config::bg_config::BgRefinement;
 
 /// A frame's sky, and the sources it was measured around with the pixels the caller masked, none
 /// when the configuration refines nothing.
@@ -44,7 +43,7 @@ impl RefinedBg {
             )
         };
         let mut sky = estimate(spec.mask, resources);
-        let BgRefinement::Iterative(refinement) = spec.bg.refinement else {
+        let Some(refinement) = spec.bg.refinement else {
             return Self {
                 estimate: sky,
                 sources: None,

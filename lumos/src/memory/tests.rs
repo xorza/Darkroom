@@ -52,9 +52,9 @@ fn usable_keeps_one_quarter_as_headroom_without_overflow() {
 fn a_stage_runs_as_wide_as_its_budget_leaves() {
     let gib = GB as usize;
     let frames = |kept, in_flight| Stage {
-        kept,
-        held: 0,
-        in_flight,
+        kept_bytes: kept,
+        held_bytes: 0,
+        in_flight_bytes: in_flight,
         units: Units::Frames,
     };
     let resident = |kept_set| Placement::Resident { kept_set };
@@ -98,7 +98,7 @@ fn a_stage_runs_as_wide_as_its_budget_leaves() {
         ),
         (
             Stage {
-                held: 2 * gib,
+                held_bytes: 2 * gib,
                 units: Units::Whole,
                 ..frames(gib, gib)
             },
@@ -209,7 +209,7 @@ fn held_frames_are_charged_only_what_the_run_adds() {
     let held = |held: usize| {
         let mut stages = found_reference(plane_bytes, decode, 0);
         for stage in &mut stages {
-            stage.kept -= held;
+            stage.kept_bytes -= held;
         }
         stages
     };
@@ -239,9 +239,9 @@ fn a_single_pass_holds_the_warped_set_beside_its_workers() {
         let warped = warped(plane_bytes, 3 * plane_bytes);
         [
             Stage {
-                kept: warped,
-                held: 0,
-                in_flight: decode.peak + DETECTOR_PLANES * plane_bytes,
+                kept_bytes: warped,
+                held_bytes: 0,
+                in_flight_bytes: decode.peak + DETECTOR_PLANES * plane_bytes,
                 units: Units::Frames,
             },
             normalize(warped, normalization_planes * plane_bytes),
@@ -288,9 +288,9 @@ fn combine_rows_match_budget_arithmetic() {
                 width: usize,
                 height: usize| {
         Stage {
-            kept: 0,
-            held: (resident_planes * size_of::<f32>() + flags) * width * height + beside,
-            in_flight: input_planes * size_of::<f32>() * width,
+            kept_bytes: 0,
+            held_bytes: (resident_planes * size_of::<f32>() + flags) * width * height + beside,
+            in_flight_bytes: input_planes * size_of::<f32>() * width,
             units: Units::Rows(height),
         }
     };
@@ -508,22 +508,22 @@ fn a_plan_never_overshoots_its_budget() {
                         for (idx, stage) in stages.iter().enumerate() {
                             let width = plan.width(idx);
                             let set = if plan.resident {
-                                before.max(stage.kept) as u64 * frames as u64
+                                before.max(stage.kept_bytes) as u64 * frames as u64
                             } else {
                                 0
                             };
-                            before = stage.kept;
+                            before = stage.kept_bytes;
                             let per_unit = match (stage.units, plan.resident) {
                                 (Units::Whole, _) | (Units::Rows(_), true) => 0,
                                 (Units::Frames | Units::Serial, false) => {
-                                    stage.in_flight + stage.kept
+                                    stage.in_flight_bytes + stage.kept_bytes
                                 }
-                                _ => stage.in_flight,
+                                _ => stage.in_flight_bytes,
                             } as u64;
                             if stage.units == Units::Frames {
                                 assert!(width >= 1 && width <= workers.min(frames));
                             }
-                            let projected = set + stage.held as u64 + width as u64 * per_unit;
+                            let projected = set + stage.held_bytes as u64 + width as u64 * per_unit;
                             assert!(
                                 projected <= budget.usable() || width <= MIN_CHUNK_ROWS,
                                 "stage {idx}: {} MiB exceeds {} MiB usable",
@@ -609,15 +609,15 @@ fn found_reference(plane_bytes: usize, decode: Footprint, output_bytes: usize) -
     let warped = warped(plane_bytes, decode.kept);
     [
         Stage {
-            kept: prepared.kept,
-            held: 0,
-            in_flight: prepared.transient() + DETECTOR_PLANES * plane_bytes,
+            kept_bytes: prepared.kept,
+            held_bytes: 0,
+            in_flight_bytes: prepared.transient() + DETECTOR_PLANES * plane_bytes,
             units: Units::Frames,
         },
         Stage {
-            kept: warped,
-            held: 0,
-            in_flight: prepared.kept,
+            kept_bytes: warped,
+            held_bytes: 0,
+            in_flight_bytes: prepared.kept,
             units: Units::Frames,
         },
         normalize(warped, 0),
@@ -646,9 +646,9 @@ impl DecodedStack {
         } = self;
         [
             Stage {
-                kept,
-                held: 0,
-                in_flight: scratch,
+                kept_bytes: kept,
+                held_bytes: 0,
+                in_flight_bytes: scratch,
                 units: Units::Frames,
             },
             normalize(kept, normalization_bytes),
@@ -659,9 +659,9 @@ impl DecodedStack {
 
 const fn normalize(kept: usize, held: usize) -> Stage {
     Stage {
-        kept,
-        held,
-        in_flight: 0,
+        kept_bytes: kept,
+        held_bytes: held,
+        in_flight_bytes: 0,
         units: Units::Whole,
     }
 }
@@ -669,9 +669,9 @@ const fn normalize(kept: usize, held: usize) -> Stage {
 /// A combine of one row, so its chunks cost nothing beside the planes it holds.
 const fn combine(kept: usize, held: usize) -> Stage {
     Stage {
-        kept,
-        held,
-        in_flight: 0,
+        kept_bytes: kept,
+        held_bytes: held,
+        in_flight_bytes: 0,
         units: Units::Rows(1),
     }
 }

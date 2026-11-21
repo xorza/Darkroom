@@ -4,6 +4,7 @@ pub(crate) mod error;
 pub(crate) mod frame_admission;
 pub(crate) mod frame_check;
 pub(crate) mod frame_intake;
+pub(crate) mod frame_origin;
 pub(crate) mod ingest_config;
 pub(crate) mod ingest_run;
 pub(crate) mod set_facts;

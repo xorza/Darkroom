@@ -5,9 +5,10 @@ use std::path::Path;
 use crate::combine::stack_config::StackConfig;
 use crate::config_field::ConfigField;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
-use crate::drizzle::drizzle_kernel::DrizzleKernel;
 use crate::drizzle::drizzle_run::DrizzleRun;
-use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
+use crate::drizzle::drizzle_sampling::DrizzleSampling;
+use crate::drizzle::error::DrizzleError;
+use crate::error::InvalidConfigField;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
@@ -20,21 +21,8 @@ use crate::stack_product::StackProduct;
 /// Configuration for Drizzle stacking.
 #[derive(Debug, Clone)]
 pub struct DrizzleConfig {
-    /// Output scale factor relative to input (e.g., 2.0 = 2x resolution).
-    /// Common values: 1.5, 2.0, 3.0
-    ///
-    /// The output keeps the input's surface brightness, value per input-pixel area: a flat field
-    /// of 1 drizzles to 1 at any scale, so the image total is `scale²` times the input's. Divide by
-    /// `scale²` for flux per output pixel, DrizzlePac's convention.
-    pub scale: f32,
-    /// Pixel fraction - ratio of drop size to input pixel before mapping.
-    /// Range: greater than 0.0 and at most 1.0
-    /// - 1.0 = shift-and-add (full pixel footprint)
-    /// - 0.8 = recommended for 4-point dithered data
-    /// - 0.5 = aggressive shrinking, needs good dithering
-    pub pixfrac: f32,
-    /// Kernel type for flux distribution.
-    pub kernel: DrizzleKernel,
+    /// How each frame is sampled onto the output grid, and how much finer the grid is.
+    pub sampling: DrizzleSampling,
     /// Fill value for pixels with no coverage.
     pub fill_value: f32,
     /// Fill gate, as a share of the deepest pixel's accumulated weight (0.0-1.0). A pixel holding
@@ -51,9 +39,7 @@ pub struct DrizzleConfig {
 impl Default for DrizzleConfig {
     fn default() -> Self {
         Self {
-            scale: 2.0,
-            pixfrac: 0.8,
-            kernel: DrizzleKernel::Square,
+            sampling: DrizzleSampling::default(),
             fill_value: 0.0,
             min_weight_fraction: 0.1,
             stack: StackConfig::light(),
@@ -62,21 +48,11 @@ impl Default for DrizzleConfig {
 }
 
 impl DrizzleConfig {
-    /// Validate parameters before allocating or processing an output image.
-    pub(crate) fn validate(&self) -> Result<(), DrizzleConfigError> {
-        ConfigField::new("scale", self.scale)
-            .finite_and("finite and positive", |value| value > 0.0)?;
-        ConfigField::new("pixfrac", self.pixfrac)
-            .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)?;
+    /// The fill value and the fill gate are in range; the sampling is valid by construction.
+    pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         ConfigField::new("fill_value", self.fill_value).finite()?;
         ConfigField::new("min_weight_fraction", self.min_weight_fraction)
             .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
-        if self.kernel == DrizzleKernel::Lanczos && (self.scale != 1.0 || self.pixfrac != 1.0) {
-            return Err(DrizzleConfigError::InvalidLanczosSampling {
-                scale: self.scale,
-                pixfrac: self.pixfrac,
-            });
-        }
         Ok(())
     }
 
@@ -89,7 +65,7 @@ impl DrizzleConfig {
     /// # Returns
     ///
     /// The drizzled product — its image in the input's surface-brightness units, see
-    /// [`Self::scale`] — with the quality planes [`Self::stack`] asks for, and the count of input
+    /// [`DrizzleScale`](crate::DrizzleScale) — with the quality planes [`Self::stack`] asks for, and the count of input
     /// pixels a SIP warp could not place.
     ///
     /// # Errors
@@ -175,7 +151,7 @@ impl DrizzleConfig {
 
     /// A drizzle under this configuration, taking its memory reading and decode policy from
     /// `ingest`, and its progress and cancel token from `monitor`, now.
-    fn begin(&self, ingest: &IngestConfig, monitor: ProgressMonitor) -> DrizzleRun<'_> {
+    fn begin<'a>(&'a self, ingest: &'a IngestConfig, monitor: ProgressMonitor) -> DrizzleRun<'a> {
         DrizzleRun {
             config: self,
             ingest: IngestRun::new(ingest, monitor),

@@ -134,7 +134,8 @@ impl Estimator<'_> {
             stars
                 .iter()
                 .filter(|s| {
-                    FilterRejection::of(s, filter_config).is_none()
+                    !s.saturated
+                        && FilterRejection::of(s, filter_config).is_none()
                         && (MIN_FWHM..MAX_FWHM).contains(&s.fwhm)
                 })
                 .map(|s| s.fwhm),

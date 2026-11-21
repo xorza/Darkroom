@@ -45,7 +45,7 @@ fn the_inverse_undoes_the_forward_warp() {
         );
     }
 
-    let plain = WarpTransform::new(transform).inverse();
+    let plain = WarpTransform::from(transform).inverse();
     let t = DVec2::new(33.0, 44.0);
     assert_eq!(plain.pos(t), Some(transform.inverse().apply(t)));
 }

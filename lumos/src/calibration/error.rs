@@ -1,12 +1,10 @@
 //! Why a calibration bundle does not fit the frame it was asked to calibrate.
 
-use std::convert::Infallible;
-
 use crate::calibration::calibration_component::CalibrationComponent;
 use crate::calibration::master_role::MasterRole;
 use crate::combine::error::StackError;
 use crate::error::Cancelled;
-use crate::frame::error::ConditionMismatch;
+use crate::frame::error::{ConditionMismatch, SettingMismatch};
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::metadata::sample_domain::SampleDomain;
@@ -35,6 +33,13 @@ pub enum CalibrationError {
     /// Swapped roles (a dark given as the flat) and a subtractor at the wrong level both end here.
     #[error("the subtracted flat has no positive mean{}", color.map_or(String::new(), |color| format!(" in its {color} photosites")))]
     NonPositiveFlat { color: Option<CfaColor> },
+    /// A defect map without the dark or the flat it was detected on.
+    #[error("a defect map is held without the dark or the flat it was detected on")]
+    DefectsWithoutMaster,
+    /// A bias beside a dark that still holds it: the bias would be subtracted twice, and the dark
+    /// cannot be separated from it once stacked.
+    #[error("a bias is held beside a dark that still holds it")]
+    UnseparatedDark,
     /// Flat-darks were given and no flat: a flat-dark calibrates the flats and nothing else, so
     /// they would be stacked for nothing. Frames of a light's exposure are darks.
     #[error("{count} flat-darks were given and no flat for them to calibrate")]
@@ -65,12 +70,18 @@ pub enum CalibrationError {
     /// under the flat's vignetting.
     #[error("the light holds an offset, and the set has a flat but no dark or bias to subtract it")]
     LightWithoutSubtractor,
-    /// A master holding dark signal was taken under other conditions than the frame it calibrates:
-    /// the dark against a light, or the flat-dark against the flat.
+    /// An additive master was taken under other conditions than the frame it calibrates: a bias or
+    /// a dark at another sensor setting, or a dark of another exposure it cannot be scaled from.
     #[error("the {component} master does not match the frame it calibrates")]
-    DarkMismatch {
+    MasterMismatch {
         component: MasterRole,
-        source: DarkMismatch,
+        source: MasterMismatch,
+    },
+    /// The flat was read at another binning than the light: its photosites are not the light's.
+    #[error("the {component} master was read at another binning than the light")]
+    SettingMismatch {
+        component: MasterRole,
+        source: SettingMismatch,
     },
     /// A calibration master was captured with a different sensor pattern than the rest of the
     /// bundle, when the set is assembled, or than the light, when one is calibrated.
@@ -113,16 +124,19 @@ pub enum CalibrationError {
     },
 }
 
-/// A master holding dark signal cannot be taken from the frame: dark current grows with the
-/// exposure, and this dark cannot be scaled to the frame's.
+/// An additive master cannot be taken from the frame: it was read at another sensor setting, or it
+/// holds dark signal of another exposure it cannot be scaled from.
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq)]
-pub enum DarkMismatch {
+pub enum MasterMismatch {
     /// The dark was exposed for another time than the frame, and it cannot be scaled to the
     /// frame: it still holds the bias, which does not grow with exposure, or it was exposed for 0 s.
     #[error(
         "the dark's exposure {dark} s does not match the frame's {frame} s, and the dark cannot be scaled to it"
     )]
     Exposure { frame: f64, dark: f64 },
+    /// The master was read at another sensor setting than the frame.
+    #[error(transparent)]
+    Setting(#[from] SettingMismatch),
 }
 
 /// Why the master a calibration stack subtracts from every frame cannot be taken from them: the
@@ -181,10 +195,10 @@ pub enum SubtractionError {
     #[error("frame {idx} already lost part of what the {subtractor} master holds")]
     SubtractedTwice { idx: usize, subtractor: MasterRole },
 
-    /// The master holding dark signal that a calibration stack subtracts was taken under other
-    /// conditions than frame `idx`.
+    /// The master a calibration stack subtracts was taken under other conditions than frame
+    /// `idx`.
     #[error("frame {idx} cannot take the subtracted master")]
-    SubtractorConditions { idx: usize, source: DarkMismatch },
+    SubtractorConditions { idx: usize, source: MasterMismatch },
 }
 
 /// Why one calibration role's master could not be stacked: the stack, the master its frames
@@ -196,10 +210,11 @@ pub enum MasterStackError {
     /// The master a calibration stack subtracts from every frame cannot be taken from them.
     #[error(transparent)]
     Subtraction(#[from] SubtractionError),
-    /// The frames of a master whose dark signal is one exposure's at one temperature — a dark or a
-    /// flat-dark — were not all taken under one: the master would state one frame's conditions and
-    /// hold the majority's signal.
-    #[error("the {role} frames must share one exposure and one temperature")]
+    /// The frames of a master were not all taken under the conditions they must share: one sensor
+    /// setting for every master, and one exposure for one whose dark signal is one exposure's — a
+    /// dark or a flat-dark. The master would state one frame's conditions and hold the majority's
+    /// signal.
+    #[error("the {role} frames do not share the conditions a master's frames must")]
     Conditions {
         role: MasterRole,
         source: ConditionMismatch,
@@ -222,37 +237,21 @@ impl From<Cancelled> for MasterStackError {
 
 /// Why [`CalibrationMasters::build`](crate::CalibrationMasters::build) could not build the masters.
 #[derive(Debug, thiserror::Error)]
-pub enum MasterBuildError<E> {
+pub enum MasterBuildError {
     /// A role's master could not be stacked.
     #[error(transparent)]
     Stack(MasterStackError),
     /// The stacked masters do not make a set.
     #[error(transparent)]
     Calibration(CalibrationError),
-    /// The cache could not be read or written.
-    #[error("calibration master cache: {0}")]
-    Cache(E),
     /// The build was cancelled: between roles, inside a role's stack, or while the set was
     /// assembled.
     #[error("calibration master build cancelled")]
     Cancelled,
 }
 
-impl MasterBuildError<Infallible> {
-    /// The same failure as a build under a cache that fails with `E`: a build with no cache fails
-    /// every way but by its cache.
-    pub fn with_cache_error<E>(self) -> MasterBuildError<E> {
-        match self {
-            Self::Stack(error) => MasterBuildError::Stack(error),
-            Self::Calibration(error) => MasterBuildError::Calibration(error),
-            Self::Cache(never) => match never {},
-            Self::Cancelled => MasterBuildError::Cancelled,
-        }
-    }
-}
-
 /// A cancel inside a role's stack is the build's cancel.
-impl<E> From<MasterStackError> for MasterBuildError<E> {
+impl From<MasterStackError> for MasterBuildError {
     fn from(error: MasterStackError) -> Self {
         match error {
             MasterStackError::Stack(StackError::Cancelled) => Self::Cancelled,
@@ -262,14 +261,14 @@ impl<E> From<MasterStackError> for MasterBuildError<E> {
 }
 
 /// A role's stack that fails before its master's own checks.
-impl<E> From<StackError> for MasterBuildError<E> {
+impl From<StackError> for MasterBuildError {
     fn from(error: StackError) -> Self {
         MasterStackError::Stack(error).into()
     }
 }
 
 /// A cancel while the set is assembled is the build's cancel.
-impl<E> From<CalibrationError> for MasterBuildError<E> {
+impl From<CalibrationError> for MasterBuildError {
     fn from(error: CalibrationError) -> Self {
         match error {
             CalibrationError::Cancelled => Self::Cancelled,
@@ -282,10 +281,10 @@ impl<E> From<CalibrationError> for MasterBuildError<E> {
 /// light's calibration, or a frame of a calibration stack.
 #[derive(Debug)]
 pub(crate) enum SubtractionFault {
-    /// The master holds dark signal and was taken under other conditions than the frame.
+    /// The master was taken under other conditions than the frame.
     Conditions {
         role: MasterRole,
-        source: DarkMismatch,
+        source: MasterMismatch,
     },
     /// The master's domain cannot be expressed in the frame's, as the frame stands when the master
     /// applies.
@@ -299,7 +298,7 @@ pub(crate) enum SubtractionFault {
 impl From<SubtractionFault> for CalibrationError {
     fn from(fault: SubtractionFault) -> Self {
         match fault {
-            SubtractionFault::Conditions { role, source } => Self::DarkMismatch {
+            SubtractionFault::Conditions { role, source } => Self::MasterMismatch {
                 component: role,
                 source,
             },

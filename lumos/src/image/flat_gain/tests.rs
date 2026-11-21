@@ -79,7 +79,7 @@ fn the_gain_is_bilinear_between_nodes_and_moves_with_the_warp() {
         close(gain.at(0, x, 4.0), expected, &format!("x = {x}"));
     }
 
-    let shift = WarpTransform::new(Transform::translation(DVec2::new(4.0, 0.0)));
+    let shift = WarpTransform::from(Transform::translation(DVec2::new(4.0, 0.0)));
     let shifted = gain.warped(|p| shift.apply(p), size);
     assert_eq!(shifted.size(), size);
     for (x, expected) in [(0.0, 1.5), (4.0, 1.875), (8.0, 1.875)] {
@@ -93,7 +93,7 @@ fn the_gain_is_bilinear_between_nodes_and_moves_with_the_warp() {
         .map(|channel| Buffer2::from_fn((3, 3), |at| (10 * channel + 3 * at.y + at.x) as f32))
         .collect();
     let gain = FlatGain::from_nodes(size, ramps);
-    let down = WarpTransform::new(Transform::translation(DVec2::new(0.0, 4.0)));
+    let down = WarpTransform::from(Transform::translation(DVec2::new(0.0, 4.0)));
     let warped = gain.warped(|p| down.apply(p), size);
     for channel in 0..3 {
         for (i, j) in [(0, 0), (2, 0), (1, 1), (0, 2), (2, 2)] {

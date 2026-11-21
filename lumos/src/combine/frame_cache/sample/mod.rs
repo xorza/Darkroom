@@ -82,11 +82,25 @@ fn fit_column<T: Clone + Default>(column: &mut Vec<T>, len: usize) {
     column.resize(len, T::default());
 }
 
-/// The flagged samples a combine left out, and those it had to keep.
-#[derive(Debug, Default)]
-pub(super) struct FlagTallies {
+/// What a combine counts as it goes, for its [`RunReport`](crate::RunReport): the flagged samples
+/// it left out, those it had to keep, and the pixels the small-sample fallback took. Each row task
+/// counts its own and the rows fold together, so no count is shared while the rows run.
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct RowTallies {
     pub(super) excluded: FlagCounts,
     pub(super) kept: FlagCounts,
+    pub(super) small_n_fallback_pixels: u64,
+}
+
+impl RowTallies {
+    /// The two tallies together.
+    pub(super) const fn merged(self, other: Self) -> Self {
+        Self {
+            excluded: self.excluded.merged(other.excluded),
+            kept: self.kept.merged(other.kept),
+            small_n_fallback_pixels: self.small_n_fallback_pixels + other.small_n_fallback_pixels,
+        }
+    }
 }
 
 /// One pixel's gather buffers, borrowed as slices: the gather loop stores into these, so it holds
@@ -110,7 +124,7 @@ impl GatheredSamples<'_> {
         &mut self,
         count: usize,
         min_survivors: usize,
-        tallies: &mut FlagTallies,
+        tallies: &mut RowTallies,
     ) -> usize {
         let flagged = self.sample_flags[..count]
             .iter()

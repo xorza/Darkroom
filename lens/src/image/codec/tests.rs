@@ -334,7 +334,7 @@ fn record_layout_is_pinned() {
         .unwrap();
     assert_eq!(
         &blake3::hash(&bytes).to_hex()[..16],
-        "accb0a9019dde9ca",
+        "110baad1a3e6aaf9",
         "the record layout moved: bump VERSION and set this pin to the digest"
     );
 }

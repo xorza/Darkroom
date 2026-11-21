@@ -1,6 +1,8 @@
 //! [`CalibrationMasters`]: the masters a light is calibrated by, built from a session's frames or
 //! loaded from a bundle.
 
+pub(crate) mod additive;
+
 use std::path::Path;
 
 use arrayvec::ArrayVec;
@@ -9,28 +11,32 @@ use common::CancelToken;
 use crate::calibration::bundle;
 use crate::calibration::bundle::error::BundleError;
 use crate::calibration::calibration_component::CalibrationComponent;
-use crate::calibration::calibration_outcome::CalibrationOutcome;
-use crate::calibration::calibration_pass::{CalibrationPass, Saturation};
+use crate::calibration::calibration_masters::additive::Additive;
+use crate::calibration::calibration_outcome::{CalibrationOutcome, DarkOutcome};
+use crate::calibration::calibration_pass::{CalibrationPass, Saturation, Subtracted};
 use crate::calibration::calibration_set::CalibrationSet;
-use crate::calibration::dark_scale::{DarkScale, DarkScaleSource, FitLight};
+use crate::calibration::dark_scale::{DarkScale, DarkScaleSource, ExposureRatio, FitLight};
 use crate::calibration::defect_map::DefectMap;
 use crate::calibration::defect_map::defect_summary::DefectSummary;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::calibration::error::{CalibrationError, MasterBuildError};
 use crate::calibration::imposed_flags;
-use crate::calibration::master_cache::{CachedMaster, MasterCache, MasterInputs, SubtractedFrames};
+use crate::calibration::master_cache::{MasterCache, MasterKey, MasterSlot};
 use crate::calibration::master_recipe::MasterRecipe;
 use crate::calibration::master_role::MasterRole;
 use crate::calibration::master_stack::MasterStack;
 use crate::calibration::prepared_flat::PreparedFlat;
 use crate::calibration::sensor::Sensor;
-use crate::calibration::subtraction::{self, Subtraction};
+use crate::calibration::subtraction::{self, Subtraction, Term};
 use crate::calibration::subtractor::Subtractor;
+use crate::frame::capture_conditions::{SensorSetting, SettingsCompared};
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::metadata::dark_comparison::DarkComparison;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::metadata::sample_domain::Pedestal;
 use crate::ingest::ingest_config::IngestConfig;
+use crate::io::decode_config::DecodeConfig;
 use crate::io::load_ctx::LoadCtx;
 use crate::progress::progress_monitor::ProgressMonitor;
 
@@ -43,9 +49,7 @@ use crate::progress::progress_monitor::ProgressMonitor;
 /// operates on raw CFA data before demosaicing so defect correction can use same-color neighbors.
 #[derive(Debug, Default)]
 pub struct CalibrationMasters {
-    bias: Option<CfaImage>,
-    /// The dark, its record saying whether it lost the bias.
-    dark: Option<CfaImage>,
+    additive: Additive,
     flat: Option<PreparedFlat>,
     defect_map: Option<DefectMap>,
     /// What calibrating a light by these masters leaves it flagged, gathered once:
@@ -56,36 +60,37 @@ pub struct CalibrationMasters {
     imposed: Option<PixelFlags>,
 }
 
-/// What [`CalibrationMasters::build`] stacks: each role's frames, the sigma threshold of defect
-/// detection ([`SigmaThreshold::DEFAULT`] by default), and the cache of masters it reads and
-/// writes.
-#[derive(Debug)]
-pub struct MasterBuild<'a, P, C> {
-    pub frames: CalibrationSet<&'a [P]>,
-    pub sigma_threshold: SigmaThreshold,
-    pub cache: &'a C,
+/// How [`CalibrationMasters::build`] builds: the σ of defect detection, and the cache of masters
+/// it reads and writes, none stacking every master.
+#[derive(Debug, Clone, Copy)]
+pub struct MastersConfig<'a> {
+    pub hot_sigma: SigmaThreshold,
+    pub cache: Option<&'a dyn MasterCache>,
 }
 
-/// Copied whatever its type parameters are, as it holds references alone: a derive would ask each
-/// to be `Copy`.
-impl<P, C> Clone for MasterBuild<'_, P, C> {
-    fn clone(&self) -> Self {
-        *self
+impl Default for MastersConfig<'_> {
+    fn default() -> Self {
+        Self {
+            hot_sigma: SigmaThreshold::DEFAULT,
+            cache: None,
+        }
     }
 }
 
-impl<P, C> Copy for MasterBuild<'_, P, C> {}
-
 impl CalibrationMasters {
     /// The masters a bundle at `path` holds, as [`Self::write_bundle`] wrote them, without
-    /// rebuilding the prepared flat or the defect map: cancellation through `ctx` reads as
-    /// [`BundleError::Cancelled`]. The file is streamed, never read into RAM whole.
+    /// rebuilding the prepared flat or the defect map: `cancel` reads as
+    /// [`BundleError::Cancelled`]. The file is streamed, never read into RAM whole. A bundle is
+    /// lumos's own format, so no load option applies: each master decodes as it was written.
     ///
     /// # Errors
     ///
     /// [`BundleError`], one variant for each way a file can fail to be a bundle of this version.
-    pub fn read_bundle(path: impl AsRef<Path>, ctx: &LoadCtx) -> Result<Self, BundleError> {
-        bundle::load(path.as_ref(), ctx)
+    pub fn read_bundle(path: impl AsRef<Path>, cancel: &CancelToken) -> Result<Self, BundleError> {
+        bundle::load(
+            path.as_ref(),
+            &LoadCtx::new(DecodeConfig::default(), cancel.clone()),
+        )
     }
 
     /// Write the masters to `path` as a versioned, checksummed multi-extension FITS bundle: the
@@ -95,32 +100,37 @@ impl CalibrationMasters {
         bundle::save(path.as_ref(), self)
     }
 
-    /// Stack every role of the build's frames into its master under the role's preset, read as
-    /// `ingest` says, and assemble the set ([`Self::from_images`]): the bias and the flat-dark
-    /// first, then the flats, then the dark. Each flat loses its additive parts before the
-    /// multiplicative normalization scales it, as PixInsight and Siril calibrate flats, by the rule
-    /// a light loses them by: the bias as it stands, and the flat-dark's dark signal — the
+    /// Stack every role of `frames` into its master under the role's preset, read as `ingest`
+    /// says, and assemble the set ([`Self::from_images`]) at `config`'s defect σ: the bias and the
+    /// flat-dark first, then the flats, then the dark. Each flat loses its additive parts before
+    /// the multiplicative normalization scales it, as PixInsight and Siril calibrate flats, by the
+    /// rule a light loses them by: the bias as it stands, and the flat-dark's dark signal — the
     /// flat-dark without the bias, when there is one — scaled to the flat's own exposure. With no
     /// bias the flat-dark holds the bias too, and only a flat of its exposure can take it. A role
-    /// with no frames has no master. The cache is read before a role is stacked, and written once
-    /// it is under the key that read gave; [`NoMasterCache`](crate::NoMasterCache) stacks every
-    /// one.
+    /// with no frames has no master. `config`'s cache is read before a role is stacked, and
+    /// written once it is, under the [`MasterKey`] lumos composes of its frames.
     ///
     /// # Errors
     ///
     /// A role's stack fails ([`StackError`](crate::StackError)), the masters do not make a set
-    /// ([`CalibrationError`]) — flat-darks with no flat among them, before any frame is read —
-    /// the cache fails, or the build is cancelled.
-    pub fn build<P: AsRef<Path>, C: MasterCache<P>>(
-        build: MasterBuild<'_, P, C>,
+    /// ([`CalibrationError`]) — flat-darks with no flat among them, before any frame is read — or
+    /// the build is cancelled.
+    pub fn build<P: AsRef<Path>>(
+        frames: CalibrationSet<&[P]>,
+        config: &MastersConfig<'_>,
         ingest: &IngestConfig,
         monitor: ProgressMonitor,
-    ) -> Result<Self, MasterBuildError<C::Error>> {
-        let MasterBuild {
-            frames,
-            sigma_threshold,
-            cache,
-        } = build;
+    ) -> Result<Self, MasterBuildError> {
+        let frames = frames.map(|paths| paths.iter().map(AsRef::as_ref).collect::<Vec<&Path>>());
+        Self::build_from(&frames, config, ingest, monitor)
+    }
+
+    fn build_from(
+        frames: &CalibrationSet<Vec<&Path>>,
+        config: &MastersConfig<'_>,
+        ingest: &IngestConfig,
+        monitor: ProgressMonitor,
+    ) -> Result<Self, MasterBuildError> {
         // A flat-dark calibrates the flats alone: without them it would be stacked and dropped.
         if frames.flat.is_empty() && !frames.flat_dark.is_empty() {
             return Err(MasterBuildError::Calibration(
@@ -129,46 +139,55 @@ impl CalibrationMasters {
                 },
             ));
         }
-        let stack = |role: MasterRole, subtract: &[Subtractor<'_>]| {
-            let paths = *frames.get(role);
+        // Each role's master and its key, which a master taken from its frames' keys by.
+        let stack = |role: MasterRole,
+                     subtract: &[(Subtractor<'_>, Option<MasterKey>)]|
+         -> Result<Option<(CfaImage, Option<MasterKey>)>, MasterBuildError> {
+            let paths = frames.get(role).as_slice();
             if paths.is_empty() {
                 return Ok(None);
             }
             if monitor.cancel.is_cancelled() {
                 return Err(MasterBuildError::Cancelled);
             }
-            let subtracted = subtract
+            let key = subtract
                 .iter()
-                .map(|subtractor| SubtractedFrames {
-                    role: subtractor.role,
-                    frames: frames.get(subtractor.role),
-                })
-                .collect::<ArrayVec<_, 2>>();
-            let inputs = MasterInputs {
+                .map(|(_, key)| *key)
+                .collect::<Option<ArrayVec<MasterKey, 2>>>()
+                .and_then(|subtracted| {
+                    MasterKey::of(paths, MasterRecipe::of(role, ingest), &subtracted)
+                });
+            let slot = key.map(|key| MasterSlot {
                 role,
                 frames: paths,
-                subtracted: &subtracted,
-                recipe: MasterRecipe::of(role, ingest),
-            };
-            let key = match cache.load(&inputs).map_err(MasterBuildError::Cache)? {
-                CachedMaster::Kept(master) => return Ok(Some(*master)),
-                CachedMaster::Missing(key) => key,
-            };
+                key,
+            });
+            let cache = config.cache.zip(slot);
+            if let Some(master) = cache.and_then(|(cache, slot)| cache.load(&slot)) {
+                return Ok(Some((master, key)));
+            }
+            let subtractors: ArrayVec<Subtractor<'_>, 2> =
+                subtract.iter().map(|(subtractor, _)| *subtractor).collect();
             let master = MasterStack {
                 paths,
                 role,
                 config: role.stack_config(),
                 ingest,
-                subtract,
+                subtract: &subtractors,
             }
             .run(monitor.clone())?
             .expect("a role with frames stacks a master");
-            cache.store(key, &master).map_err(MasterBuildError::Cache)?;
-            Ok(Some(master))
+            if let Some((cache, slot)) = cache {
+                cache.store(&slot, &master);
+            }
+            Ok(Some((master, key)))
         };
         let bias = stack(MasterRole::Bias, &[])?;
         let flat_dark = stack(MasterRole::FlatDark, &[])?
-            .map(|flat_dark| without_bias(flat_dark, bias.as_ref()))
+            .map(|(flat_dark, key)| {
+                without_bias(flat_dark, bias.as_ref().map(|(bias, _)| bias))
+                    .map(|flat_dark| (flat_dark, key))
+            })
             .transpose()?;
         let flat = {
             let subtract = [
@@ -176,20 +195,24 @@ impl CalibrationMasters {
                 (MasterRole::FlatDark, flat_dark.as_ref()),
             ]
             .into_iter()
-            .filter_map(|(role, master)| master.map(|master| Subtractor { role, master }))
+            .filter_map(|(role, master)| {
+                master.map(|(master, key)| (Subtractor { role, master }, *key))
+            })
             .collect::<ArrayVec<_, 2>>();
             stack(MasterRole::Flat, &subtract)?
         };
         let dark = stack(MasterRole::Dark, &[])?;
         let ProgressMonitor { cancel, .. } = monitor;
+        let master =
+            |master: Option<(CfaImage, Option<MasterKey>)>| master.map(|(master, _)| master);
         Ok(Self::from_images(
             CalibrationSet {
-                dark,
-                flat,
-                bias,
-                flat_dark,
+                dark: master(dark),
+                flat: master(flat),
+                bias: master(bias),
+                flat_dark: master(flat_dark),
             },
-            sigma_threshold,
+            config.hot_sigma,
             &cancel,
         )?)
     }
@@ -202,12 +225,12 @@ impl CalibrationMasters {
     /// The present masters, with their roles, in bundle order.
     pub(crate) fn masters(&self) -> impl Iterator<Item = (MasterRole, &CfaImage)> {
         [
-            (MasterRole::Dark, self.dark.as_ref()),
+            (MasterRole::Dark, self.additive.dark()),
             (
                 MasterRole::Flat,
                 self.flat.as_ref().map(PreparedFlat::divisor),
             ),
-            (MasterRole::Bias, self.bias.as_ref()),
+            (MasterRole::Bias, self.additive.bias()),
         ]
         .into_iter()
         .filter_map(|(role, master)| master.map(|master| (role, master)))
@@ -255,36 +278,49 @@ impl CalibrationMasters {
     /// Resident RAM held by this bundle: the present masters' planes and flags, the flat's gain,
     /// the defect map's index lists, and the flags the masters impose on a light.
     pub fn ram_bytes(&self) -> usize {
-        self.dark.as_ref().map_or(0, CfaImage::ram_bytes)
+        self.masters()
+            .filter(|&(role, _)| role != MasterRole::Flat)
+            .map(|(_, master)| master.ram_bytes())
+            .sum::<usize>()
             + self.flat.as_ref().map_or(0, PreparedFlat::ram_bytes)
-            + self.bias.as_ref().map_or(0, CfaImage::ram_bytes)
             + self.defect_map.as_ref().map_or(0, DefectMap::ram_bytes)
             + self.imposed.as_ref().map_or(0, |flags| flags.bytes().len())
     }
 
-    /// A set of masters built one master at a time; see [`MastersBuilder::build`].
-    pub(crate) fn builder() -> MastersBuilder {
-        MastersBuilder::default()
-    }
-
-    /// Whether the dark still holds the bias, which the bias is then not subtracted beside.
-    fn dark_holds_bias(&self) -> bool {
-        self.dark
-            .as_ref()
-            .is_some_and(|dark| !dark.metadata.derived.calibration().bias)
-    }
-
-    /// The bias a light is calibrated by: none when the dark still holds it.
-    fn used_bias(&self) -> Option<&CfaImage> {
-        self.bias.as_ref().filter(|_| !self.dark_holds_bias())
+    /// `parts` as one coherent set, checked as [`Self::from_images`] checks its inputs, with the
+    /// flags they impose on a light gathered: one sensor, every master's record one its role can
+    /// hold, and a defect map only beside the dark or the flat it was detected on.
+    ///
+    /// # Errors
+    ///
+    /// [`CalibrationError`] when the parts do not make such a set.
+    pub(crate) fn assemble(parts: MasterParts) -> Result<Self, CalibrationError> {
+        let MasterParts {
+            additive,
+            flat,
+            defect_map,
+        } = parts;
+        if defect_map.is_some() && additive.dark().is_none() && flat.is_none() {
+            return Err(CalibrationError::DefectsWithoutMaster);
+        }
+        let mut masters = Self {
+            additive,
+            flat,
+            defect_map,
+            imposed: None,
+        };
+        Sensor::shared(masters.sensors())?;
+        masters.validate_records()?;
+        masters.imposed = masters.imposed_flags();
+        Ok(masters)
     }
 
     /// See [`Self::imposed`](CalibrationMasters#structfield.imposed); `None` when they impose none.
     fn imposed_flags(&self) -> Option<PixelFlags> {
         imposed_flags::of(
             [
-                self.used_bias(),
-                self.dark.as_ref(),
+                self.additive.bias(),
+                self.additive.dark(),
                 self.flat.as_ref().map(PreparedFlat::divisor),
             ]
             .into_iter()
@@ -333,6 +369,10 @@ impl CalibrationMasters {
             if let Some(master) = master {
                 check_record(role, master)?;
             }
+        }
+        // A flat-dark calibrates the flat alone, as `build` refuses its frames without flats.
+        if images.flat.is_none() && images.flat_dark.is_some() {
+            return Err(CalibrationError::FlatDarksWithoutFlats { count: 1 });
         }
 
         let CalibrationSet {
@@ -412,12 +452,11 @@ impl CalibrationMasters {
             return Err(CalibrationError::Cancelled);
         }
 
-        Self::builder()
-            .bias(bias)
-            .dark(dark)
-            .flat(flat)
-            .defect_map(defect_map)
-            .build()
+        Self::assemble(MasterParts {
+            additive: Additive::of(bias, dark)?,
+            flat,
+            defect_map,
+        })
     }
 
     /// Every present master lost no more to calibration than its role can: the check `from_images`
@@ -466,8 +505,8 @@ impl CalibrationMasters {
         }
         self.validate_against_light(image)?;
         let mut outcome = CalibrationOutcome::default();
-        let dark_holds_bias = self.dark_holds_bias();
-        let bias = self.used_bias();
+        let dark_holds_bias = self.additive.dark_holds_bias();
+        let bias = self.additive.bias();
         if self.flat.is_some() && bias.is_none() && !dark_holds_bias && holds_offset(image) {
             return Err(CalibrationError::LightWithoutSubtractor);
         }
@@ -480,42 +519,51 @@ impl CalibrationMasters {
                 role: MasterRole::Bias,
                 master,
             }),
-            self.dark.as_ref().map(|master| Subtractor {
+            self.additive.dark().map(|master| Subtractor {
                 role: MasterRole::Dark,
                 master,
             }),
         ];
         let subtraction = Subtraction::resolve(image, subtractors.into_iter().flatten())?;
+        outcome.settings_compared = subtraction.settings == SettingsCompared::All;
+        outcome.filter_differs = self.flat.as_ref().is_some_and(|flat| {
+            let filter = |metadata: &ImageMetadata| {
+                metadata
+                    .header
+                    .filter
+                    .as_deref()
+                    .map(str::trim)
+                    .map(str::to_owned)
+            };
+            matches!(
+                (filter(&image.metadata), filter(&flat.divisor().metadata)),
+                (Some(light), Some(flat)) if light != flat
+            )
+        });
         let bias = subtraction.term(MasterRole::Bias);
         let dark = subtraction.term(MasterRole::Dark);
-        outcome.dark = dark
-            .and_then(|dark| dark.matched)
-            .map(|matched| matched.comparison);
         let bias_term = bias.map(|bias| bias.subtracted(1.0));
         // A bias-removed dark is scaled, by the fit where its hot pixels allow; one that holds the
         // bias is subtracted as it is, the exposures having matched.
-        outcome.dark_scale = dark
-            .filter(|_| !dark_holds_bias)
-            .map(|dark| match &self.defect_map {
-                Some(defects) => DarkScale::fit(
-                    defects.hot(),
-                    FitLight {
-                        light: image,
-                        bias: bias_term,
-                        imposed: self.imposed.as_ref(),
-                        dark_gain: dark.map.gain,
-                    },
-                    dark.matched_scale(),
-                ),
-                None => DarkScale {
-                    factor: dark.matched_scale(),
-                    source: DarkScaleSource::Exposure { fit_pixels: 0 },
-                },
-            });
+        outcome.dark = match dark {
+            None => DarkOutcome::NoDark,
+            Some(dark) => {
+                let matched = dark.matched.expect("a dark is matched to the light");
+                if dark_holds_bias {
+                    DarkOutcome::AsIs(matched.comparison)
+                } else {
+                    DarkOutcome::Scaled {
+                        comparison: matched.comparison,
+                        scale: self.dark_scale(image, bias_term, dark),
+                    }
+                }
+            }
+        };
         let dark_term = dark.map(|dark| {
             dark.subtracted(
                 outcome
-                    .dark_scale
+                    .dark
+                    .scale()
                     .map_or_else(|| dark.matched_scale(), |scale| scale.factor),
             )
         });
@@ -545,6 +593,33 @@ impl CalibrationMasters {
         Ok(outcome)
     }
 
+    /// The scale of the bias-removed `dark` for `image`, less `bias`: fitted on the defect map's
+    /// hot pixels where they beat the exposure ratio, else the ratio.
+    fn dark_scale(
+        &self,
+        image: &CfaImage,
+        bias: Option<Subtracted<'_>>,
+        dark: &Term<'_>,
+    ) -> DarkScale {
+        let matched = dark.matched.expect("a dark is matched to the light");
+        match &self.defect_map {
+            Some(defects) => DarkScale::fit(
+                defects.hot(),
+                FitLight {
+                    light: image,
+                    bias,
+                    imposed: self.imposed.as_ref(),
+                    dark_gain: dark.map.gain,
+                },
+                ExposureRatio::of(matched),
+            ),
+            None => DarkScale {
+                factor: matched.factor(),
+                source: DarkScaleSource::Exposure { fit_pixels: 0 },
+            },
+        }
+    }
+
     /// Every master must describe the same sensor as `image`, in pattern and extent, and the
     /// same instrument and unit where both state one.
     fn validate_against_light(&self, image: &CfaImage) -> Result<(), CalibrationError> {
@@ -565,6 +640,15 @@ impl CalibrationMasters {
                     master: master.to_owned(),
                 });
             }
+            // A flat of another binning sums other photosites than the light's.
+            if role == MasterRole::Flat {
+                SensorSetting::of(&image.metadata)
+                    .compare_binning(SensorSetting::of(&master.metadata))
+                    .map_err(|source| CalibrationError::SettingMismatch {
+                        component: role,
+                        source,
+                    })?;
+            }
             // The flat divides a normalized copy of itself, so its scale cancels; only a different
             // stated unit disqualifies it. A subtracted master's scale is checked in
             // `Subtractor::map_into`. Only when both declare a domain: a synthesized one has none.
@@ -584,76 +668,12 @@ impl CalibrationMasters {
     }
 }
 
-/// The masters [`CalibrationMasters::builder`] gathers, each optional, until [`Self::build`]
-/// checks them as one set.
-#[derive(Debug, Default)]
-pub(crate) struct MastersBuilder {
-    bias: Option<CfaImage>,
-    dark: Option<CfaImage>,
-    flat: Option<PreparedFlat>,
-    defect_map: Option<DefectMap>,
-}
-
-impl MastersBuilder {
-    #[must_use]
-    pub(crate) fn bias(self, bias: impl Into<Option<CfaImage>>) -> Self {
-        Self {
-            bias: bias.into(),
-            ..self
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn dark(self, dark: impl Into<Option<CfaImage>>) -> Self {
-        Self {
-            dark: dark.into(),
-            ..self
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn flat(self, flat: impl Into<Option<PreparedFlat>>) -> Self {
-        Self {
-            flat: flat.into(),
-            ..self
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn defect_map(self, defect_map: impl Into<Option<DefectMap>>) -> Self {
-        Self {
-            defect_map: defect_map.into(),
-            ..self
-        }
-    }
-
-    /// The masters as one coherent bundle, checked as [`CalibrationMasters::from_images`] checks
-    /// its inputs, with the flags they impose on a light gathered.
-    ///
-    /// # Errors
-    /// [`CalibrationError`] when the masters or the map do not describe one sensor, or a master
-    /// lost more to calibration than its role can.
-    pub(crate) fn build(self) -> Result<CalibrationMasters, CalibrationError> {
-        let Self {
-            bias,
-            dark,
-            flat,
-            defect_map,
-        } = self;
-        let mut masters = CalibrationMasters {
-            bias,
-            dark,
-            flat,
-            defect_map,
-            imposed: None,
-        };
-        // `from_images` checks its inputs first; this checks a set built some other way, a bundle
-        // read as independent HDUs, so no `CalibrationMasters` spans two sensors.
-        Sensor::shared(masters.sensors())?;
-        masters.validate_records()?;
-        masters.imposed = masters.imposed_flags();
-        Ok(masters)
-    }
+/// The parts [`CalibrationMasters::assemble`] checks as one set.
+#[derive(Debug)]
+pub(crate) struct MasterParts {
+    pub(crate) additive: Additive,
+    pub(crate) flat: Option<PreparedFlat>,
+    pub(crate) defect_map: Option<DefectMap>,
 }
 
 /// Whether `frame` may still hold an additive offset: its pedestal is kept or unknown. A frame with
@@ -704,10 +724,9 @@ fn without_bias(
 pub(crate) mod internals {
     use std::path::Path;
 
-    use crate::calibration::calibration_masters::{CalibrationMasters, MasterBuild};
+    use crate::calibration::calibration_masters::{CalibrationMasters, MastersConfig};
     use crate::calibration::calibration_set::CalibrationSet;
     use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
-    use crate::calibration::master_cache::NoMasterCache;
     use crate::ingest::ingest_config::IngestConfig;
     use crate::progress::progress_monitor::ProgressMonitor;
 
@@ -718,10 +737,10 @@ pub(crate) mod internals {
         sigma_threshold: SigmaThreshold,
     ) -> CalibrationMasters {
         CalibrationMasters::build(
-            MasterBuild {
-                frames,
-                sigma_threshold,
-                cache: &NoMasterCache,
+            frames,
+            &MastersConfig {
+                hot_sigma: sigma_threshold,
+                cache: None,
             },
             &IngestConfig::default(),
             ProgressMonitor::unattended(),

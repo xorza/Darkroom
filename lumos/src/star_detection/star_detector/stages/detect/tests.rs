@@ -16,7 +16,7 @@ fn local_maxima_config() -> ExtractionConfig {
         },
         deblend_min_separation: 3,
         min_area: 1,
-        max_area: usize::MAX,
+        max_area: None,
         edge_margin: 0,
         ..Default::default()
     }
@@ -204,7 +204,7 @@ fn region_filter_bounds() {
     let size = USize2::new(64, 64);
     let config = ExtractionConfig {
         min_area: 5,
-        max_area: 20,
+        max_area: Some(20),
         edge_margin: 10,
         ..local_maxima_config()
     };

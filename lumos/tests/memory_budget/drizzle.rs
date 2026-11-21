@@ -29,7 +29,7 @@ fn a_spilled_drizzle_stays_within_its_budget() {
                 let [x, y] = StarField::dither(idx);
                 DrizzleFrame {
                     source,
-                    warp: WarpTransform::new(Transform::translation(DVec2::new(
+                    warp: WarpTransform::from(Transform::translation(DVec2::new(
                         f64::from(x),
                         f64::from(y),
                     ))),
@@ -38,10 +38,7 @@ fn a_spilled_drizzle_stays_within_its_budget() {
             })
             .collect();
         let budget = Budget::mib(3);
-        let drizzle = DrizzleConfig {
-            scale: 2.0,
-            ..DrizzleConfig::default()
-        };
+        let drizzle = DrizzleConfig::default();
         let ingest = session.ingest(budget);
         let run = session.measure(|| {
             drizzle
@@ -49,7 +46,7 @@ fn a_spilled_drizzle_stays_within_its_budget() {
                 .unwrap()
         });
         let report = &run.value.report;
-        assert_eq!(report.spilled_frames, FRAMES as u64);
+        assert_eq!(report.memory.spilled_frames, FRAMES as u64);
         budget.assert_held("drizzle", run.peak_bytes, report);
     });
 }
@@ -75,7 +72,7 @@ fn a_flat_divided_drizzle_stays_within_its_budget() {
                     let [x, y] = StarField::dither(idx);
                     DrizzleFrame {
                         source,
-                        warp: WarpTransform::new(Transform::translation(DVec2::new(
+                        warp: WarpTransform::from(Transform::translation(DVec2::new(
                             f64::from(x),
                             f64::from(y),
                         ))),
@@ -86,7 +83,6 @@ fn a_flat_divided_drizzle_stays_within_its_budget() {
             // A few stars over little sky give a color too faint a spread to normalize by, which
             // the memory under test does not need.
             let drizzle = DrizzleConfig {
-                scale: 2.0,
                 stack: StackConfig {
                     normalization: Normalization::None,
                     ..StackConfig::light()
@@ -100,7 +96,7 @@ fn a_flat_divided_drizzle_stays_within_its_budget() {
                     .unwrap()
             });
             let report = &run.value.report;
-            assert_eq!(report.spilled_frames, spilled, "{label}");
+            assert_eq!(report.memory.spilled_frames, spilled, "{label}");
             budget.assert_held(label, run.peak_bytes, report);
         }
     });

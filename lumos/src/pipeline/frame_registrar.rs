@@ -10,6 +10,7 @@ use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::FrameParking;
 use crate::registration::error::RegistrationError;
+use crate::registration::registrar::ReferenceCatalog;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::registration::warp_transform::WarpTransform;
@@ -21,7 +22,7 @@ use crate::star_detection::star_detector::detection_result::DetectionDiagnostics
 #[derive(Debug)]
 pub(super) struct FrameRegistrar<'a> {
     reference: usize,
-    reference_stars: Vec<Star>,
+    catalog: ReferenceCatalog<'a>,
     run: &'a AlignStackRun<'a>,
     parking: &'a FrameParking,
     count: usize,
@@ -66,11 +67,15 @@ pub(super) struct ParkedLight {
 
 impl<'a> FrameRegistrar<'a> {
     /// Park `lights` in `parking`, registered and warped as `run` asks.
+    ///
+    /// # Errors
+    ///
+    /// [`AlignStackError::Reference`] when no light could register to the reference's stars.
     pub(super) fn new(
         run: &'a AlignStackRun<'a>,
         parking: &'a FrameParking,
         lights: LightSet,
-    ) -> Self {
+    ) -> Result<Self, AlignStackError> {
         let LightSet {
             count,
             desc,
@@ -83,15 +88,21 @@ impl<'a> FrameRegistrar<'a> {
             lights = count,
             "Registering lights to the reference"
         );
-        Self {
+        let catalog = run.registrar.reference(reference_stars).map_err(|source| {
+            AlignStackError::Reference {
+                idx: reference,
+                source,
+            }
+        })?;
+        Ok(Self {
             reference,
-            reference_stars,
+            catalog,
             run,
             parking,
             count,
             desc,
             scratch: WarpScratch::default(),
-        }
+        })
     }
 
     /// Register light `idx`, `frame`, warp it into the set its worker carries in `warped`, or a
@@ -123,7 +134,7 @@ impl<'a> FrameRegistrar<'a> {
             ));
         }
 
-        let registration = match self.run.registrar.register(&self.reference_stars, &stars) {
+        let registration = match self.catalog.register(&stars) {
             Ok(registration) => registration,
             Err(error) => {
                 tracing::info!(
@@ -138,14 +149,13 @@ impl<'a> FrameRegistrar<'a> {
         tracing::info!(
             light = idx,
             total = self.count,
-            inliers = registration.inlier_count(),
-            rms = format!("{:.3}", registration.rms_error()),
-            quality = format!("{:.3}", registration.quality_score()),
-            transform = %registration.transform(),
+            inliers = registration.matches().len(),
+            rms = format!("{:.3}", registration.rms_error_px()),
+            transform = %registration.warp().linear(),
             "registered"
         );
-        let inliers = registration.inlier_count();
-        let rms_error = registration.rms_error();
+        let inliers = registration.matches().len();
+        let rms_error = registration.rms_error_px();
         let warp = registration.into_warp();
         let mut result = warped.take().unwrap_or_else(|| WarpResult::new(self.desc));
         let image = image.into_resident();

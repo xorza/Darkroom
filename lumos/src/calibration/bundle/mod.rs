@@ -20,7 +20,8 @@ use fits_well::{FitsReader, FitsWriter};
 
 use crate::calibration::bundle::error::{BundleError, DefectTableError};
 use crate::calibration::calibration_component::CalibrationComponent;
-use crate::calibration::calibration_masters::CalibrationMasters;
+use crate::calibration::calibration_masters::additive::Additive;
+use crate::calibration::calibration_masters::{CalibrationMasters, MasterParts};
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::defect_map::{DefectMap, HotPixels};
 use crate::calibration::master_role::MasterRole;
@@ -121,9 +122,6 @@ pub(crate) fn read(
     if idxs.masters.flat_dark.is_some() {
         return Err(BundleError::FlatDark);
     }
-    if idxs.defects.is_some() && idxs.masters.dark.is_none() && idxs.masters.flat.is_none() {
-        return Err(BundleError::DefectsWithoutMaster);
-    }
     let mut master = |role| {
         (*idxs.masters.get(role))
             .map(|idx| bundle.master(idx, role))
@@ -135,15 +133,13 @@ pub(crate) fn read(
         .map(PreparedFlat::checked_divisor)
         .transpose()?;
     let defects = idxs.defects.map(|idx| bundle.defect_map(idx)).transpose()?;
-    // The builder runs the coherence checks `from_images` does, so a bundle read back is as
+    // The assembly runs the coherence checks `from_images` does, so a bundle read back is as
     // trustworthy as one just built.
-    let masters = CalibrationMasters::builder()
-        .bias(bias)
-        .dark(dark)
-        .flat(flat)
-        .defect_map(defects)
-        .build()?;
-    Ok(masters)
+    Ok(CalibrationMasters::assemble(MasterParts {
+        additive: Additive::of(bias, dark)?,
+        flat,
+        defect_map: defects,
+    })?)
 }
 
 fn bundle_primary_header() -> Result<Header, WriteError> {

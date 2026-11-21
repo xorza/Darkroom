@@ -3,10 +3,7 @@
 
 use std::path::PathBuf;
 
-use lumos::{
-    CalibrationMasters, CalibrationSet, MasterBuild, NoMasterCache, ProgressMonitor,
-    SigmaThreshold, StackConfig,
-};
+use lumos::{CalibrationMasters, CalibrationSet, MastersConfig, ProgressMonitor, StackConfig};
 
 use crate::alone::alone;
 use crate::budget::{Budget, UNPLANNED_BYTES};
@@ -46,7 +43,7 @@ fn a_stack_stays_within_its_budget() {
             });
             let report = &run.value.report;
             assert_eq!(
-                (report.spilled_frames, report.overcommit_bytes),
+                (report.memory.spilled_frames, report.memory.overcommit_bytes),
                 (spilled, overcommit),
                 "{label}"
             );
@@ -79,16 +76,13 @@ fn a_master_stays_within_its_budget() {
         let none: &[PathBuf] = &[];
         let run = session.measure(|| {
             CalibrationMasters::build(
-                MasterBuild {
-                    frames: CalibrationSet {
-                        dark: darks.as_slice(),
-                        flat: none,
-                        bias: none,
-                        flat_dark: none,
-                    },
-                    sigma_threshold: SigmaThreshold::DEFAULT,
-                    cache: &NoMasterCache,
+                CalibrationSet {
+                    dark: darks.as_slice(),
+                    flat: none,
+                    bias: none,
+                    flat_dark: none,
                 },
+                &MastersConfig::default(),
                 &ingest,
                 ProgressMonitor::unattended(),
             )

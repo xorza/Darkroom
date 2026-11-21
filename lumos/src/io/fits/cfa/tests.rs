@@ -507,7 +507,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
     assert_eq!(info.desc, PlanarDesc::new((2, 2), ChannelLayout::Mono));
     assert_eq!(
         info.cfa_type,
-        CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr))
+        Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)))
     );
     let loaded = load_cfa(&original, &LoadCtx::default()).unwrap();
 

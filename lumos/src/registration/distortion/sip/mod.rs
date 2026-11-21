@@ -3,7 +3,8 @@
 //! FITS WCS headers carry SIP's polynomials (Shupe et al. 2005) from pixels to intermediate world
 //! coordinates. This uses their form between two frames instead: it corrects reference pixels
 //! before the linear transform to a target frame, holds the coefficients in coordinates normalized
-//! about the matched stars' centroid, and has no inverse polynomial (`AP`/`BP`). It is not a WCS
+//! about the model's reference point, `SipModel::origin`, and has no inverse polynomial
+//! (`AP`/`BP`). It is not a WCS
 //! SIP solution, and no header is written from it.
 //!
 //! # Model
@@ -117,10 +118,6 @@ pub(crate) struct SipFit {
     pub(crate) sip: SipPolynomial,
 }
 
-/// The secant steps a rotation's joint fit may take: it converges superlinearly from the
-/// unconstrained fit's angle, to rounding within a handful.
-const MAX_SECANT_STEPS: usize = 50;
-
 /// The pairs a SIP fit solves over, and the polynomial's terms and the normalization they are
 /// evaluated in.
 #[derive(Debug)]
@@ -139,13 +136,6 @@ struct JointSolution {
     h: Vec<DVec2>,
 }
 
-/// A fit with its linear part held, and the derivative of its χ² in a rotation's angle.
-#[derive(Debug)]
-struct FixedLinearFit {
-    fit: SipFit,
-    angle_derivative: f64,
-}
-
 impl SipPolynomial {
     /// A transform of `model` and its correction `sip`, fitted together to the joint optimum, as
     /// astrometry.net's `fit_sip_wcs` does: a correction `c` carried through a linear part `A` adds
@@ -153,8 +143,8 @@ impl SipPolynomial {
     /// angle, and `c` is `A⁻¹·H`.
     ///
     /// A translation holds `A = I`, a similarity `A = [a −b; b a]`, an affine map frees `A`. A
-    /// rotation's angle is found by a secant iteration on the optimum's χ² derivative in the angle,
-    /// `2·Σ wᵢ·eᵢ·R′·rᵢ` by the envelope theorem. A homography has no SIP fit: see [`LinearModel`].
+    /// rotation's angle is in closed form ([`SipSystem::fit_rotation`]). A homography has no SIP
+    /// fit: see [`LinearModel`].
     /// `None` when the pairs do not determine the fit, or its linear part is singular.
     pub(crate) fn fit_with(
         model: LinearModel,
@@ -163,9 +153,7 @@ impl SipPolynomial {
     ) -> Option<SipFit> {
         let system = SipSystem::new(pairs, sip);
         match model {
-            LinearModel::Translation => system
-                .fit_fixed(LinearModel::Translation, DMat2::IDENTITY)
-                .map(|fixed| fixed.fit),
+            LinearModel::Translation => system.fit_fixed(LinearModel::Translation, DMat2::IDENTITY),
             LinearModel::Euclidean => system.fit_rotation(),
             LinearModel::Similarity => system.fit_similarity(),
             LinearModel::Affine => system.fit_affine(),
@@ -309,20 +297,16 @@ impl<'a> SipSystem<'a> {
         })
     }
 
-    /// With the pixel linear part held at `linear`, the constant and the terms by one weighted
-    /// solve per axis on `t − A·r`, and the solved warp's weighted χ² and its residuals' first
-    /// moment against `rotate(r)`: the angle derivative a rotation's fit needs.
-    fn fit_fixed(&self, model: LinearModel, linear: DMat2) -> Option<FixedLinearFit> {
+    /// The weighted design of the constant and the terms, one row a pair: what a held linear part
+    /// leaves to solve.
+    fn constant_and_terms(&self) -> DMatrix<f64> {
         let k = self.order.term_count();
-        let n = self.pairs.reference.len();
-        let mut design = DMatrix::zeros(n, 1 + k);
-        let mut rhs = DMatrix::zeros(n, 2);
+        let mut design = DMatrix::zeros(self.pairs.reference.len(), 1 + k);
         let mut basis = [0.0; MAX_TERMS];
-        for (row, ((&r, &t), &w)) in self
+        for (row, (&r, &w)) in self
             .pairs
             .reference
             .iter()
-            .zip(self.pairs.target)
             .zip(self.pairs.weights)
             .enumerate()
         {
@@ -332,79 +316,89 @@ impl<'a> SipSystem<'a> {
             for (col, &value) in basis[..k].iter().enumerate() {
                 design[(row, 1 + col)] = root * value;
             }
-            let rest = t - linear * r;
-            rhs[(row, 0)] = root * rest.x;
-            rhs[(row, 1)] = root * rest.y;
         }
-        let solution = Lstsq::new(design).solve(&rhs)?;
-        let constant = DVec2::new(solution[(0, 0)], solution[(0, 1)]);
-        let h: Vec<DVec2> = (0..k)
-            .map(|i| DVec2::new(solution[(1 + i, 0)], solution[(1 + i, 1)]))
-            .collect();
-        let mut angle_derivative = 0.0;
-        for ((&r, &t), &w) in self
+        design
+    }
+
+    /// With the pixel linear part held at `linear`, the constant and the terms by one weighted
+    /// solve per axis on `t − A·r`.
+    fn fit_fixed(&self, model: LinearModel, linear: DMat2) -> Option<SipFit> {
+        let mut rhs = DMatrix::zeros(self.pairs.reference.len(), 2);
+        for (row, ((&r, &t), &w)) in self
             .pairs
             .reference
             .iter()
             .zip(self.pairs.target)
             .zip(self.pairs.weights)
+            .enumerate()
         {
-            evaluate_basis(self.norm.normalize(r), self.order.terms(), &mut basis[..k]);
-            let correction = h
-                .iter()
-                .zip(&basis[..k])
-                .fold(DVec2::ZERO, |sum, (&term, &value)| sum + term * value);
-            let residual = linear * r + constant + correction - t;
-            // `R′(θ)·r` is the quarter turn of `R(θ)·r`.
-            angle_derivative += 2.0 * w * residual.dot((linear * r).perp());
+            let rest = w.sqrt() * (t - linear * r);
+            rhs[(row, 0)] = rest.x;
+            rhs[(row, 1)] = rest.y;
         }
-        Some(FixedLinearFit {
-            fit: self.assemble(
-                model,
-                JointSolution {
-                    linear,
-                    constant,
-                    h,
-                },
-            )?,
-            angle_derivative,
+        let solution = Lstsq::new(self.constant_and_terms()).solve(&rhs)?;
+        self.held(model, linear, |row| {
+            DVec2::new(solution[(row, 0)], solution[(row, 1)])
         })
     }
 
-    /// The rotation's angle by the secant method on the derivative of the optimum's χ², from the
-    /// similarity's angle, to the rounding of the angle.
+    /// The rotation's joint fit, its angle in closed form. With the angle held, the constant and
+    /// the terms are a weighted linear solve shared by both axes, so the profiled χ² is
+    /// `Σw|P(R(θ)·r − t)|²`, `P` the weighted projector off the constant and the terms; it commutes
+    /// with the rotation, which keeps `|P·r|`, so with `r̃ = P·r` and `t̃ = P·t` the χ² is a constant
+    /// less `2·(C·cos θ + S·sin θ)`, `C = Σw·r̃·t̃` and `S = Σw·r̃ × t̃`, least at `θ = atan2(S, C)`:
+    /// the Procrustes rotation (Schönemann 1966) of the vectors the correction leaves. One solve
+    /// serves the angle and the rest: the solution for `t − R·r` is `t`'s less `R` times `r`'s.
     fn fit_rotation(&self) -> Option<SipFit> {
-        let start = self
-            .fit_similarity()?
-            .transform
-            .local_geometry(DVec2::ZERO)
-            .rotation;
-        let at = |angle: f64| {
-            let (sin, cos) = angle.libm_sin_cos();
-            self.fit_fixed(
-                LinearModel::Euclidean,
-                DMat2::from_cols_array(&[cos, sin, -sin, cos]),
-            )
-        };
-        let (mut prev_angle, mut prev) = (start, at(start)?);
-        let mut angle = start + 1e-6;
-        let mut cur = at(angle)?;
-        for _ in 0..MAX_SECANT_STEPS {
-            let slope = cur.angle_derivative - prev.angle_derivative;
-            if cur.angle_derivative == 0.0 || slope == 0.0 {
-                break;
-            }
-            let next = angle - cur.angle_derivative * (angle - prev_angle) / slope;
-            let step = (next - angle).abs();
-            prev_angle = angle;
-            prev = cur;
-            angle = next;
-            cur = at(angle)?;
-            if step <= 4.0 * f64::EPSILON * angle.abs().max(1.0) {
-                break;
+        let n = self.pairs.reference.len();
+        let mut rhs = DMatrix::zeros(n, 4);
+        for (row, ((&r, &t), &w)) in self
+            .pairs
+            .reference
+            .iter()
+            .zip(self.pairs.target)
+            .zip(self.pairs.weights)
+            .enumerate()
+        {
+            let root = w.sqrt();
+            for (col, value) in [r.x, r.y, t.x, t.y].into_iter().enumerate() {
+                rhs[(row, col)] = root * value;
             }
         }
-        Some(cur.fit)
+        let design = self.constant_and_terms();
+        let solution = Lstsq::new(design.clone()).solve(&rhs)?;
+        let projected = &rhs - &design * &solution;
+        let (mut c, mut s) = (0.0, 0.0);
+        for row in 0..n {
+            let r = DVec2::new(projected[(row, 0)], projected[(row, 1)]);
+            let t = DVec2::new(projected[(row, 2)], projected[(row, 3)]);
+            c += r.dot(t);
+            s += r.perp_dot(t);
+        }
+        let (sin, cos) = s.libm_atan2(c).libm_sin_cos();
+        let linear = DMat2::from_cols_array(&[cos, sin, -sin, cos]);
+        self.held(LinearModel::Euclidean, linear, |row| {
+            let r = DVec2::new(solution[(row, 0)], solution[(row, 1)]);
+            DVec2::new(solution[(row, 2)], solution[(row, 3)]) - linear * r
+        })
+    }
+
+    /// The fit of `model` with its linear part held at `linear`, its constant row 0 of `solved`
+    /// and its terms the rows after.
+    fn held(
+        &self,
+        model: LinearModel,
+        linear: DMat2,
+        solved: impl Fn(usize) -> DVec2,
+    ) -> Option<SipFit> {
+        self.assemble(
+            model,
+            JointSolution {
+                linear,
+                constant: solved(0),
+                h: (1..=self.order.term_count()).map(solved).collect(),
+            },
+        )
     }
 
     /// `A = [a −b; b a]`: the two shared coefficients couple the axes, so both rows of every pair

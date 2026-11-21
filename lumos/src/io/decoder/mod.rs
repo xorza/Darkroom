@@ -3,7 +3,6 @@
 //! of a decoded frame is keyed on, the decode cache's and a calibration master's alike.
 
 pub(crate) mod cfa_decoder;
-pub(crate) mod decode_params;
 pub(crate) mod decode_version;
 pub(crate) mod decoder_kind;
 pub(crate) mod fnv1a;
@@ -14,7 +13,7 @@ use std::path::Path;
 
 use crate::frame::frame_info::{DecoderBytes, FrameInfo};
 use crate::image::flat_gain::shared_gains::SharedGains;
-use crate::image::stackable_image::StackableImage;
+use crate::image::frame::{Frame, Samples};
 use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::io::error::ImageError;
 use crate::io::load_ctx::LoadCtx;
@@ -22,7 +21,7 @@ use crate::io::load_ctx::LoadCtx;
 /// How a frame set's files decode, as one image type: what a run generic over its frames' type
 /// reads them through.
 pub(crate) trait Decoder {
-    type Image: StackableImage;
+    type Samples: Samples;
 
     /// What a header read leaves in hand that the load then takes rather than read again: a
     /// camera RAW's file, read whole for LibRaw to parse its header, or a FITS file's reader, with
@@ -33,7 +32,11 @@ pub(crate) trait Decoder {
     const KIND: DecoderKind;
 
     /// The frame of `path` under `ctx`, the flat gain its file stores shared through `gains`.
-    fn load(path: &Path, ctx: &LoadCtx, gains: &SharedGains) -> Result<Self::Image, ImageError>;
+    fn load(
+        path: &Path,
+        ctx: &LoadCtx,
+        gains: &SharedGains,
+    ) -> Result<Frame<Self::Samples>, ImageError>;
 
     /// The bytes `read` holds.
     fn read_len(read: &Self::Read) -> usize;
@@ -44,7 +47,7 @@ pub(crate) trait Decoder {
         path: &Path,
         ctx: &LoadCtx,
         gains: &SharedGains,
-    ) -> Result<Self::Image, ImageError>;
+    ) -> Result<Frame<Self::Samples>, ImageError>;
 
     /// What a header alone settles about a frame, for a format that can answer without decoding.
     /// `None` when it cannot, or the header does not read, which leaves the caller to decode the
@@ -53,7 +56,7 @@ pub(crate) trait Decoder {
 
     /// What [`Self::load`] of `path` held beside `image`, the frame it made, for a frame
     /// [`Self::peek`] could not answer for before the decode.
-    fn decoded_beside(path: &Path, image: &Self::Image) -> DecoderBytes;
+    fn decoded_beside(path: &Path, image: &Frame<Self::Samples>) -> DecoderBytes;
 }
 
 /// What a header read settles about a frame, and what it read that the frame's load takes.

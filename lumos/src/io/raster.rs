@@ -105,7 +105,7 @@ pub(crate) fn linear(
             .planes_mut()
             .map(|plane| CountedPlane::count(plane.pixels_mut()))
             .collect::<ArrayVec<CountedPlane<'_>, 3>>();
-        ctx.nulls.resolve(&mut planes, size, None)?
+        ctx.decode.nulls.resolve(&mut planes, size, None)?
     };
     image.set_flags(flags);
     // A float raster is taken as it stands, so one sample is one unit of whatever the file already

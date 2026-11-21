@@ -16,9 +16,8 @@ use crate::combine::rejection::Rejection;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::rejection::trim_config::TrimConfig;
-use crate::combine::stack::mean_combine::MeanCombine;
+use crate::combine::stack::rejected_mean::RejectedMean;
 use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
-use crate::combine::stack_config::small_n::SmallN;
 use crate::internals::test_rng::TestRng;
 use common::USize2;
 
@@ -32,9 +31,8 @@ const FULL_WELL_E: f32 = 50_000.0;
 const READ_NOISE_E: f32 = 3.0;
 
 /// Every rejection the configuration offers, at the settings a user starts from, and its name.
-pub(crate) fn rejections() -> [(&'static str, Rejection); 6] {
+pub(crate) fn rejections() -> [(&'static str, Rejection); 5] {
     [
-        ("none", Rejection::None),
         ("sigma_clip", Rejection::sigma_clip(2.5)),
         ("winsorized", Rejection::winsorized(3.0)),
         (
@@ -56,9 +54,9 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 let mut scratch = ScratchBuffers::default();
                 scratch.reserve(frames);
                 let mut values = vec![0.0; frames];
-                let reduce = MeanCombine {
+                let reduce = RejectedMean {
                     rejection,
-                    small_n: SmallN::none(),
+                    small_n: None,
                     min_survivors: DEFAULT_MIN_SURVIVORS,
                     quality: SampleQuality::Measured,
                 }

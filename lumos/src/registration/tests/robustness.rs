@@ -7,7 +7,7 @@ use glam::DVec2;
 
 use crate::internals::synthetic::transforms::{StarScatter, add_star_noise};
 use crate::internals::test_rng::TestRng;
-use crate::registration::error::{ModelFailure, RegistrationError};
+use crate::registration::error::{ModelFailure, RegistrationCatalog, RegistrationError};
 use crate::registration::final_fit::FitModel;
 use crate::registration::final_fit::fit_catalogs::FitCatalogs;
 use crate::registration::match_idxs::MatchIdxs;
@@ -15,12 +15,13 @@ use crate::registration::model_search::ModelSearch;
 use crate::registration::point_pairs::PointPairs;
 use crate::registration::ransac::RansacEstimator;
 use crate::registration::ransac::ransac_config::RansacConfig;
+use crate::registration::registrar::Registrar;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers::{
     self, FWHM_NORMAL, FieldMotion, map_stars, max_deviation,
 };
 use crate::registration::transform::{Transform, TransformType};
-use crate::registration::transform_model::TransformModel;
+use crate::registration::transform_model::{ModelChoice, TransformModel};
 use crate::registration::tuning;
 use crate::star_detection::star::Star;
 
@@ -51,7 +52,6 @@ struct Scenario {
     overlap: bool,
     /// Lift RANSAC's rotation and scale plausibility limits.
     unconstrained: bool,
-    min_stars: usize,
     min_matches: usize,
 }
 
@@ -77,7 +77,6 @@ impl Scenario {
             spurious: 0,
             overlap: false,
             unconstrained: false,
-            min_stars: 6,
             min_matches: 4,
         }
     }
@@ -127,13 +126,13 @@ impl Scenario {
 
     fn config(&self) -> RegistrationConfig {
         let mut config = RegistrationConfig {
-            model: TransformModel::Fixed(self.model),
-            matching: helpers::matching_config(self.min_stars, self.min_matches),
+            model: TransformModel::Plain(ModelChoice::Fixed(self.model)),
+            matching: helpers::matching_config(self.min_matches),
             ..Default::default()
         };
         if self.unconstrained {
             config.ransac = RansacConfig {
-                max_rotation: None,
+                max_rotation_rad: None,
                 scale_range: None,
                 ..Default::default()
             };
@@ -156,16 +155,13 @@ impl Scenario {
     /// is checked over the box the paired reference stars span, where that holds.
     fn check(&self) {
         let catalogs = self.catalogs();
-        let result = self
-            .config()
-            .registrar()
-            .unwrap()
+        let result = Registrar::new(self.config())
             .register(&catalogs.reference, &catalogs.target)
             .unwrap_or_else(|error| panic!("{}: {error}", self.name));
-        let found = result.transform();
+        let found = result.warp().linear();
         assert_eq!(found.transform_type(), self.model, "{}", self.name);
 
-        let mut matched: Vec<MatchIdxs> = result.matched_stars().iter().map(|m| m.idxs).collect();
+        let mut matched: Vec<MatchIdxs> = result.matches().iter().map(|m| m.idxs).collect();
         matched.sort_by_key(|m| (m.reference, m.target));
         assert_eq!(matched, catalogs.pairs, "{}: matched pairs", self.name);
 
@@ -194,10 +190,10 @@ impl Scenario {
         );
         if self.noise == 0.0 {
             assert!(
-                result.rms_error() <= EXACT_FIT_PX,
+                result.rms_error_px() <= EXACT_FIT_PX,
                 "{}: rms {}",
                 self.name,
-                result.rms_error()
+                result.rms_error_px()
             );
         }
     }
@@ -359,7 +355,6 @@ fn every_model_recovers_an_exact_transform() {
         Scenario {
             stars: 200,
             side: 3000.0,
-            min_stars: 10,
             min_matches: 8,
             ..Scenario::new(
                 "dense field, large shift and scale",
@@ -499,10 +494,7 @@ fn a_mirrored_field_is_refused() {
         Transform::affine([-1.0, 0.0, 2000.0, 0.0, 1.0, 0.0]),
     );
     let catalogs = scenario.catalogs();
-    let error = scenario
-        .config()
-        .registrar()
-        .unwrap()
+    let error = Registrar::new(scenario.config())
         .register(&catalogs.reference, &catalogs.target)
         .unwrap_err();
     assert!(
@@ -564,7 +556,6 @@ fn missing_and_spurious_stars_are_left_out() {
             stars: 120,
             spurious: 20,
             seed: 16,
-            min_stars: 8,
             min_matches: 6,
             ..Scenario::new(
                 "homography with spurious stars",
@@ -694,7 +685,6 @@ fn noisy_positions_fit_within_their_noise() {
             overlap: true,
             stars: 150,
             seed: 35,
-            min_stars: 8,
             min_matches: 6,
             ..Scenario::new(
                 "homography, ±0.3 px, 85% overlap",
@@ -706,13 +696,13 @@ fn noisy_positions_fit_within_their_noise() {
 }
 
 /// The smallest catalogs that register: six stars for a translation and eight for a similarity,
-/// at `min_stars` 4 and `min_matches` 3 — and three stars are refused before any matching.
+/// at `min_matches` 3 — and three stars, below a similarity's gate of four, are refused before
+/// any matching.
 #[test]
 fn the_smallest_catalogs_register_and_three_stars_do_not() {
     let small = |name, model, truth, stars| Scenario {
         stars,
         side: 1000.0,
-        min_stars: 4,
         min_matches: 3,
         ..Scenario::new(name, model, truth)
     };
@@ -738,18 +728,21 @@ fn the_smallest_catalogs_register_and_three_stars_do_not() {
 
     let three = small(
         "three stars",
-        TransformType::Translation,
+        TransformType::Similarity,
         Transform::translation(DVec2::new(10.0, 5.0)),
         3,
     );
     let catalogs = three.catalogs();
-    let result = three
-        .config()
-        .registrar()
-        .unwrap()
-        .register(&catalogs.reference, &catalogs.target);
+    let result = Registrar::new(three.config()).register(&catalogs.reference, &catalogs.target);
     assert!(
-        matches!(result, Err(RegistrationError::TooFewStars { found: 3, .. })),
+        matches!(
+            result,
+            Err(RegistrationError::TooFewStars {
+                catalog: RegistrationCatalog::Reference,
+                found: 3,
+                required: 4
+            })
+        ),
         "expected TooFewStars {{ found: 3 }}, got {result:?}"
     );
 }
@@ -779,7 +772,7 @@ fn a_fit_on_fewer_inliers_than_min_matches_is_refused() {
         })
         .collect();
     let mut config = RegistrationConfig {
-        model: TransformModel::Fixed(TransformType::Translation),
+        model: TransformModel::Plain(ModelChoice::Fixed(TransformType::Translation)),
         ..RegistrationConfig::default()
     };
     config.ransac.seed = 1;
@@ -792,7 +785,7 @@ fn a_fit_on_fewer_inliers_than_min_matches_is_refused() {
         ransac: RansacEstimator::new(config.ransac, 1.0),
         recovery_radius: tuning::recovery_radius(1.0),
         min_matches: config.matching.min_matches,
-        max_rms_error: config.max_rms_error,
+        max_rms_error_px: config.max_rms_error_px,
     };
     let error = search
         .estimate_and_refine(FitModel::Plain(TransformType::Translation))

@@ -6,6 +6,8 @@ use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::flags::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::internals::cfa::XTRANS_PATTERN;
+use crate::io::decode_config::DecodeConfig;
+use crate::io::error::LoadError;
 use crate::io::raw::unpacked_raw::{instrument, planes, saturation_level};
 use crate::io::raw::*;
 use common::USize2;
@@ -26,24 +28,24 @@ fn load_invalid_path() {
     // refuses is a `Raw` one, pinned by `load_rejects_invalid_files`.
     let error = load_preview(path, &LoadCtx::default()).unwrap_err();
     assert!(
-        matches!(&error, ImageError::Io { path: io_path, .. } if io_path == path),
+        matches!(&error, ImageError { path: io_path, kind: LoadError::Io(_) } if io_path == path),
         "a missing file should read as an Io error, got: {error}",
     );
 
     let cancel = CancelToken::new();
     cancel.cancel();
-    let cancelled = LoadCtx::new(cancel);
+    let cancelled = LoadCtx::new(DecodeConfig::default(), cancel);
     assert!(matches!(
         load_preview(path, &cancelled),
-        Err(ImageError::Cancelled { path: error_path }) if error_path == path
+        Err(ImageError { path: error_path, kind: LoadError::Cancelled }) if error_path == path
     ));
     assert!(matches!(
         load_cfa(path, &cancelled),
-        Err(ImageError::Cancelled { path: error_path }) if error_path == path
+        Err(ImageError { path: error_path, kind: LoadError::Cancelled }) if error_path == path
     ));
     assert!(matches!(
         cfa_peek(path, &cancelled),
-        Err(ImageError::Cancelled { path: error_path }) if error_path == path
+        Err(ImageError { path: error_path, kind: LoadError::Cancelled }) if error_path == path
     ));
 }
 
@@ -82,8 +84,8 @@ fn load_rejects_invalid_files() {
         assert!(
             matches!(
                 &error,
-                ImageError::Raw {
-                    source: RawError::Libraw(LibrawError::Open(_)),
+                ImageError {
+                    kind: LoadError::Raw(RawError::Libraw(LibrawError::Open(_))),
                     ..
                 }
             ),
@@ -457,8 +459,11 @@ fn a_cancelled_token_stops_libraw() {
         "{error:?}"
     );
     assert!(matches!(
-        ImageError::raw(path, error),
-        ImageError::Cancelled { .. }
+        ImageError::new(path, error),
+        ImageError {
+            kind: LoadError::Cancelled,
+            ..
+        }
     ));
 }
 

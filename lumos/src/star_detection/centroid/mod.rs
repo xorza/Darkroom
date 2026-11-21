@@ -8,6 +8,7 @@
 //! narrowing in the middle, and would quantize coarser than the centroid's tolerance beyond
 //! x ≈ 1024.
 
+mod circular_aperture;
 mod covariance;
 mod gaussian_fit;
 pub(super) mod measure_grid;
@@ -186,6 +187,7 @@ impl MeasurePlanes<'_> {
         let metrics = StampMetrics::measure(
             stamp_at(pos),
             grid.window_sigma,
+            grid.aperture,
             StarBg {
                 offset: annulus_bg.map_or(0.0, |local| local.offset),
                 noise: annulus_bg.map_or(noise, |local| StarNoise {
@@ -215,10 +217,26 @@ impl MeasurePlanes<'_> {
             eccentricity,
             snr: metrics.snr,
             peak: metrics.peak,
-            saturated: saturation.get_at(region.peak),
+            // Any saturated pixel within the star's half-width of its peak: a clipped core is a
+            // plateau, whose highest sample need not be the one clipped.
+            saturated: saturation.any_in_square(region.peak, core_radius(fwhm)),
             sharpness: metrics.sharpness,
             roundness: metrics.roundness,
         })
+    }
+}
+
+/// The half-width, in whole pixels and at least one, around a star's peak its core spans.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "the half-width is finite and past 1 where it is cast"
+)]
+fn core_radius(fwhm: f32) -> usize {
+    let half = (0.5 * fwhm).ceil();
+    if half.is_finite() && half > 1.0 {
+        half as usize
+    } else {
+        1
     }
 }
 

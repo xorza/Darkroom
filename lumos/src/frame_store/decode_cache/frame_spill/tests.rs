@@ -6,7 +6,7 @@ use fits_well::image::SampleType;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::frame::admitted::Admitted;
-use crate::frame::capture_conditions::CaptureConditions;
+use crate::frame::capture_conditions::{CaptureConditions, SensorSetting};
 use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_stats::{FrameStats, SlotSpread};
 use crate::frame_store::decode_cache::cache_key::CacheKey;
@@ -75,6 +75,13 @@ fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> Admitted {
             exposure_time: Some(300.0),
             ccd_temp: Some(-10.0),
             camera_temp: Some(21.5),
+            setting: SensorSetting {
+                gain: Some(120.0),
+                iso: None,
+                offset: Some(30),
+                xbinning: Some(1),
+                ybinning: Some(1),
+            },
         },
         dark_comparison: Some(DarkComparison {
             exposure_compared: true,
@@ -126,7 +133,6 @@ fn metadata() -> ImageMetadata {
             dec_deg: Some(-5.39),
             pixel_size_x: Some(3.76),
             pixel_size_y: Some(3.76),
-            data_max: Some(65535.0),
         },
         derived: DerivedFacts::builder()
             .provenance(ImageProvenance {

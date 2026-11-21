@@ -6,41 +6,18 @@ use thiserror::Error;
 
 use crate::error::{Cancelled, InvalidConfigField};
 use crate::frame::frame_plane::FramePlane;
-use crate::frame_store::error::{FrameStoreError, LoadError};
+use crate::frame_store::error::{FrameLoadError, FrameStoreError};
 use crate::image::error::FrameDimensionMismatch;
 use crate::ingest::error::AdmissionError;
-use crate::io::error::ImageError;
+use crate::io::error::{ImageError, LoadError};
 use common::USize2;
-
-/// Invalid [`crate::StackConfig`] parameters.
-///
-/// Plain range checks report through [`InvalidConfigField`]; the variants below are the
-/// constraints that aren't one: a per-element check and the ones that span the weights or fields.
-#[derive(Debug, Error, Clone, PartialEq)]
-pub enum StackConfigError {
-    #[error(transparent)]
-    Field(#[from] InvalidConfigField),
-
-    #[error(
-        "manual weight {idx} must be finite and positive, got {value}: drop a frame from the set rather than weigh it 0"
-    )]
-    InvalidManualWeight { idx: usize, value: f32 },
-
-    #[error("manual weights must contain at least one value, with a finite sum")]
-    InvalidManualWeightSum,
-
-    #[error("manual weight count {actual} does not match frame count {expected}")]
-    ManualWeightCountMismatch { expected: usize, actual: usize },
-
-    #[error("small-stack fallback must not use pixel rejection")]
-    RejectingSmallNFallback,
-}
 
 /// Errors that can occur during stacking operations.
 #[derive(Debug, Error)]
 pub enum StackError {
+    /// A [`crate::StackConfig`] parameter outside its range.
     #[error(transparent)]
-    Config(#[from] StackConfigError),
+    Config(#[from] InvalidConfigField),
 
     #[error(transparent)]
     FrameStore(#[from] FrameStoreError),
@@ -81,7 +58,7 @@ pub enum StackError {
 
     /// `Weighting::Noise` weighs each frame by its inverse noise variance, and this frame measured
     /// none: only synthetic data has no noise at all.
-    #[error("frame {idx} has no measured noise to weight by; use Equal or Manual weighting")]
+    #[error("frame {idx} has no measured noise to weight by; use Equal weighting")]
     NoNoiseToWeigh { idx: usize },
 
     /// [`RejectionScale::CcdModel`](crate::RejectionScale::CcdModel) holds each sample to its own
@@ -113,29 +90,11 @@ pub enum StackError {
     Admission(AdmissionError),
 }
 
-impl StackConfigError {
-    /// The error with each frame index it holds, a position in the list it was raised over, read
-    /// through `inputs` into the caller's own numbering of those frames.
-    pub(crate) const fn renumbered(self, inputs: &[usize]) -> Self {
-        match self {
-            Self::InvalidManualWeight { idx, value } => Self::InvalidManualWeight {
-                idx: inputs[idx],
-                value,
-            },
-            error @ (Self::Field(_)
-            | Self::InvalidManualWeightSum
-            | Self::ManualWeightCountMismatch { .. }
-            | Self::RejectingSmallNFallback) => error,
-        }
-    }
-}
-
 impl StackError {
     /// The error with each frame index it holds, a position in the list it was raised over, read
     /// through `inputs` into the caller's own numbering of those frames.
     pub(crate) fn renumbered(self, inputs: &[usize]) -> Self {
         match self {
-            Self::Config(error) => Self::Config(error.renumbered(inputs)),
             Self::NonPositiveMedian { idx, slot, median } => Self::NonPositiveMedian {
                 idx: inputs[idx],
                 slot,
@@ -166,7 +125,8 @@ impl StackError {
                 actual,
             },
             Self::Admission(error) => Self::Admission(error.renumbered(inputs)),
-            error @ (Self::FrameStore(_)
+            error @ (Self::Config(_)
+            | Self::FrameStore(_)
             | Self::NoFrames
             | Self::Cancelled
             | Self::NoCommonCoverage
@@ -195,18 +155,18 @@ impl From<AdmissionError> for StackError {
 /// error behind and reports as the stack's own.
 impl From<ImageError> for StackError {
     fn from(error: ImageError) -> Self {
-        match error {
-            ImageError::Cancelled { .. } => Self::Cancelled,
-            error => Self::ImageLoad(error),
+        match error.kind {
+            LoadError::Cancelled => Self::Cancelled,
+            _ => Self::ImageLoad(error),
         }
     }
 }
 
-impl From<LoadError> for StackError {
-    fn from(error: LoadError) -> Self {
+impl From<FrameLoadError> for StackError {
+    fn from(error: FrameLoadError) -> Self {
         match error {
-            LoadError::Decode(error) => error.into(),
-            LoadError::Store(error) => error.into(),
+            FrameLoadError::Decode(error) => error.into(),
+            FrameLoadError::Store(error) => error.into(),
         }
     }
 }
@@ -317,32 +277,30 @@ mod tests {
     #[test]
     fn a_load_failure_states_the_path_once_and_stays_typed() {
         let path = PathBuf::from("/path/to/image.fits");
-        let error = StackError::from(ImageError::Io {
-            path,
-            source: io::Error::new(io::ErrorKind::NotFound, "file not found"),
-        });
+        let error = StackError::from(ImageError::new(
+            &path,
+            io::Error::new(io::ErrorKind::NotFound, "file not found"),
+        ));
 
-        assert_eq!(
-            error.to_string(),
-            "failed to read file '/path/to/image.fits'"
-        );
+        assert_eq!(error.to_string(), "failed to load '/path/to/image.fits'");
         let message = ErrorChain::new(&error).to_string();
         assert_eq!(
             message,
-            "failed to read file '/path/to/image.fits': file not found"
+            "failed to load '/path/to/image.fits': failed to read the file: file not found"
         );
         assert_eq!(message.matches("/path/to/image.fits").count(), 1);
         assert!(matches!(
             error,
-            StackError::ImageLoad(ImageError::Io { .. })
+            StackError::ImageLoad(ImageError {
+                kind: LoadError::Io(_),
+                ..
+            })
         ));
 
         let source = error.source().expect("the decode's own cause");
-        assert!(source.downcast_ref::<io::Error>().is_some(), "{source}");
+        assert!(source.downcast_ref::<LoadError>().is_some(), "{source}");
 
-        let cancelled = StackError::from(ImageError::Cancelled {
-            path: PathBuf::from("/path/to/image.fits"),
-        });
+        let cancelled = StackError::from(ImageError::new(&path, LoadError::Cancelled));
         assert!(matches!(cancelled, StackError::Cancelled), "{cancelled:?}");
     }
 

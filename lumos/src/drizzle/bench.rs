@@ -51,7 +51,7 @@ fn stage(c: &mut Criterion) {
         let frames: &Vec<DrizzleFrame<LinearImage>> = frames.get_or_init(|| {
             (0..STACKED_LIGHTS)
                 .map(|idx| {
-                    let warp = WarpTransform::new(scene::dither(SIDE, idx));
+                    let warp = WarpTransform::from(scene::dither(SIDE, idx));
                     DrizzleFrame::new(field.exposure(SIDE, idx).image, warp)
                 })
                 .collect()
@@ -95,7 +95,7 @@ fn end_to_end(c: &mut Criterion) {
                     .iter()
                     .enumerate()
                     .map(|(idx, path)| {
-                        DrizzleFrame::new(path, WarpTransform::new(scene::dither(FRAME, idx)))
+                        DrizzleFrame::new(path, WarpTransform::from(scene::dither(FRAME, idx)))
                     })
                     .collect()
             },

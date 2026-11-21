@@ -24,8 +24,10 @@ use crate::io::load_ctx::LoadCtx;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::fits::error::{ProductError, ProductRefusal};
-use crate::stack_product::run_report::RunReport;
-use crate::stack_product::weight_kind::WeightKind;
+use crate::stack_product::run_report::{
+    CalibrationReport, CombineReport, DrizzleReport, MemoryReport, RunReport,
+};
+use crate::stack_product::weight_plane::{WeightKind, WeightPlane};
 use common::USize2;
 
 /// An edit of one HDU of a file, by index: its header and data, `false` to drop it.
@@ -82,41 +84,49 @@ fn rgb_product() -> StackProduct {
             flags,
         ),
         coverage: Some(Coverage::PerPixel(QualityMap::Shared(plane(30.0)))),
-        weight: Some(QualityMap::PerChannel([
-            plane(40.0),
-            plane(41.0),
-            plane(42.0),
-        ])),
-        weight_kind: WeightKind::InverseVariance,
+        weight: Some(WeightPlane {
+            map: QualityMap::PerChannel([plane(40.0), plane(41.0), plane(42.0)]),
+            kind: WeightKind::InverseVariance,
+        }),
         inverse_variance: Some(QualityMap::PerChannel(inverse_variance)),
         dispersion: Some(QualityMap::PerChannel(dispersion)),
         cfa_type: None,
         report: RunReport {
-            excluded_samples: FlagCounts::from_per_bit(excluded_samples),
-            kept_flagged_samples: FlagCounts::from_per_bit(kept_flagged_samples),
-            variance_bg_only: true,
-            unverified_dark_exposures: 1,
-            unverified_dark_temperatures: 2,
-            camera_temperature_darks: 3,
-            dark_temperature_differences: 4,
-            scaled_darks: 5,
-            fitted_dark_scales: 6,
-            flat_dark: Some(DarkComparison {
-                exposure_compared: false,
-                temperature: Some(TemperatureSource::Sensor),
-                temperature_difference: Some(TemperatureDifference {
-                    reading: TemperatureSource::Sensor,
-                    frame: -10.0,
-                    dark: -8.5,
+            combine: CombineReport {
+                excluded_samples: FlagCounts::from_per_bit(excluded_samples),
+                kept_flagged_samples: FlagCounts::from_per_bit(kept_flagged_samples),
+                small_n_fallback_pixels: 10,
+                variance_bg_only: true,
+            },
+            memory: MemoryReport {
+                spilled_frames: 9,
+                parked_lights: 12,
+                overcommit_bytes: 11,
+                planned_peak_bytes: Some(14),
+            },
+            calibration: Some(CalibrationReport {
+                unverified_dark_exposures: 1,
+                unverified_dark_temperatures: 2,
+                unverified_settings: 15,
+                filter_differences: 16,
+                camera_temperature_darks: 3,
+                dark_temperature_differences: 4,
+                scaled_darks: 5,
+                fitted_dark_scales: 6,
+                flat_dark: Some(DarkComparison {
+                    exposure_compared: false,
+                    temperature: Some(TemperatureSource::Sensor),
+                    temperature_difference: Some(TemperatureDifference {
+                        reading: TemperatureSource::Sensor,
+                        frame: -10.0,
+                        dark: -8.5,
+                    }),
                 }),
+                floored_flat_pixels: 8,
             }),
-            floored_flat_pixels: 8,
-            spilled_frames: 9,
-            small_n_fallback_pixels: 10,
-            overcommit_bytes: 11,
-            planned_peak_bytes: Some(14),
-            parked_lights: 12,
-            unconverged_points: 13,
+            drizzle: Some(DrizzleReport {
+                unconverged_points: 13,
+            }),
         },
     }
 }
@@ -180,7 +190,11 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
         unreachable!()
     };
     assert_map_eq(Some(coverage), Some(written_coverage), "coverage");
-    assert_map_eq(read.weight.as_ref(), written.weight.as_ref(), "weight");
+    assert_map_eq(
+        read.weight.as_ref().map(|weight| &weight.map),
+        written.weight.as_ref().map(|weight| &weight.map),
+        "weight",
+    );
     assert_map_eq(
         read.inverse_variance.as_ref(),
         written.inverse_variance.as_ref(),
@@ -218,7 +232,7 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
     assert_eq!(scaling(4), Scaling::IDENTITY);
     assert_eq!(scaling(5).bscale, 1.0 / (SCALE * SCALE));
     assert_eq!(scaling(6).bscale, SCALE * SCALE);
-    assert_eq!(read.weight_kind, WeightKind::InverseVariance);
+    assert_eq!(read.weight.unwrap().kind, WeightKind::InverseVariance);
     assert_eq!(
         file.hdus()[0].header.get_text("LUMWGTK").unwrap(),
         Some("INVERSE_VARIANCE")
@@ -249,23 +263,22 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
     assert_eq!(bits(alone.channel(1)), bits(read.image.channel(1)));
 }
 
-/// A monochrome product of undemosaiced Bayer frames: its pattern comes back, its coverage of one
-/// value too, held as a keyword rather than a plane of that value, and of its planes only the
-/// weight it holds, a count, which no scale changes. With no pixel of no data it writes no `MASK`. A linear image written alone
+/// A monochrome product of undemosaiced Bayer frames: its pattern comes back, its full coverage
+/// too, held as a logical rather than a plane of 1, and of its planes only the weight it holds, a
+/// count, which no scale changes. With no pixel of no data it writes no `MASK`. A linear image written alone
 /// reloads as itself, an RGB one as a cube no load option has to name.
 #[test]
-fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
+fn a_mosaic_product_keeps_its_pattern_and_its_full_coverage() {
     let dir = TempDir::new("product-mosaic");
     let path = dir.join("product.fits");
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Gbrg));
     let written = StackProduct {
         image: image(PlanarImage::new_mono(plane(0.0)), None),
-        coverage: Some(Coverage::Uniform {
-            value: 0.75,
-            size: SIZE,
+        coverage: Some(Coverage::Full),
+        weight: Some(WeightPlane {
+            map: QualityMap::Shared(plane(1.0)),
+            kind: WeightKind::Count,
         }),
-        weight: Some(QualityMap::Shared(plane(1.0))),
-        weight_kind: WeightKind::Count,
         inverse_variance: None,
         dispersion: None,
         cfa_type: Some(cfa_type),
@@ -274,14 +287,12 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
     written.write_fits(&path).unwrap();
     let read = StackProduct::read_fits(&path, &LoadCtx::default()).unwrap();
     assert_eq!(read.cfa_type, Some(cfa_type));
-    assert!(matches!(
-        read.coverage,
-        Some(Coverage::Uniform {
-            value: 0.75,
-            size: SIZE
-        })
-    ));
-    assert_map_eq(read.weight.as_ref(), written.weight.as_ref(), "weight");
+    assert!(matches!(read.coverage, Some(Coverage::Full)));
+    assert_map_eq(
+        read.weight.as_ref().map(|weight| &weight.map),
+        written.weight.as_ref().map(|weight| &weight.map),
+        "weight",
+    );
     assert!(read.inverse_variance.is_none() && read.dispersion.is_none());
     assert_eq!(bits(read.image.channel(0)), bits(written.image.channel(0)));
     assert_eq!(read.report, RunReport::default());
@@ -289,10 +300,30 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
     let file = FitsReader::from_bytes(&bytes).unwrap();
     assert_eq!(file.hdus().len(), 2, "the primary and WEIGHT");
     assert_eq!(
+        file.hdus()[0].header.get_logical("LUMCOVU").unwrap(),
+        Some(true)
+    );
+    assert_eq!(
         file.hdus()[1].image_metadata().unwrap().scaling,
         Scaling::IDENTITY
     );
-    assert_eq!(read.weight_kind, WeightKind::Count);
+    assert_eq!(read.weight.unwrap().kind, WeightKind::Count);
+
+    // Without a weight plane no kind is written, and a full coverage is no longer stated once a
+    // plane holds it.
+    let bare = StackProduct {
+        coverage: None,
+        weight: None,
+        ..written
+    };
+    bare.write_fits(&path).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let file = FitsReader::from_bytes(&bytes).unwrap();
+    let header = &file.hdus()[0].header;
+    assert_eq!(header.get_text("LUMWGTK").unwrap(), None);
+    assert_eq!(header.get_logical("LUMCOVU").unwrap(), None);
+    let read = StackProduct::read_fits(&path, &LoadCtx::default()).unwrap();
+    assert!(read.weight.is_none() && read.coverage.is_none());
 
     let rgb = rgb_product().image;
     let linear_path = dir.join("linear.fits");
@@ -363,13 +394,13 @@ fn a_product_edited_out_of_its_format_is_refused() {
             "another product version",
             Box::new(|idx, header, _| {
                 if idx == 0 {
-                    header.set("LUMPRODV", 3).unwrap();
+                    header.set("LUMPRODV", 5).unwrap();
                 }
                 true
             }),
             Refused::from(ProductRefusal::Version {
-                version: 3,
-                expected: 2,
+                version: 5,
+                expected: 4,
             }),
         ),
         (
@@ -395,6 +426,11 @@ fn a_product_edited_out_of_its_format_is_refused() {
             Refused::from(FitsRefusal::KeywordOutOfRange {
                 keyword: "LUMWGTK".to_owned(),
             }),
+        ),
+        (
+            "a weight kind without its plane",
+            Box::new(|idx, _, _| idx != 5),
+            Refused::from(ProductRefusal::WeightKindAlone),
         ),
         (
             "inverse-variance weights named a count",
@@ -423,6 +459,18 @@ fn a_product_edited_out_of_its_format_is_refused() {
             }),
             Refused::from(FitsRefusal::MissingKeyword {
                 keyword: "LUMSPIL".to_owned(),
+            }),
+        ),
+        (
+            "a calibration group in part",
+            Box::new(|idx, header, _| {
+                if idx == 0 {
+                    header.remove("LUMSCDK").unwrap();
+                }
+                true
+            }),
+            Refused::from(FitsRefusal::MissingKeyword {
+                keyword: "LUMSCDK".to_owned(),
             }),
         ),
         (
@@ -466,14 +514,26 @@ fn a_product_edited_out_of_its_format_is_refused() {
             Refused::from(ProductRefusal::MaskDisagrees { idx: NO_DATA_PIXEL }),
         ),
         (
-            "a uniform coverage beside its plane",
+            "a full coverage beside its plane",
             Box::new(|idx, header, _| {
                 if idx == 0 {
-                    header.set("LUMCOVU", 1.0).unwrap();
+                    header.set("LUMCOVU", true).unwrap();
                 }
                 true
             }),
             Refused::from(ProductRefusal::CoverageTwice),
+        ),
+        (
+            "a full coverage denied",
+            Box::new(|idx, header, _| {
+                if idx == 0 {
+                    header.set("LUMCOVU", false).unwrap();
+                }
+                true
+            }),
+            Refused::from(FitsRefusal::KeywordOutOfRange {
+                keyword: "LUMCOVU".to_owned(),
+            }),
         ),
     ];
     for (name, edit, refusal) in cases {

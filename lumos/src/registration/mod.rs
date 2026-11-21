@@ -6,22 +6,22 @@
 //! # Quick Start
 //!
 //! ```no_run
-//! use lumos::{LinearImage, RegistrationConfig, Star, WarpConfig};
+//! use lumos::{LinearImage, Registrar, RegistrationConfig, Star, WarpConfig};
 //!
 //! # fn example(ref_stars: &[Star], target_stars: &[Star], target_image: &LinearImage)
 //! # -> Result<(), Box<dyn std::error::Error>> {
-//! let config = RegistrationConfig::default();
+//! let registrar = Registrar::checked(RegistrationConfig::default())?;
 //!
 //! // Register stars from two images
-//! let result = config.registrar()?.register(ref_stars, target_stars)?;
+//! let result = registrar.register(ref_stars, target_stars)?;
 //! println!(
 //!     "Matched {} stars, RMS = {:.2}px",
-//!     result.inlier_count(),
-//!     result.rms_error()
+//!     result.matches().len(),
+//!     result.rms_error_px()
 //! );
 //!
 //! // Reproject the target onto the reference's grid, into a new image
-//! let aligned = WarpConfig::default().warp(target_image, result.warp_transform());
+//! let aligned = WarpConfig::default().warp(target_image, result.warp());
 //! # Ok(())
 //! # }
 //! ```
@@ -46,14 +46,14 @@
 //!   chooses up to an affine map, for wide-field lenses
 //! - [`RegistrationConfig::precise_wide_field()`][precise_wide_field] — `wide_field` with
 //!   `precise`'s iteration budget and RMS gate, more stars and tighter matching
-//! - [`RegistrationConfig::mosaic()`][mosaic] — Allows larger rotations and scale differences
+//! - [`RegistrationConfig::wide_scale()`][wide_scale] — Allows any rotation and scales from half to twice
 //!
 //! [default]: registration_config::RegistrationConfig::default
 //! [fast]: registration_config::RegistrationConfig::fast
 //! [precise]: registration_config::RegistrationConfig::precise
 //! [wide_field]: registration_config::RegistrationConfig::wide_field
 //! [precise_wide_field]: registration_config::RegistrationConfig::precise_wide_field
-//! [mosaic]: registration_config::RegistrationConfig::mosaic
+//! [wide_scale]: registration_config::RegistrationConfig::wide_scale
 
 pub(crate) mod distortion;
 pub(crate) mod error;

@@ -5,6 +5,7 @@ fn conditions(exposure_time: Option<f64>, ccd_temp: Option<f64>) -> CaptureCondi
         exposure_time,
         ccd_temp,
         camera_temp: None,
+        setting: SensorSetting::default(),
     }
 }
 
@@ -94,4 +95,82 @@ fn the_first_frame_out_of_range_is_named_against_the_far_end() {
     );
     assert_eq!(CaptureConditions::check_exposures(drifting), Ok(()));
     assert_eq!(CaptureConditions::shared(drifting).ccd_temp, None);
+}
+
+/// A setting is shared where every frame states it alike, and a set that differs on one is
+/// refused on the first setting, in order, a frame differs on: gain 120 against 100 at frame 1.
+/// Comparing a master with a frame refuses a setting both state and differ on, and is partial
+/// where one side alone states one, or neither states any.
+#[test]
+fn settings_are_shared_and_compared_by_equality() {
+    let set = |gain, iso| CaptureConditions {
+        setting: SensorSetting {
+            gain,
+            iso,
+            offset: Some(30),
+            ..SensorSetting::default()
+        },
+        ..conditions(Some(120.0), None)
+    };
+    let shared = CaptureConditions::shared([set(Some(120.0), None), set(Some(120.0), Some(800))]);
+    assert_eq!(
+        shared.setting,
+        SensorSetting {
+            gain: Some(120.0),
+            iso: None,
+            offset: Some(30),
+            ..SensorSetting::default()
+        }
+    );
+    assert_eq!(
+        CaptureConditions::check_settings([set(Some(120.0), None), set(Some(100.0), None)]),
+        Err(ConditionMismatch {
+            condition: CaptureCondition::Gain,
+            idx: 1,
+            value: 100.0,
+            reference_idx: 0,
+            reference: 120.0,
+        })
+    );
+    assert_eq!(
+        CaptureConditions::check_settings([set(Some(120.0), None), set(None, Some(800))]),
+        Ok(())
+    );
+
+    let iso = |iso| SensorSetting {
+        iso,
+        ..SensorSetting::default()
+    };
+    assert_eq!(
+        iso(Some(1600)).compare(iso(Some(800))),
+        Err(SettingMismatch {
+            condition: CaptureCondition::Iso,
+            frame: 1600.0,
+            master: 800.0,
+        })
+    );
+    assert_eq!(
+        iso(Some(1600)).compare(iso(Some(1600))),
+        Ok(SettingsCompared::All)
+    );
+    assert_eq!(
+        iso(Some(1600)).compare(iso(None)),
+        Ok(SettingsCompared::Partly)
+    );
+    assert_eq!(iso(None).compare(iso(None)), Ok(SettingsCompared::Partly));
+    // Binning alone is compared for a flat: its gain may differ.
+    let binned = |gain, xbinning| SensorSetting {
+        gain: Some(gain),
+        xbinning: Some(xbinning),
+        ..SensorSetting::default()
+    };
+    assert_eq!(binned(120.0, 1).compare_binning(binned(0.0, 1)), Ok(()));
+    assert_eq!(
+        binned(120.0, 1).compare_binning(binned(120.0, 2)),
+        Err(SettingMismatch {
+            condition: CaptureCondition::XBinning,
+            frame: 1.0,
+            master: 2.0,
+        })
+    );
 }

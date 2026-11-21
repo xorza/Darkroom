@@ -2,37 +2,69 @@ use std::path::Path;
 use std::{array, slice};
 
 use arrayvec::ArrayVec;
-use common::{Buffer2, USize2, par};
+use common::{Buffer2, par};
 use imaginarium::{InterleavedImage, PlanarDesc, PlanarImage};
 use rayon::prelude::*;
 
 use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flags::pixel_flags::PixelFlags;
-use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::frame_desc;
+use crate::image::frame::{Frame, sealed};
 use crate::image::intensity::Intensity;
 use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::rgb::Rgb;
-use crate::image::stackable_image::{ImageParts, StackableImage};
 use crate::io::error::WriteError;
 use crate::io::{fits, raster};
 
 /// A one- or three-channel floating-point image in a linear numeric domain.
-#[derive(Debug, Clone)]
-pub struct LinearImage {
-    pub metadata: ImageMetadata,
-    pixels: PlanarImage,
-    /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
-    /// [`QualityFlags::NO_DATA`](crate::image::flags::quality_flags::QualityFlags::NO_DATA) are a finite
-    /// fill, not data.
-    flags: Option<PixelFlags>,
-    /// The gain a flat applied to each pixel's value and noise, in this image's own pixels — see
-    /// [`FrameGain`]. `None` for an image no flat divided, and for a master, which the combine made.
-    flat_gain: Option<FrameGain>,
+pub type LinearImage = Frame<PlanarImage>;
+
+impl sealed::Planes for PlanarImage {
+    type Pattern = ();
+
+    fn desc(&self) -> PlanarDesc {
+        Self::desc(self)
+    }
+
+    fn channel(&self, channel: usize) -> &Buffer2<f32> {
+        Self::channel(self, channel)
+    }
+
+    fn pattern(&self) {}
+
+    fn cfa_type(&self) -> Option<CfaType> {
+        None
+    }
+
+    fn pattern_of(cfa_type: Option<CfaType>) -> Option<()> {
+        cfa_type.is_none().then_some(())
+    }
+
+    fn gain_channels(&self) -> usize {
+        self.channel_count()
+    }
+
+    fn into_planes(self) -> ArrayVec<Buffer2<f32>, 3> {
+        if self.is_mono() {
+            ArrayVec::from_iter([self.into_mono()])
+        } else {
+            ArrayVec::from(self.into_rgb())
+        }
+    }
+
+    fn from_planes(planes: ArrayVec<Buffer2<f32>, 3>, (): ()) -> Self {
+        match planes.into_inner() {
+            Ok(rgb) => Self::new_rgb(rgb),
+            Err(mut mono) => {
+                let plane = mono.pop().expect("an image has one plane or three");
+                assert!(mono.is_empty(), "an image has one plane or three");
+                Self::new_mono(plane)
+            }
+        }
+    }
 }
 
-impl LinearImage {
+impl Frame<PlanarImage> {
     /// Write the image to `path` as a checksummed floating-point FITS file: a plane or an RGB
     /// cube, with its flags and flat gain in `LUMFLAGS` and `LUMGAIN` extensions beside it;
     /// [`LoadCtx::linear`](crate::LoadCtx::linear) reads it back.
@@ -54,13 +86,7 @@ impl LinearImage {
         flags: Option<PixelFlags>,
         metadata: ImageMetadata,
     ) -> Self {
-        frame_desc::assert_frame(pixels.desc());
-        let mut image = Self {
-            metadata,
-            pixels,
-            flags: None,
-            flat_gain: None,
-        };
+        let mut image = Self::of(pixels, metadata);
         image.set_flags(flags);
         image
     }
@@ -80,10 +106,6 @@ impl LinearImage {
         Self::from(PlanarImage::from_planar_channels(desc, planes))
     }
 
-    pub fn size(&self) -> USize2 {
-        self.desc().size()
-    }
-
     pub fn width(&self) -> usize {
         self.desc().width()
     }
@@ -93,11 +115,7 @@ impl LinearImage {
     }
 
     pub const fn channel_count(&self) -> usize {
-        self.pixels.channel_count()
-    }
-
-    pub fn desc(&self) -> PlanarDesc {
-        self.pixels.desc()
+        self.samples.channel_count()
     }
 
     pub fn pixel_count(&self) -> usize {
@@ -109,16 +127,11 @@ impl LinearImage {
     }
 
     pub const fn is_mono(&self) -> bool {
-        self.pixels.is_mono()
+        self.samples.is_mono()
     }
 
     pub const fn is_rgb(&self) -> bool {
-        self.pixels.is_rgb()
-    }
-
-    /// The plane of channel `c`: 0 is mono or R, 1 is G, 2 is B.
-    pub const fn channel(&self, c: usize) -> &Buffer2<f32> {
-        self.pixels.channel(c)
+        self.samples.is_rgb()
     }
 
     /// The plane of channel `c`, mutably. The metadata's quantization σ and mosaic noise are
@@ -131,62 +144,12 @@ impl LinearImage {
     /// to the samples comes through here, so no change to them keeps a stale noise.
     const fn samples_mut(&mut self) -> &mut PlanarImage {
         self.metadata.derived.after_edit();
-        &mut self.pixels
-    }
-
-    /// Resident RAM held by this image: its `f32` planes, its flag plane, and a flat gain it holds
-    /// alone. A shared gain's owner counts it. Metadata is negligible against a plane.
-    pub fn ram_bytes(&self) -> usize {
-        self.desc().byte_len()
-            + self.flags.as_ref().map_or(0, |flags| flags.bytes().len())
-            + self.flat_gain.as_ref().map_or(0, FrameGain::own_ram_bytes)
-    }
-
-    /// The data-quality flags of the pixels; `None` when no pixel carries one.
-    pub const fn flags(&self) -> Option<&PixelFlags> {
-        self.flags.as_ref()
-    }
-
-    /// Replace the flags with `flags`, of these pixels.
-    ///
-    /// # Panics
-    /// When `flags` are of another size.
-    pub fn set_flags(&mut self, flags: Option<PixelFlags>) {
-        assert!(
-            flags
-                .as_ref()
-                .is_none_or(|flags| flags.size() == self.desc().size()),
-            "flags for another geometry"
-        );
-        self.flags = flags;
-    }
-
-    /// The flags, moved out.
-    pub(crate) const fn take_flags(&mut self) -> Option<PixelFlags> {
-        self.flags.take()
-    }
-
-    /// The gain a flat applied to the pixels, for an image a flat divided.
-    pub const fn flat_gain(&self) -> Option<&FrameGain> {
-        self.flat_gain.as_ref()
-    }
-
-    /// Replace the flat gain with `gain`, which covers these pixels and channels.
-    ///
-    /// # Panics
-    /// When `gain` covers another size or another channel count.
-    pub fn set_flat_gain(&mut self, gain: Option<FrameGain>) {
-        assert!(
-            gain.as_ref()
-                .is_none_or(|gain| gain.covers(self.desc().size(), self.channel_count())),
-            "an image's flat gain covers another image's pixels"
-        );
-        self.flat_gain = gain;
+        &mut self.samples
     }
 
     /// The pixels, moved out.
     pub(crate) fn into_pixels(self) -> PlanarImage {
-        self.pixels
+        self.samples
     }
 
     /// Iterate the channel planes in channel order: one for mono, three for RGB.
@@ -199,7 +162,7 @@ impl LinearImage {
     pub(crate) fn planes_mut_with_flags(&mut self) -> PlanesWithFlags<'_> {
         self.metadata.derived.after_edit();
         PlanesWithFlags {
-            planes: self.pixels.planes_mut().iter_mut(),
+            planes: self.samples.planes_mut().iter_mut(),
             flags: self.flags.as_ref(),
         }
     }
@@ -305,116 +268,9 @@ pub(crate) struct PlanesWithFlags<'a> {
     pub(crate) flags: Option<&'a PixelFlags>,
 }
 
-/// A [`LinearImage`] taken apart: its planes and what it carries beside them, each moved, not
-/// copied. `From` both ways, not inherent `into_parts` and `from_parts`, which would shadow the
-/// `StackableImage` methods of those names.
-#[derive(Debug)]
-pub struct LinearParts {
-    pub pixels: PlanarImage,
-    pub metadata: ImageMetadata,
-    pub flags: Option<PixelFlags>,
-    pub flat_gain: Option<FrameGain>,
-}
-
-impl From<LinearImage> for LinearParts {
-    fn from(image: LinearImage) -> Self {
-        let LinearImage {
-            metadata,
-            pixels,
-            flags,
-            flat_gain,
-        } = image;
-        Self {
-            pixels,
-            metadata,
-            flags,
-            flat_gain,
-        }
-    }
-}
-
-/// The image `parts` make.
-///
-/// # Panics
-/// When the pixels have a side past [`MAX_SIDE`](crate::frame_desc::MAX_SIDE), or the flags or
-/// the flat gain cover other pixels.
-impl From<LinearParts> for LinearImage {
-    fn from(parts: LinearParts) -> Self {
-        let LinearParts {
-            pixels,
-            metadata,
-            flags,
-            flat_gain,
-        } = parts;
-        let mut image = Self::new(pixels, flags, metadata);
-        image.set_flat_gain(flat_gain);
-        image
-    }
-}
-
-impl StackableImage for LinearImage {
-    fn desc(&self) -> PlanarDesc {
-        self.desc()
-    }
-
-    fn flags(&self) -> Option<&PixelFlags> {
-        self.flags.as_ref()
-    }
-
-    fn channel(&self, c: usize) -> &Buffer2<f32> {
-        Self::channel(self, c)
-    }
-
-    fn metadata(&self) -> &ImageMetadata {
-        &self.metadata
-    }
-
-    fn cfa_type(&self) -> Option<CfaType> {
-        None
-    }
-
-    fn into_parts(self) -> ImageParts {
-        ImageParts {
-            planes: if self.pixels.is_mono() {
-                ArrayVec::from_iter([self.pixels.into_mono()])
-            } else {
-                ArrayVec::from(self.pixels.into_rgb())
-            },
-            flags: self.flags,
-            flat_gain: self.flat_gain,
-        }
-    }
-
-    fn from_parts(parts: ImageParts, _cfa_type: Option<CfaType>, metadata: ImageMetadata) -> Self {
-        let ImageParts {
-            planes,
-            flags,
-            flat_gain,
-        } = parts;
-        let pixels = match planes.into_inner() {
-            Ok(rgb) => PlanarImage::new_rgb(rgb),
-            Err(mut mono) => {
-                let plane = mono.pop().expect("an image has one plane or three");
-                assert!(mono.is_empty(), "an image has one plane or three");
-                PlanarImage::new_mono(plane)
-            }
-        };
-        Self::from(LinearParts {
-            pixels,
-            metadata,
-            flags,
-            flat_gain,
-        })
-    }
-
-    fn flat_gain(&self) -> Option<&FrameGain> {
-        Self::flat_gain(self)
-    }
-}
-
 impl From<&LinearImage> for InterleavedImage {
     fn from(linear: &LinearImage) -> Self {
-        Self::from(&linear.pixels)
+        Self::from(&linear.samples)
     }
 }
 
@@ -462,7 +318,8 @@ mod tests {
     use crate::image::flags::pixel_flags::PixelFlags;
     use crate::image::flat_gain::FlatGain;
     use crate::image::flat_gain::frame_gain::FrameGain;
-    use crate::image::linear_image::{LinearImage, LinearParts};
+    use crate::image::frame::FrameParts;
+    use crate::image::linear_image::LinearImage;
     use crate::internals::images::{mono_image, rgb_image};
     use common::USize2;
 
@@ -509,8 +366,8 @@ mod tests {
         image.set_flat_gain(Some(FrameGain::Shared(Arc::new(gain))));
         let plane = image.channel(0).pixels().as_ptr();
 
-        let parts = LinearParts::from(image);
-        assert_eq!(parts.pixels.channel(0).pixels().as_ptr(), plane);
+        let parts = FrameParts::from(image);
+        assert_eq!(parts.samples.channel(0).pixels().as_ptr(), plane);
         let image = LinearImage::from(parts);
         assert_eq!(image.channel(0).pixels().as_ptr(), plane);
         assert_eq!(image.metadata.header.object.as_deref(), Some("M31"));
@@ -521,7 +378,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "flags for another geometry")]
     fn parts_refuse_flags_of_another_size() {
-        let mut parts = LinearParts::from(mono_image(USize2::new(2, 1), vec![0.25, 0.5]));
+        let mut parts = FrameParts::from(mono_image(USize2::new(2, 1), vec![0.25, 0.5]));
         parts.flags = PixelFlags::from_bytes(Buffer2::new((3, 1), vec![0, 5, 0]));
         let _ = LinearImage::from(parts);
     }

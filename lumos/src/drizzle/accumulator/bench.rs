@@ -11,22 +11,31 @@ use crate::bench::scene::{FRAME, Field};
 use crate::drizzle::accumulator::Drizzler;
 use crate::drizzle::accumulator::kernel_plan::KernelPlan;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
-use crate::drizzle::drizzle_kernel::DrizzleKernel;
+use crate::drizzle::drizzle_sampling::{DrizzleSampling, DrizzleScale, DropShape, Pixfrac};
 use crate::drizzle::output_grid::OutputGrid;
 use crate::registration::bench::Pair;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 
-/// Each kernel and its pixfrac: the default 0.8, and the square kernel at 1 too, where its drops
-/// tile the output; Lanczos takes 1 alone.
-const KERNELS: [(&str, DrizzleKernel, f32); 6] = [
-    ("point_p0.8", DrizzleKernel::Point, 0.8),
-    ("turbo_p0.8", DrizzleKernel::Turbo, 0.8),
-    ("square_p0.8", DrizzleKernel::Square, 0.8),
-    ("square_p1", DrizzleKernel::Square, 1.0),
-    ("gaussian_p0.8", DrizzleKernel::Gaussian, 0.8),
-    ("lanczos_p1", DrizzleKernel::Lanczos, 1.0),
-];
+/// Each sampling: every drop shape at the default pixfrac 0.8, the square at 1 too, where its
+/// drops tile, and the point, at scale 2; Lanczos at the frame's own scale, the only one it
+/// resamples at.
+fn samplings() -> [(&'static str, DrizzleSampling); 6] {
+    let scale = DrizzleScale::new(2.0);
+    let drops = |shape, pixfrac| DrizzleSampling::Drops {
+        shape,
+        scale,
+        pixfrac: Pixfrac::new(pixfrac),
+    };
+    [
+        ("point_p0.8", DrizzleSampling::Point { scale }),
+        ("turbo_p0.8", drops(DropShape::Turbo, 0.8)),
+        ("square_p0.8", drops(DropShape::Square, 0.8)),
+        ("square_p1", drops(DropShape::Square, 1.0)),
+        ("gaussian_p0.8", drops(DropShape::Gaussian, 0.8)),
+        ("lanczos_p1", DrizzleSampling::Lanczos),
+    ]
+}
 
 /// How the frame lies on the output: a dither alone; a dither and the turn of field rotation; 45°
 /// and 90° turns, where the turbo kernel's axis-aligned drops are worst and exact; and the warp
@@ -73,7 +82,7 @@ impl Geometry {
                 let centre = DVec2::new(FRAME.width as f64, FRAME.height as f64) / 2.0;
                 let placement = Transform::translation(DVec2::new(0.37, -0.29))
                     .compose(&Transform::rotation_around(centre, degrees.to_radians()));
-                WarpTransform::new(placement.inverse())
+                WarpTransform::from(placement.inverse())
             }
             Self::Sip => Pair::typical().sip_warp(),
         }
@@ -84,20 +93,15 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
     let mut group = Kind::Atomic.group(c, "drizzle/accumulate/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
-    for (kernel_name, kernel, pixfrac) in KERNELS {
+    for (kernel_name, sampling) in samplings() {
         for geometry in GEOMETRIES {
             let id = format!("{kernel_name}/{}", geometry.name());
             group.bench_function(BenchmarkId::new(id, field.name()), |b| {
-                let scale = if kernel == DrizzleKernel::Lanczos {
-                    1.0
-                } else {
-                    2.0
-                };
                 let frame = DrizzleFrame::new(field.render(FRAME).image, geometry.warp());
                 let mut drizzler = Drizzler::new(
                     &frame.source,
-                    KernelPlan::new(kernel, pixfrac, scale),
-                    OutputGrid::new(scale, FRAME),
+                    KernelPlan::new(sampling),
+                    OutputGrid::new(sampling.scale(), FRAME),
                 );
                 let mut sums = drizzler.sums();
                 b.iter(|| {

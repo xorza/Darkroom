@@ -24,7 +24,7 @@ use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::flat_gain::{FlatGain, GainGrid};
-use crate::image::stackable_image::{ImageParts, StackableImage};
+use crate::image::frame::{Frame, FrameParts, Samples};
 use common::USize2;
 
 /// A kept frame, its planes mapped: the same whether this run wrote it or a run before did, so a
@@ -97,7 +97,7 @@ impl KeptFrame {
     /// wrote it, then commit them with what its admission found.
     pub(crate) fn keep(
         spill: &FrameSpill<'_>,
-        image: &impl StackableImage,
+        image: &Frame<impl Samples>,
         admitted: Admitted,
     ) -> Result<Self, FrameStoreError> {
         let mut sink = KeptSink {
@@ -222,11 +222,11 @@ impl KeptFrame {
     /// does, or parks it. `None` as [`Self::reuse`] finds none whole. Each channel and the flags
     /// are copied out of their maps, then hashed in RAM, so a page of their files is read once;
     /// the samples, which an image does not carry, are not read.
-    pub(crate) fn reuse_image<I: StackableImage>(
+    pub(crate) fn reuse_image<S: Samples>(
         spill: &FrameSpill<'_>,
         committed: Committed,
         gains: &SharedGains,
-    ) -> Option<KeptImage<I>> {
+    ) -> Option<KeptImage<Frame<S>>> {
         let Committed {
             admitted,
             decoded:
@@ -242,6 +242,7 @@ impl KeptFrame {
         if digests.channels.len() != desc.channel_count() {
             return None;
         }
+        let pattern = S::pattern_of(admitted.facts.cfa_type)?;
         let pixels = size.pixel_count();
         let mut planes = ArrayVec::new();
         let mut channels = ArrayVec::new();
@@ -265,15 +266,12 @@ impl KeptFrame {
             Some(gain) => Some(shared_gain(spill, gain, size, gains)?),
             None => None,
         };
-        let image = I::from_parts(
-            ImageParts {
-                planes,
-                flags: image_flags,
-                flat_gain: flat_gain.clone().map(FrameGain::Shared),
-            },
-            admitted.facts.cfa_type,
-            metadata.clone(),
-        );
+        let image = Frame::from(FrameParts {
+            samples: S::from_planes(planes, pattern),
+            metadata: metadata.clone(),
+            flags: image_flags,
+            flat_gain: flat_gain.clone().map(FrameGain::Shared),
+        });
         Some(KeptImage {
             image,
             admitted,

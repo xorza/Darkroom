@@ -56,12 +56,12 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
             .iter()
             .map(|star| star.flux)
             .collect::<Vec<_>>(),
-        vec![200.0, 180.0, 170.0, 160.0, 150.0]
+        vec![200.0, 180.0, 170.0, 160.0, 150.0, 130.0],
+        "the saturated star is kept, flagged"
     );
     assert_eq!(
         outcome.diagnostics,
         QualityFilterDiagnostics {
-            saturated: 1,
             low_snr: 1,
             high_eccentricity: 1,
             cosmic_rays: 1,
@@ -85,7 +85,7 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
             .iter()
             .map(|star| star.flux)
             .collect::<Vec<_>>(),
-        vec![200.0, 180.0, 170.0, 160.0, 150.0, 140.0]
+        vec![200.0, 180.0, 170.0, 160.0, 150.0, 140.0, 130.0]
     );
     assert_eq!(unbounded.diagnostics.fwhm_outliers, 0);
 }
@@ -535,9 +535,10 @@ fn rejection_bounds_and_precedence() {
             base.with_roundness(round(-0.51)),
             Some(FilterRejection::NotRound),
         ),
+        (base.with_saturated(true), None),
         (
             base.with_saturated(true).with_snr(1.0),
-            Some(FilterRejection::Saturated),
+            Some(FilterRejection::LowSnr),
         ),
         (
             base.with_snr(1.0).with_eccentricity(0.9),

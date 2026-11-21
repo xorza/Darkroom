@@ -21,7 +21,7 @@ pub(crate) struct Sensor {
 }
 
 impl Sensor {
-    pub(crate) const fn of(image: &CfaImage) -> Self {
+    pub(crate) fn of(image: &CfaImage) -> Self {
         Self {
             cfa_type: Some(image.cfa_type()),
             size: image.size(),

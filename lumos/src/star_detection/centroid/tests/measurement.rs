@@ -6,6 +6,7 @@
 use glam::Vec2;
 
 use super::*;
+use crate::star_detection::centroid::circular_aperture::CircularAperture;
 use std::f32::consts::PI;
 
 /// The windowed centroid against what it must return. A star centred on the start stays put: its
@@ -73,7 +74,9 @@ fn windowed_centroid_limits() {
 fn moment_star_of_a_clean_star() {
     let size = USize2::new(64, 64);
     let centre = DVec2::splat(32.0);
-    let npix = (2 * TEST_STAMP_RADIUS + 1) as f32;
+    // The aperture is the stamp's inscribed circle, wholly within the stamp: its area is exact.
+    let radius = TEST_STAMP_RADIUS as f32;
+    let area = PI * radius * radius;
     let reference = |amplitude: f32| {
         let pixels = SyntheticStar::new(centre.as_vec2(), amplitude, StarProfile::gaussian(2.5))
             .stamp(size, 0.1);
@@ -83,14 +86,16 @@ fn moment_star_of_a_clean_star() {
     };
 
     let base = reference(0.8);
-    let flux = 2.0 * PI * 6.25 * 0.8;
+    // The Gaussian's integral within the circle, `2πσ²A·(1 − exp(−r²/2σ²))`, which the samples at
+    // the pixel centres, each weighed by its area inside, meet to 2.5e-5.
+    let flux = 2.0 * PI * 6.25 * 0.8 * (1.0 - (-radius * radius / 12.5).libm_exp());
     assert!(
         (base.flux - flux).abs() <= 2.5e-5 * flux,
         "flux {}",
         base.flux
     );
     assert!(
-        (base.snr - base.flux / (0.01 * npix)).abs() <= 1e-6 * base.snr,
+        (base.snr - base.flux / (0.01 * area.sqrt())).abs() <= 1e-6 * base.snr,
         "SNR {}",
         base.snr
     );
@@ -335,11 +340,12 @@ fn moment_star_local_offset_removes_what_the_global_map_left() {
     )
     .unwrap();
 
-    let npix = (2 * TEST_STAMP_RADIUS + 1).pow(2) as f32;
+    // The aperture is the stamp's inscribed circle, of area πr².
+    let npix = PI * (TEST_STAMP_RADIUS as f32).libm_powi(2);
     let flux_diff = global.flux - local.flux;
     assert!(
         (flux_diff - 0.05 * npix).abs() < 1e-3,
-        "the local offset must remove exactly 0.05/pixel: flux diff {flux_diff}"
+        "the local offset must remove exactly 0.05 a pixel of the aperture: flux diff {flux_diff}"
     );
 
     let expected_snr = local.flux / (0.05 * (npix * (1.0 + npix / 900.0)).sqrt());
@@ -452,11 +458,10 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
 }
 
 /// Sky noise is zero-mean, so it must not add flux. A ±σ checkerboard on a known sky is the exact
-/// case: the stamp holds one more `+σ` than `−σ` pixel, so under a one-pixel star of 1 its signed
-/// flux is exactly 1 + σ, and its SNR exactly `(1 + σ) / (σ·√npix) = 17 / (2r + 1)` at σ = 1/16 —
-/// every value is dyadic or a perfect square, so the arithmetic is exact to the f32 result.
-/// Clipping each pixel at zero instead keeps the `(npix − 1) / 2` other positive pixels, `(npix − 1)·σ/2` more flux: 14 at
-/// r = 7, more than the star.
+/// case: under a one-pixel star of 1 the signed flux over the aperture, the stamp's inscribed
+/// circle, is 1 plus the checkerboard's weighed sum, `σ·Σw(−1)^(x+y)`, which cancels but for the
+/// circle's edge, and its SNR that over `σ·√(πr²)`. Clipping each pixel at zero instead keeps every
+/// other positive pixel: some 10 at r = 7, more than the star.
 #[test]
 fn sky_noise_adds_no_flux_or_snr() {
     const SIGMA: f32 = 0.0625;
@@ -486,15 +491,30 @@ fn sky_noise_adds_no_flux_or_snr() {
             global_bg(&sky, pos),
         )
         .expect("a one-pixel star");
-        assert_eq!(
-            star.flux,
-            1.0 + SIGMA,
-            "r = {radius}: the signed sum of the stamp"
+        let aperture = CircularAperture {
+            centre: pos,
+            radius: radius as f64,
+        };
+        let reach = radius as i32;
+        let checker: f64 = (-reach..=reach)
+            .flat_map(|dy| (-reach..=reach).map(move |dx| (dx, dy)))
+            .map(|(dx, dy)| {
+                let sign = if (dx + dy) % 2 == 0 { 1.0 } else { -1.0 };
+                sign * aperture.overlap(24.0 + f64::from(dx), 24.0 + f64::from(dy))
+            })
+            .sum();
+        let flux = 1.0 + f64::from(SIGMA) * checker;
+        assert!(
+            (f64::from(star.flux) - flux).abs() <= 1e-6,
+            "r = {radius}: the signed sum over the aperture, {} vs {flux}",
+            star.flux
         );
-        assert_eq!(
-            star.snr,
-            (17.0 / (2 * radius + 1) as f64) as f32,
-            "r = {radius}"
+        let area = std::f64::consts::PI * (radius as f64).libm_powi(2);
+        let snr = f64::from(star.flux) / (f64::from(SIGMA) * area.sqrt());
+        assert!(
+            (f64::from(star.snr) - snr).abs() <= 1e-6 * snr,
+            "r = {radius}: {} vs {snr}",
+            star.snr
         );
     }
 }
@@ -619,4 +639,64 @@ fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
         (without.offset, without.noise),
         (unfilled.offset, unfilled.noise)
     );
+}
+
+/// A star is saturated where any pixel of its core is, not its peak alone: a clipped core is a
+/// plateau. A Gaussian star of FWHM 4 at (32, 32): a saturated pixel beside the peak, at (33, 32),
+/// flags it; one five pixels out, past the core's half-width of 2, does not; nor does none.
+#[test]
+fn a_saturated_pixel_in_the_core_flags_the_star() {
+    let size = USize2::new(64, 64);
+    let pixels = SyntheticStar::new(
+        Vec2::new(32.0, 32.0),
+        0.8,
+        StarProfile::gaussian(fwhm::to_sigma(4.0)),
+    )
+    .stamp(size, 0.1);
+    let saturated_at = |at: Option<USizeVec2>| {
+        let mut measured = Measured::flat(&pixels, 0.1, 0.01);
+        if let Some(at) = at {
+            measured.saturation.set_at(at, true);
+        }
+        let region = measured.region_at(DVec2::new(32.0, 32.0));
+        measured
+            .measure(&region, &MeasurementConfig::default(), 4.0)
+            .expect("the star measures")
+            .saturated
+    };
+    assert!(saturated_at(Some(USizeVec2::new(33, 32))));
+    assert!(!saturated_at(Some(USizeVec2::new(37, 32))));
+    assert!(!saturated_at(None));
+}
+
+/// The aperture moves with the FWHM where the stamp's radius steps: at an expected FWHM of 3.99 the
+/// stamp is 7 px and at 4.01 it is 8, where a square stamp's SNR would fall by `√(15²/17²)`, 12%;
+/// the circles of 6.98 and 7.02 px hold the star's SNR to within 1%.
+#[test]
+fn the_snr_is_continuous_in_the_expected_fwhm() {
+    assert_eq!(
+        (
+            measure_grid::stamp_radius(3.99),
+            measure_grid::stamp_radius(4.01)
+        ),
+        (7, 8)
+    );
+    let pixels = SyntheticStar::new(
+        Vec2::new(32.2, 31.7),
+        0.8,
+        StarProfile::gaussian(fwhm::to_sigma(4.0)),
+    )
+    .stamp(USize2::new(64, 64), 0.1);
+    let measured = Measured::flat(&pixels, 0.1, 0.01);
+    let region = measured.region_at(DVec2::new(32.2, 31.7));
+    let snr = |expected_fwhm| {
+        f64::from(
+            measured
+                .measure(&region, &MeasurementConfig::default(), expected_fwhm)
+                .expect("the star measures")
+                .snr,
+        )
+    };
+    let (below, above) = (snr(3.99), snr(4.01));
+    assert!((below - above).abs() < 0.01 * below, "{below} vs {above}");
 }

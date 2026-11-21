@@ -4,9 +4,9 @@ use crate::math::fwhm;
 use crate::star_detection::centroid::stamp::StampGrid;
 use common::Libm;
 
-/// Stamp radius as a multiple of FWHM. A circle of 1.75 FWHM = 4.12σ holds
-/// `1 − exp(−4.12²/2)` = 99.98% of a Gaussian's flux, and 91% of a β = 2.5 Moffat's.
-const STAMP_RADIUS_FWHM_FACTOR: f32 = 1.75;
+/// The flux aperture's radius, and the stamp's, as a multiple of FWHM. A circle of 1.75 FWHM =
+/// 4.12σ holds `1 − exp(−4.12²/2)` = 99.98% of a Gaussian's flux, and 91% of a β = 2.5 Moffat's.
+const APERTURE_FWHM: f32 = 1.75;
 
 /// The smallest stamp radius, in pixels: enough pixels to fit a profile to a narrow star.
 pub(super) const MIN_STAMP_RADIUS: usize = 4;
@@ -27,7 +27,7 @@ const ANNULUS_MOFFAT_BETA: f64 = 2.5;
     reason = "a non-positive FWHM saturates to 0 and takes the minimum radius"
 )]
 pub(super) const fn stamp_radius(expected_fwhm: f32) -> usize {
-    let radius = (expected_fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
+    let radius = (expected_fwhm * APERTURE_FWHM).ceil() as usize;
     if radius < MIN_STAMP_RADIUS {
         MIN_STAMP_RADIUS
     } else if radius > MAX_STAMP_RADIUS {
@@ -47,6 +47,10 @@ pub(crate) struct MeasureGrid {
     /// The sky annulus: from where a β = 2.5 Moffat of the expected FWHM holds 99% of its flux, so
     /// its wings lift the sky by under half a percent of the flux, out by a stamp radius.
     pub(super) annulus: AnnulusRadii,
+    /// The flux aperture's radius, in pixels: [`APERTURE_FWHM`] of the expected FWHM, unrounded,
+    /// held to the stamp's bounds as the stamp's radius is, but continuously: it moves with the
+    /// FWHM where the stamp's radius steps.
+    pub(super) aperture: f64,
 }
 
 /// The inner and outer radius of a sky annulus, in pixels.
@@ -64,6 +68,8 @@ impl MeasureGrid {
             stamp: StampGrid::new(radius),
             window_sigma,
             annulus: AnnulusRadii::enclosing(f64::from(expected_fwhm), radius),
+            aperture: f64::from(expected_fwhm * APERTURE_FWHM)
+                .clamp(MIN_STAMP_RADIUS as f64, radius as f64),
         }
     }
 }

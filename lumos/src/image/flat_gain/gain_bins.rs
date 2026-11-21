@@ -19,10 +19,17 @@ pub(crate) struct GainBins {
 impl GainBins {
     /// The bounds of equal-count bins over `gains`, which this sorts.
     pub(crate) fn of(gains: &mut [f32]) -> Self {
-        gains.sort_unstable_by(f32::total_cmp);
+        debug_assert!(!gains.is_empty(), "a gain plane holds a node at least");
+        // The ranks ascend, so each selection runs over the part past the last: everything before
+        // a selected rank is no greater than it, and the next rank's value lies after it.
+        let mut start = 0;
         Self {
             bounds: array::from_fn(|bound| {
-                gains[(gains.len() * (bound + 1) / GAIN_BINS).min(gains.len() - 1)]
+                let rank = (gains.len() * (bound + 1) / GAIN_BINS).min(gains.len() - 1);
+                let (_, &mut value, _) =
+                    gains[start..].select_nth_unstable_by(rank - start, f32::total_cmp);
+                start = rank;
+                value
             }),
         }
     }
@@ -39,7 +46,7 @@ impl GainBins {
 
 #[cfg(test)]
 mod tests {
-    use crate::image::flat_gain::gain_bins::GainBins;
+    use crate::image::flat_gain::gain_bins::{GAIN_BINS, GainBins};
 
     /// Sixteen gains 1 to 16 cut into eight bins of two: the bounds are the gains at ranks 2, 4,
     /// …, 14, so 3, 5, …, 15, and a gain falls in the bin whose bound it has not reached.
@@ -56,6 +63,29 @@ mod tests {
             (16.0, 7),
         ] {
             assert_eq!(bins.bin(gain), bin, "gain {gain}");
+        }
+    }
+
+    /// The selected bounds are the sorted gains at their ranks, bit for bit, over a plane of
+    /// repeated and scattered values whose ranks fall on runs of equal gains, and one of three.
+    #[test]
+    fn selected_bounds_are_the_sorted_ranks() {
+        for len in [3_usize, 7, 1000] {
+            let gains: Vec<f32> = (0..len)
+                .map(|idx| ((idx * 7919) % 97) as f32 / 8.0)
+                .collect();
+            let mut sorted = gains.clone();
+            sorted.sort_unstable_by(f32::total_cmp);
+            let mut selected = gains;
+            let bins = GainBins::of(&mut selected);
+            for (bound, value) in bins.bounds.iter().enumerate() {
+                let rank = (len * (bound + 1) / GAIN_BINS).min(len - 1);
+                assert_eq!(
+                    value.to_bits(),
+                    sorted[rank].to_bits(),
+                    "{len}: bound {bound}"
+                );
+            }
         }
     }
 }

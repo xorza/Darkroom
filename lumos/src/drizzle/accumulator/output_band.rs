@@ -530,7 +530,7 @@ mod tests {
         let warps = [
             LatticeCase {
                 name: "homography",
-                warp: WarpTransform::new(Transform::homography([
+                warp: WarpTransform::from(Transform::homography([
                     1.01, 0.02, 1.5, -0.01, 0.99, -0.7, 3e-4, -2e-4,
                 ])),
                 folds: false,

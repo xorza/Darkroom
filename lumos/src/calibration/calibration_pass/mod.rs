@@ -34,8 +34,8 @@ impl Subtracted<'_> {
 /// upward.
 ///
 /// Under [`Saturation::Detect`], [`QualityFlags::SATURATED`] is taken from each raw sample at the
-/// frame's saturation level before it moves, unless the decoder flagged saturation, and `data_max`
-/// dropped: past this no level marks the saturated samples, and the flags are the record.
+/// frame's saturation level before it moves, unless the decoder flagged saturation: past this no
+/// level marks the saturated samples, and the flags are the record.
 #[derive(Debug)]
 pub(crate) struct CalibrationPass<'a> {
     /// The additive masters, each in the frame's domain.
@@ -52,11 +52,11 @@ pub(crate) struct CalibrationPass<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Saturation {
     /// A frame as decoded, a light or a frame of a calibration stack: its samples at its
-    /// saturation level are flagged, unless its decoder flagged them, and its `data_max` dropped.
-    /// The level is the one the detector applies to a frame as decoded.
+    /// saturation level are flagged, unless its decoder flagged them. The level is the one the
+    /// detector applies to a frame as decoded.
     Detect,
     /// A stacked master: a ceiling no file declared is a guess the detector makes for frames as
-    /// decoded alone, so its flags and `data_max` stay as they are.
+    /// decoded alone, so its flags stay as they are.
     Kept,
 }
 
@@ -74,9 +74,10 @@ impl CalibrationPass<'_> {
         {
             debug_assert_eq!(samples.len(), pixels, "a master of another size");
         }
-        let saturation = (self.saturation == Saturation::Detect
-            && !image.metadata.derived.saturation_flagged())
-        .then(|| image.metadata.header.saturation_level());
+        let saturation = match self.saturation {
+            Saturation::Detect => image.metadata.derived.unflagged_saturation(),
+            Saturation::Kept => None,
+        };
         let imposed = self.imposed.map(PixelFlags::bytes);
         debug_assert!(imposed.is_none_or(|bytes| bytes.len() == pixels));
         let flags = match image.take_flags() {
@@ -117,7 +118,6 @@ impl CalibrationPass<'_> {
         image.set_flags(flags);
         if self.saturation == Saturation::Detect {
             image.metadata.derived.mark_saturation_flagged();
-            image.metadata.header.data_max = None;
         }
     }
 

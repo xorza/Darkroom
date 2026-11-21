@@ -315,7 +315,8 @@ fn bicubic_lanes<S: Isa>(isa: S, x: S::F32) -> S::F32 {
 /// frame's last row and column. A node that lands outside the source has nothing to alias and
 /// is left out: near a homography's horizon the scale grows without bound.
 fn frame_stretch(warp: &WarpTransform, size: USize2) -> f32 {
-    let largest = if !warp.has_sip() && warp.transform.transform_type() != TransformType::Homography
+    let largest = if warp.sip().is_none()
+        && warp.linear().transform_type() != TransformType::Homography
     {
         LocalGeometry::of(warp.jacobian(DVec2::ZERO)).stretch[0]
     } else {

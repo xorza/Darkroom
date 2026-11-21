@@ -52,9 +52,6 @@ pub enum BundleError {
     /// A bundle holds no flat-dark: the flat is stored prepared, the flat-dark spent on it.
     #[error("the calibration-master bundle holds a flat-dark")]
     FlatDark,
-    /// A defect map without the dark or the flat it was detected on.
-    #[error("the calibration-master bundle holds a defect map without a dark or a flat")]
-    DefectsWithoutMaster,
     /// A flags extension names no image of the file, or is not this format's.
     #[error(transparent)]
     Flags(FitsLoadError),

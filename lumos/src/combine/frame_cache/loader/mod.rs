@@ -12,22 +12,23 @@ use crate::error::Cancelled;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::decode_cache::kept_frame::KeptFrame;
-use crate::frame_store::file_set::{FileSet, SetPeek, Taken};
+use crate::frame_store::file_set::{FileSet, FilesPeek, Taken};
 use crate::frame_store::frame_buffers::NewFrame;
+use crate::frame_store::run_shape::{PlannedTier, RunShape};
 use crate::frame_store::run_storage::RunWrites;
 use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::{SetKind, StoredFrame};
 use crate::frame_store::stored_layout::StoredLayout;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::image::error::FrameDimensionMismatch;
+use crate::image::frame::Frame;
 use crate::image::frame_desc;
 use crate::image::metadata::image_metadata::ImageMetadata;
-use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::decoder::Decoder;
-use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{Stage, Units};
 use crate::progress::stacking_progress::StackingStage;
 
@@ -47,11 +48,11 @@ impl LoadedCache {
     pub(super) fn load<D, S, E>(
         frames: SteppedPaths<'_, &Path, S>,
         combine: PlannedCombine,
-        run: IngestRun,
+        run: IngestRun<'_>,
     ) -> Result<Self, E>
     where
         D: Decoder,
-        S: FrameStep<D::Image>,
+        S: FrameStep<Frame<D::Samples>>,
         E: From<StackError> + From<AdmissionError> + From<S::Error> + From<Cancelled> + Send,
     {
         let SteppedPaths { paths, step } = frames;
@@ -60,8 +61,7 @@ impl LoadedCache {
         // A decode-level memo: looked up before any decode on every tier. An unstepped frame is its
         // kept planes, mapped from the files whatever the tier, since a mapped plane reads as a
         // resident one does.
-        let files =
-            FileSet::<_, D>::new(paths, &run.storage, &run.ctx).map_err(StackError::from)?;
+        let files = FileSet::<_, D>::new(paths, &run).map_err(StackError::from)?;
         let kept = files.storage().kept().filter(|_| !step.changes_frames());
 
         // Dimensions drive the in-memory-vs-disk tier decision. A header answers without a decode
@@ -73,11 +73,25 @@ impl LoadedCache {
         // they carry the two quality planes a masked frame does, which `FrameInfo::decoded`
         // charges for.
         let budget = run.budget;
-        let plan = RunPlan::of(
-            paths.len(),
-            &stages(combine, peek, paths.len(), budget.workers()),
-            budget,
-        );
+        // A spilled frame writes only its planes: its gain is the run's. A frame the decode cache
+        // maps is spilled already.
+        let spilled = if kept.is_some() {
+            0
+        } else {
+            (frame_desc::decoded_byte_len(desc) as u64).saturating_mul(paths.len() as u64)
+        };
+        let PlannedTier { tier, plan } = stack(
+            RunShape {
+                frame_count: paths.len(),
+                stages: stages(combine, peek, paths.len(), budget.workers()),
+                writes: RunWrites {
+                    kept_bytes: peek.kept_write_bytes(),
+                    spilled_bytes: spilled,
+                },
+                beside_bytes: peek.gains_bytes,
+            }
+            .tier(budget, files.storage()),
+        )?;
         tracing::info!(
             frame_count = paths.len(),
             sample_count = desc.sample_count(),
@@ -85,19 +99,6 @@ impl LoadedCache {
             resident = plan.resident,
             "Image cache storage decision"
         );
-
-        // A kept frame writes its gain too, a spilled one only its planes: its gain is the run's.
-        let frame_bytes = frame_desc::decoded_byte_len(desc) as u64;
-        let writes = RunWrites {
-            kept: (files.uncached() as u64)
-                .saturating_mul(frame_bytes.saturating_add(peek.info.gain_bytes as u64)),
-            spilled: if kept.is_some() {
-                0
-            } else {
-                frame_bytes.saturating_mul(paths.len() as u64)
-            },
-        };
-        let tier = stack(files.storage().tier(&plan, writes))?.holding_beside(peek.gains);
         let intake = FrameIntake::new(
             IntakePlan {
                 desc,
@@ -154,7 +155,7 @@ const DECODE: usize = 0;
 /// one every frame covers.
 fn stages(
     combine: PlannedCombine,
-    peek: SetPeek,
+    peek: FilesPeek,
     frame_count: usize,
     workers: usize,
 ) -> [Stage; 3] {
@@ -166,7 +167,10 @@ fn stages(
             count: frame_count,
             desc,
             layout: StoredLayout::decoded(desc),
-            slots: Slots::new(frame.cfa_type.mosaic(), desc.channel_count()),
+            slots: Slots::new(
+                frame.cfa_type.and_then(CfaType::mosaic),
+                desc.channel_count(),
+            ),
             coverage: SetCoverage::Common,
             workers,
         },
@@ -174,16 +178,16 @@ fn stages(
     );
     [
         Stage {
-            kept: decoded.kept,
-            held: peek.held,
-            in_flight: decoded.transient(),
+            kept_bytes: decoded.kept,
+            held_bytes: peek.held_bytes,
+            in_flight_bytes: decoded.transient(),
             units: Units::Frames,
         },
         normalize,
         combine,
     ]
     .map(|stage| Stage {
-        held: stage.held + peek.gains,
+        held_bytes: stage.held_bytes + peek.gains_bytes,
         ..stage
     })
 }
@@ -209,7 +213,7 @@ struct FrameStore<'a, D: Decoder, S> {
     intake: &'a FrameIntake<'a>,
 }
 
-impl<D: Decoder, S: FrameStep<D::Image>> FrameStore<'_, D, S> {
+impl<D: Decoder, S: FrameStep<Frame<D::Samples>>> FrameStore<'_, D, S> {
     /// Frame `idx` in its tier: with a decode cache, the planes it holds committed for this
     /// source and decoder, or a decode written there and committed; without one, a decode through
     /// the step, which the tier keeps. A frame through the step is not what its source decodes
@@ -221,7 +225,7 @@ impl<D: Decoder, S: FrameStep<D::Image>> FrameStore<'_, D, S> {
         let mut image = stack(self.files.decode(idx, self.intake.ctx()))?.image;
         self.step.apply(idx, &mut image)?;
         let admitted = stack(self.intake.admit(idx, &image))?;
-        let metadata = (idx == 0).then(|| image.metadata().clone());
+        let metadata = (idx == 0).then(|| image.metadata.clone());
         let quality = FrameQuality::for_unwarped(image.flag_counts());
         let frame = stack(self.tier.store(
             NewFrame { image, quality },

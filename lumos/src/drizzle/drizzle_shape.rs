@@ -3,77 +3,46 @@
 use imaginarium::PlanarDesc;
 
 use crate::combine::frame_read::slots::Slots;
-use crate::combine::stack::planned_combine::{PlannedCombine, PlannedFrames};
+use crate::combine::stack::planned_combine::PlannedFrames;
 use crate::combine::stack_config::StackConfig;
 use crate::drizzle::deposit::Deposit;
-use crate::drizzle::error::DrizzleError;
 use crate::frame::frame_info::{DecoderBytes, FrameInfo};
-use crate::frame_store::run_storage::{RunStorage, RunWrites};
-use crate::frame_store::storage_tier::StorageTier;
+use crate::frame_store::file_set::FilesPeek;
+use crate::frame_store::run_shape::RunShape;
+use crate::frame_store::run_storage::RunWrites;
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::frame_desc;
-use crate::ingest::ingest_run::IngestRun;
 use crate::memory::footprint::Footprint;
-use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{Stage, Units};
 
-/// Where a drizzle run's input frames come from, which decides whether the caller already holds
-/// them when the run reads the machine's memory.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum DrizzleSource {
-    /// Decoded from files, one at a time, `uncached` of them not yet in the decode cache, beside
-    /// the `gains` bytes of the source gains they share, which the run holds from their decode on,
-    /// each decode holding `decoder` on its way.
-    Files {
-        uncached: usize,
-        gains: usize,
-        decoder: DecoderBytes,
-    },
-    /// Handed over decoded, every one resident from the start and freed once drizzled.
-    Memory,
-}
-
-/// What a drizzle run holds, which decides the [`StorageTier`] it keeps its drizzled frames in.
+/// What a drizzle run holds, which decides the tier it keeps its drizzled frames in.
+/// `files` is what the plan read off a set of files, each decoded when its turn comes; `None` for
+/// frames handed over decoded, every one resident from the start and freed once drizzled.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DrizzleShape {
     pub(crate) input: PlanarDesc,
     pub(crate) output: PlanarDesc,
     pub(crate) deposit: Deposit,
     pub(crate) frame_count: usize,
-    pub(crate) origin: DrizzleSource,
+    pub(crate) files: Option<FilesPeek>,
 }
 
 impl DrizzleShape {
-    /// The tier of a run of this shape combined under `stack`, planned over its [`Self::stages`],
-    /// on `storage` once its disk holds what the run writes: the decoded frames the decode cache
-    /// does not hold yet, and the drizzled ones when they spill.
-    pub(crate) fn tier(
-        &self,
-        stack: &StackConfig,
-        run: &IngestRun,
-        storage: RunStorage<'_>,
-    ) -> Result<StorageTier, DrizzleError> {
-        let budget = run.budget;
-        let plan = RunPlan::of(
-            self.frame_count,
-            &self.stages(stack, budget.workers()),
-            budget,
-        );
-        let uncached = match self.origin {
-            DrizzleSource::Files { uncached, .. } => uncached,
-            DrizzleSource::Memory => 0,
-        };
-        let writes = RunWrites {
-            kept: (frame_desc::decoded_byte_len(self.input) as u64)
-                .saturating_mul(uncached as u64)
-                .saturating_add(self.gain_bytes() as u64),
-            spilled: (self.drizzled().heap_bytes(self.output) as u64)
-                .saturating_mul(self.frame_count as u64),
-        };
-        Ok(storage
-            .tier(&plan, writes)?
-            .holding_beside(self.held_bytes()))
+    /// The run of this shape combined under `stack`, on `workers`: what it writes to its disk —
+    /// the decoded frames the decode cache does not hold yet, and the drizzled ones when they
+    /// spill — and what it holds beside its combine.
+    pub(crate) fn run_shape(&self, stack: &StackConfig, workers: usize) -> RunShape<3> {
+        RunShape {
+            frame_count: self.frame_count,
+            stages: self.stages(stack, workers),
+            writes: RunWrites {
+                kept_bytes: self.files.map_or(0, |peek| peek.kept_write_bytes()),
+                spilled_bytes: (self.drizzled().heap_bytes(self.output) as u64)
+                    .saturating_mul(self.frame_count as u64),
+            },
+            beside_bytes: self.held_bytes(),
+        }
     }
 
     /// How a drizzled frame is stored: its channels, a drop weight and Kish size per weight plane,
@@ -94,22 +63,19 @@ impl DrizzleShape {
         (self.deposit.weight_planes() * size_of::<f32>()).saturating_mul(self.output.pixel_count())
     }
 
-    /// The source gains frames decoded from files share, which the caller holds of frames it
-    /// handed over.
-    const fn gain_bytes(&self) -> usize {
-        match self.origin {
-            DrizzleSource::Files { gains, .. } => gains,
-            DrizzleSource::Memory => 0,
-        }
-    }
-
-    /// What the run holds beside every stage: the depth and the source gains.
+    /// What the run holds beside every stage: the depth, and the source gains frames decoded from
+    /// files share, which the caller holds of frames it handed over.
     const fn held_bytes(&self) -> usize {
-        self.depth_bytes().saturating_add(self.gain_bytes())
+        let gains_bytes = match self.files {
+            Some(peek) => peek.gains_bytes,
+            None => 0,
+        };
+        self.depth_bytes().saturating_add(gains_bytes)
     }
 
     /// The stages of a run of this shape combined under `stack` on `workers`: the drizzle, a frame
-    /// at a time; the normalization; the combine.
+    /// at a time, beside what the plan's read of a file holds until that frame's decode takes it;
+    /// the normalization; the combine.
     ///
     /// A drizzled frame's accumulator holds the same sums as the frame and becomes it in place, so
     /// the frame in flight adds its input, and the statistics measured on that input before its
@@ -120,59 +86,53 @@ impl DrizzleShape {
             output,
             deposit,
             frame_count,
-            origin,
+            files,
         } = *self;
         let drizzled = self.drizzled();
         let drizzled_bytes = drizzled.heap_bytes(output);
         let input_bytes = frame_desc::decoded_byte_len(input);
-        let decoder = match origin {
-            DrizzleSource::Files { decoder, .. } => decoder,
-            DrizzleSource::Memory => DecoderBytes::default(),
-        };
         let way = FrameInfo {
             desc: input,
-            cfa_type: deposit.mosaic().map_or(CfaType::Mono, CfaType::Mosaic),
-            decoder,
+            cfa_type: deposit.mosaic().map(CfaType::Mosaic),
+            decoder: files.map_or_else(DecoderBytes::default, |peek| peek.info.decoder),
             gain_bytes: 0,
         }
         .footprint(workers)
         .then(Footprint {
             kept: drizzled_bytes,
-            peak: drizzled_bytes + input_bytes,
+            peak: drizzled_bytes.saturating_add(input_bytes),
         });
         // A held input is freed as its frame is drizzled; a drizzled frame smaller than its input
         // frees at most its own size.
-        let kept = match origin {
-            DrizzleSource::Files { .. } => drizzled_bytes,
-            DrizzleSource::Memory => drizzled_bytes - input_bytes.min(drizzled_bytes),
+        let kept = match files {
+            Some(_) => drizzled_bytes,
+            None => drizzled_bytes - input_bytes.min(drizzled_bytes),
         };
         let held = self.held_bytes();
         // A drizzled frame covers only the pixels its drops reached; a mosaic's, in each channel by
         // its color's own.
-        let [normalize, combine] = PlannedCombine {
-            normalization: stack.normalization,
-            quality: stack.quality,
-        }
-        .stages(
-            PlannedFrames {
-                count: frame_count,
-                desc: output,
-                layout: drizzled,
-                slots: Slots::new(None, output.channel_count()),
-                coverage: deposit.set_coverage(),
-                workers,
-            },
-            kept,
-        )
-        .map(|stage| Stage {
-            held: stage.held + held,
-            ..stage
-        });
+        let [normalize, combine] = stack
+            .planned()
+            .stages(
+                PlannedFrames {
+                    count: frame_count,
+                    desc: output,
+                    layout: drizzled,
+                    slots: Slots::new(None, output.channel_count()),
+                    coverage: deposit.set_coverage(),
+                    workers,
+                },
+                kept,
+            )
+            .map(|stage| Stage {
+                held_bytes: stage.held_bytes + held,
+                ..stage
+            });
         [
             Stage {
-                kept,
-                held,
-                in_flight: way.transient(),
+                kept_bytes: kept,
+                held_bytes: held.saturating_add(files.map_or(0, |peek| peek.held_bytes)),
+                in_flight_bytes: way.transient(),
                 units: Units::Serial,
             },
             normalize,
@@ -188,8 +148,9 @@ mod tests {
     use crate::combine::normalization::Normalization;
     use crate::combine::stack_config::StackConfig;
     use crate::drizzle::deposit::Deposit;
-    use crate::drizzle::drizzle_shape::{DrizzleShape, DrizzleSource};
-    use crate::frame::frame_info::DecoderBytes;
+    use crate::drizzle::drizzle_shape::DrizzleShape;
+    use crate::frame::frame_info::{DecoderBytes, FrameInfo};
+    use crate::frame_store::file_set::FilesPeek;
     use crate::memory::stage::{Stage, Units};
     use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -210,6 +171,10 @@ mod tests {
     /// positions and kept marks, 17 B, the weights and the clamped copy, 8 B, four GESD critical
     /// values of 8 B, and the normal scores, a row of three for each of the three counts and their
     /// counts, 72 + 24 B: 3 × 46 + 32 + 96.
+    ///
+    /// A peek that holds 8 B for its frame's decode charges them to the drizzle alone, which takes
+    /// them. The decode cache is written its two uncached frames whole, 20 B each with their 16 B
+    /// gain, 72 B; frames handed over write nothing, and their gains are the caller's.
     #[test]
     fn the_depth_and_the_shared_gains_are_held_through_every_stage() {
         let stack = StackConfig {
@@ -217,59 +182,69 @@ mod tests {
             quality: QualityPlanes::IMAGE_ONLY,
             ..StackConfig::light()
         };
-        for gains in [0, 16] {
-            let shape = DrizzleShape {
-                input: PlanarDesc::new((2, 2), ChannelLayout::Mono),
-                output: PlanarDesc::new((4, 4), ChannelLayout::Mono),
-                deposit: Deposit::Channels(ChannelLayout::Mono),
-                frame_count: 3,
-                origin: DrizzleSource::Files {
-                    uncached: 0,
-                    gains,
-                    decoder: DecoderBytes::default(),
-                },
-            };
-            assert_eq!(
-                shape.stages(&stack, 1),
-                [
-                    Stage {
-                        kept: 224,
-                        held: 64 + gains,
-                        in_flight: 184,
-                        units: Units::Serial,
-                    },
-                    Stage {
-                        kept: 224,
-                        held: 64 + gains,
-                        in_flight: 0,
-                        units: Units::Whole,
-                    },
-                    Stage {
-                        kept: 224,
-                        held: 144 + 266 + gains,
-                        in_flight: 312,
-                        units: Units::Rows(4),
-                    },
-                ],
-                "{gains}"
-            );
-        }
-        // A decoder that holds 1000 B beside the frame it makes peaks the way at 20 + 1000 B,
-        // past the statistics' 408: 1020 − 224 = 796 past the drizzled frame.
-        let decoding = DrizzleShape {
-            input: PlanarDesc::new((2, 2), ChannelLayout::Mono),
+        let input = PlanarDesc::new((2, 2), ChannelLayout::Mono);
+        let peek = |decoder, gains_bytes, held_bytes| FilesPeek {
+            idx: 0,
+            info: FrameInfo {
+                desc: input,
+                cfa_type: None,
+                decoder,
+                gain_bytes: 16,
+            },
+            uncached_count: 2,
+            held_bytes,
+            gains_bytes,
+        };
+        let shape = |files| DrizzleShape {
+            input,
             output: PlanarDesc::new((4, 4), ChannelLayout::Mono),
             deposit: Deposit::Channels(ChannelLayout::Mono),
             frame_count: 3,
-            origin: DrizzleSource::Files {
-                uncached: 0,
-                gains: 0,
-                decoder: DecoderBytes {
-                    source: 0,
-                    beside: 1000,
-                },
-            },
+            files,
         };
-        assert_eq!(decoding.stages(&stack, 1)[0].in_flight, 796);
+        for (gains, held) in [(0, 0), (16, 0), (16, 8)] {
+            let run = shape(Some(peek(DecoderBytes::default(), gains, held))).run_shape(&stack, 1);
+            assert_eq!(
+                run.stages,
+                [
+                    Stage {
+                        kept_bytes: 224,
+                        held_bytes: 64 + gains + held,
+                        in_flight_bytes: 184,
+                        units: Units::Serial,
+                    },
+                    Stage {
+                        kept_bytes: 224,
+                        held_bytes: 64 + gains,
+                        in_flight_bytes: 0,
+                        units: Units::Whole,
+                    },
+                    Stage {
+                        kept_bytes: 224,
+                        held_bytes: 144 + 266 + gains,
+                        in_flight_bytes: 312,
+                        units: Units::Rows(4),
+                    },
+                ],
+                "{gains} {held}"
+            );
+            assert_eq!(run.beside_bytes, 64 + gains);
+            assert_eq!(run.writes.kept_bytes, 72);
+            assert_eq!(run.writes.spilled_bytes, 3 * 224);
+        }
+        let held = shape(None).run_shape(&stack, 1);
+        assert_eq!(held.writes.kept_bytes, 0);
+        assert_eq!(held.beside_bytes, 64);
+        // A decoder that holds 1000 B beside the frame it makes peaks the way at 20 + 1000 B,
+        // past the statistics' 408: 1020 − 224 = 796 past the drizzled frame.
+        let decoding = shape(Some(peek(
+            DecoderBytes {
+                source: 0,
+                beside: 1000,
+            },
+            0,
+            0,
+        )));
+        assert_eq!(decoding.stages(&stack, 1)[0].in_flight_bytes, 796);
     }
 }

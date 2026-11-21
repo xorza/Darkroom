@@ -16,7 +16,6 @@ use crate::pipeline::frame_registration::FrameRegistration;
 #[derive(Debug)]
 pub(super) struct RegisteredSet {
     pub(super) lights: Vec<ParkedLight>,
-    pub(super) reference: usize,
     /// The reference's: the master follows the alignment anchor, not whichever frame reaches the
     /// combine first.
     pub(super) metadata: ImageMetadata,
@@ -87,7 +86,6 @@ impl RegisteredSet {
         let mut stacked = run
             .config
             .stack
-            .for_survivors(&dropped)
             .stack_stored_frames(
                 frames,
                 CacheCore {
@@ -100,12 +98,8 @@ impl RegisteredSet {
             // The combine numbers the survivors by position; the caller numbers its lights.
             .map_err(|error| error.renumbered(&survivors))?;
         tracing::info!("Stack complete");
-        stacked.report.parked_lights = parked_lights;
+        stacked.report.memory.parked_lights = parked_lights;
 
-        Ok(AlignStackResult {
-            product: stacked,
-            reference: self.reference,
-            lights,
-        })
+        Ok(AlignStackResult::new(stacked, lights))
     }
 }

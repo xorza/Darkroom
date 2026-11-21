@@ -20,7 +20,7 @@ fn the_way_to_a_demosaic_holds_the_decode_the_noise_then_the_planes() {
     let desc = PlanarDesc::new((10, 8), ChannelLayout::Mono);
     let info = |cfa_type| FrameInfo {
         desc,
-        cfa_type,
+        cfa_type: Some(cfa_type),
         decoder: DecoderBytes {
             source: 0,
             beside: 100,
@@ -79,7 +79,7 @@ fn the_statistics_and_the_decoders_bytes_set_the_way_s_peak() {
     let rggb = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let info = |cfa_type, decoder| FrameInfo {
         desc: PlanarDesc::new((100, 100), ChannelLayout::Mono),
-        cfa_type,
+        cfa_type: Some(cfa_type),
         decoder,
         gain_bytes: 0,
     };

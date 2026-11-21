@@ -47,6 +47,7 @@ use crate::internals::test_rng::TestRng;
 use crate::io::fits::cfa;
 use crate::io::load_ctx::LoadCtx;
 use crate::progress::progress_monitor::ProgressMonitor;
+use crate::registration::registrar::Registrar;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::WarpResult;
 use crate::registration::resample::warp_config::WarpConfig;
@@ -74,7 +75,7 @@ fn dither() -> Transform {
 }
 
 fn warped(image: &LinearImage, transform: Transform) -> WarpResult {
-    WarpConfig::default().warp(image, &WarpTransform::new(transform))
+    WarpConfig::default().warp(image, &WarpTransform::from(transform))
 }
 
 /// A decoded mosaic as a kept cache holds it: its plane, the flags its decoder set, and its
@@ -357,16 +358,14 @@ fn register_snapshot() {
     let target = warped(&reference, dither()).image;
     let mut config = RegistrationConfig::default();
     config.ransac.seed = 0x5EED;
-    let result = config
-        .registrar()
-        .unwrap()
+    let result = Registrar::new(config)
         .register(&detect(&reference), &detect(&target))
         .unwrap();
     let mut snapshot = Snapshot::default();
     snapshot
-        .f64s("matrix", result.transform().matrix())
-        .count("inliers", result.inlier_count())
-        .f64s("rms error", &[result.rms_error()]);
+        .f64s("matrix", result.warp().linear().matrix())
+        .count("inliers", result.matches().len())
+        .f64s("rms error", &[result.rms_error_px()]);
     snapshot.check("registration");
 }
 

@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::frame::frame_info::DecoderBytes;
 use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::cfa::mosaic_plane::MosaicPlane;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::io::decoder::{Decoder, Peek};
@@ -25,7 +26,7 @@ pub(crate) enum CfaRead {
 }
 
 impl Decoder for CfaDecoder {
-    type Image = CfaImage;
+    type Samples = MosaicPlane;
     type Read = CfaRead;
     const KIND: DecoderKind = DecoderKind::Cfa;
 

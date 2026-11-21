@@ -1,9 +1,11 @@
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::metadata::bg_split::BgSplit;
 use crate::image::metadata::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
 };
+use crate::image::metadata::mosaic_noise::MosaicNoise;
 use crate::internals::images::mono_image;
 use crate::internals::test_rng::TestRng;
 use crate::star_detection::star_detector::stages::detect::DetectionInput;
@@ -151,6 +153,30 @@ fn detection_weights_are_inverse_variances() {
         [16.0 / 17.0, 1.0 / 17.0, 0.0]
     );
     assert_eq!(inverse_variance_weights([None; 3]), [1.0 / 3.0; 3]);
+}
+
+/// A demosaiced frame's channel noise is its mosaic's, as its metadata states it, floored at the
+/// quantization σ, and a color of no measured noise is dead: σ 0.25, 0.5 and 0.0625 with a step of
+/// 0.125 read 0.25, 0.5 and 0.125; a color of σ 0 reads none.
+#[test]
+fn a_demosaiced_frames_channel_noise_is_its_mosaics() {
+    let mut image =
+        LinearImage::from_interleaved(PlanarDesc::new((4, 4), ChannelLayout::Rgb), vec![0.5; 48]);
+    let stated = |sigma: [f32; 3]| MosaicNoise {
+        bg: sigma.map(BgSplit::of_sigma),
+        sky: [0.5; 3],
+        quantization_sigma: Some(0.125),
+    };
+    image
+        .metadata
+        .derived
+        .set_mosaic_noise(Some(stated([0.25, 0.5, 0.0625])));
+    assert_eq!(channel_noise(&image), [Some(0.25), Some(0.5), Some(0.125)]);
+    image
+        .metadata
+        .derived
+        .set_mosaic_noise(Some(stated([0.25, 0.0, 0.5])));
+    assert_eq!(channel_noise(&image), [Some(0.25), None, Some(0.5)]);
 }
 
 /// The weights read the white noise, not the spread: a red channel carrying a strong gradient on

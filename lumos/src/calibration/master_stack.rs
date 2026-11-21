@@ -8,11 +8,10 @@ use crate::calibration::master_subtraction::MasterSubtraction;
 use crate::calibration::subtractor::Subtractor;
 use crate::combine::frame_cache::FrameCache;
 use crate::combine::frame_cache::frame_step::SteppedPaths;
-use crate::combine::stack::planned_combine::PlannedCombine;
-use crate::combine::stack::{CombineSource, FrameSet};
 use crate::combine::stack_config::StackConfig;
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::image::cfa::cfa_image::CfaImage;
+use crate::ingest::frame_origin::FrameOrigin;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -76,24 +75,22 @@ impl<P: AsRef<Path>> MasterStack<'_, P> {
             quality: QualityPlanes::IMAGE_ONLY,
             ..config
         };
-        let set = FrameSet {
-            source: CombineSource::CfaPaths,
-            count: paths.len(),
-        };
-        let product = config.combine_cached(set, || {
+        let product = config.combine_cached(FrameOrigin::Files, paths.len(), || {
             let cache = FrameCache::from_cfa_paths::<_, _, MasterStackError>(
                 SteppedPaths {
                     paths,
                     step: &subtraction,
                 },
-                PlannedCombine {
-                    normalization: config.normalization,
-                    quality: config.quality,
-                },
+                config.planned(),
                 run,
             )?;
+            let conditions = cache
+                .frames
+                .iter()
+                .map(|frame| frame.admitted.facts.conditions);
+            CaptureConditions::check_settings(conditions.clone())
+                .map_err(|source| MasterStackError::Conditions { role, source })?;
             if role.is_dark() {
-                let conditions = cache.frames.iter().map(|frame| frame.facts.conditions);
                 CaptureConditions::check_exposures(conditions.clone())
                     .map_err(|source| MasterStackError::Conditions { role, source })?;
                 if let Some(disagreement) = CaptureConditions::temperature_disagreement(conditions)

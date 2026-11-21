@@ -93,8 +93,8 @@ impl RansacEstimator {
         }
         let rotation_exceeds = self
             .config
-            .max_rotation
-            .is_some_and(|max_rotation| geometry.rotation.abs() > max_rotation);
+            .max_rotation_rad
+            .is_some_and(|max_rotation_rad| geometry.rotation.abs() > max_rotation_rad);
         let scale_outside = self.config.scale_range.is_some_and(|range| {
             geometry
                 .stretch
@@ -172,10 +172,11 @@ impl<'a> Search<'a> {
         let min_samples = self.transform_type.min_points();
 
         // `None` until a hypothesis scores at all. `scratch` is where the next hypothesis is
-        // scored; a new best takes it and hands the old best's buffer back, so the loop allocates
-        // nothing after its first improvement.
+        // scored; a new best takes it and hands the old best's buffer back, the first best the
+        // spare, so the loop allocates nothing past these two.
         let mut best: Option<ScoredHypothesis> = None;
         let mut scratch: Vec<usize> = Vec::with_capacity(n);
+        let mut spare: Vec<usize> = Vec::with_capacity(n);
         let mut sample_idxs: Vec<usize> = Vec::with_capacity(min_samples);
         let mut sample = PointPairs::with_capacity(min_samples);
         let mut lo_buffers = LocalOptBuffers::with_capacity(n);
@@ -231,14 +232,17 @@ impl<'a> Search<'a> {
             };
 
             // Standard LO-RANSAC: only a new best is refined.
-            if config.local_max_iterations > 0 && candidate.inliers.len() >= min_samples {
-                self.local_optimization(&mut candidate, &mut lo_buffers);
+            if let Some(steps) = config.local_optimization
+                && candidate.inliers.len() >= min_samples
+            {
+                self.local_optimization(&mut candidate, steps.get(), &mut lo_buffers);
             }
 
             iteration_bound = self.iteration_bound(candidate.inliers.len());
-            if let Some(prev) = best.replace(candidate) {
-                scratch = prev.inliers;
-            }
+            scratch = match best.replace(candidate) {
+                Some(prev) => prev.inliers,
+                None => mem::take(&mut spare),
+            };
         }
 
         // A best with fewer inliers than a minimal sample has nothing to re-estimate from, and is
@@ -298,7 +302,12 @@ impl<'a> Search<'a> {
     /// re-scoring, until the score stops improving or the iterations run out (LO-RANSAC).
     ///
     /// `hypothesis` is left exactly as it came in unless the refinement strictly improves it.
-    fn local_optimization(&self, hypothesis: &mut ScoredHypothesis, buffers: &mut LocalOptBuffers) {
+    fn local_optimization(
+        &self,
+        hypothesis: &mut ScoredHypothesis,
+        steps: usize,
+        buffers: &mut LocalOptBuffers,
+    ) {
         let min_samples = self.transform_type.min_points();
         let mut cur_transform = hypothesis.transform;
 
@@ -308,7 +317,7 @@ impl<'a> Search<'a> {
         buffers.inlier_buf.extend_from_slice(&hypothesis.inliers);
         let mut cur_score = hypothesis.score;
 
-        for _ in 0..self.estimator.config.local_max_iterations {
+        for _ in 0..steps {
             if buffers.inlier_buf.len() < min_samples {
                 break;
             }

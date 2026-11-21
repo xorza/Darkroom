@@ -13,9 +13,7 @@ pub(crate) mod filter_config;
 pub(crate) mod fwhm_config;
 pub(crate) mod measurement_config;
 
-use crate::star_detection::star_detection_config::bg_config::{
-    BgConfig, BgRefinement, IterativeRefinement,
-};
+use crate::star_detection::star_detection_config::bg_config::{BgConfig, IterativeRefinement};
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
 use crate::star_detection::star_detection_config::filter_config::FilterConfig;
 use crate::star_detection::star_detection_config::fwhm_config::{FwhmConfig, FwhmMode};
@@ -62,11 +60,10 @@ impl StarDetectionConfig {
         Ok(())
     }
 
-    /// Wide-field imaging settings (short focal length, large pixel scale).
-    ///
-    /// Wide-field setups produce larger stars (FWHM 5-8px) that may be slightly
-    /// elongated at field edges due to coma and field curvature. Uses relaxed
-    /// eccentricity filtering, auto FWHM estimation, and larger area and edge limits.
+    /// Settings for wide stars, FWHM 5–8 px: oversampled seeing — a long focal length over small
+    /// pixels spreads a star over more of them — or a fast optic whose coma and field curvature
+    /// widen and elongate the stars toward the field's edge. Uses relaxed eccentricity filtering,
+    /// auto FWHM estimation from a 6 px start, and larger area and edge limits.
     pub fn wide_field() -> Self {
         Self {
             fwhm: FwhmConfig {
@@ -76,7 +73,6 @@ impl StarDetectionConfig {
             },
             extraction: ExtractionConfig {
                 min_area: 7,
-                max_area: 1500,
                 edge_margin: 20,
                 ..Default::default()
             },
@@ -88,12 +84,10 @@ impl StarDetectionConfig {
         }
     }
 
-    /// High-resolution imaging settings (long focal length, small pixel scale).
-    ///
-    /// Well-sampled Nyquist PSFs (FWHM 2-4px) with symmetric profiles. Uses
-    /// Gaussian centroid fitting for maximum precision on well-sampled stars,
-    /// stricter eccentricity and roundness filtering, and higher SNR threshold
-    /// to build a clean, high-quality star catalog.
+    /// Settings for compact stars, FWHM 2–4 px: critically sampled, Nyquist PSFs of symmetric
+    /// profile, as a focal length matched to the seeing gives — a shorter one over the same pixels
+    /// spreads a star over fewer. Uses Gaussian centroid fitting for maximum precision, stricter
+    /// eccentricity and roundness filtering, and a higher SNR threshold to build a clean catalog.
     pub fn high_resolution() -> Self {
         Self {
             fwhm: FwhmConfig {
@@ -103,7 +97,6 @@ impl StarDetectionConfig {
             },
             extraction: ExtractionConfig {
                 min_area: 3,
-                max_area: 200,
                 ..Default::default()
             },
             measurement: MeasurementConfig {
@@ -128,7 +121,7 @@ impl StarDetectionConfig {
     pub fn crowded_field() -> Self {
         Self {
             bg: BgConfig {
-                refinement: BgRefinement::Iterative(IterativeRefinement {
+                refinement: Some(IterativeRefinement {
                     iterations: NonZeroUsize::new(2).unwrap(),
                     mask_dilation: 3,
                     mask_sigma: 2.0,
@@ -165,7 +158,7 @@ impl StarDetectionConfig {
             bg: BgConfig {
                 tile_size: 128,
                 sigma_clip_max_iterations: 3,
-                refinement: BgRefinement::Iterative(IterativeRefinement {
+                refinement: Some(IterativeRefinement {
                     iterations: NonZeroUsize::new(3).unwrap(),
                     mask_dilation: 5,
                     mask_sigma: 2.0,
@@ -174,7 +167,6 @@ impl StarDetectionConfig {
             extraction: ExtractionConfig {
                 sigma_threshold: 3.0,
                 min_area: 7,
-                max_area: 2000,
                 edge_margin: 15,
                 deblend: Deblend::MultiThreshold {
                     threshold_count: 32,

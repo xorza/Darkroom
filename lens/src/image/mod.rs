@@ -15,7 +15,7 @@ use common::USize2;
 use glam::USizeVec2;
 use imaginarium::{ChannelLayout, PixelSample, PlanarDesc, PlanarImage};
 use lumos::{
-    FrameDescError, FrameGain, ImageMetadata, LinearImage, LinearParts, PixelFlags, frame_desc,
+    FrameDescError, FrameGain, FrameParts, ImageMetadata, LinearImage, PixelFlags, frame_desc,
 };
 use scenarium::{CustomTypeId, CustomValue, DataType, DynamicValue, InputDecl, RamUsage};
 
@@ -103,8 +103,8 @@ impl Image {
             Pixels::Planar(planes) => planes,
             Pixels::Interleaved(image) => PlanarImage::without_alpha(&image),
         };
-        Ok(LinearImage::from(LinearParts {
-            pixels,
+        Ok(LinearImage::from(FrameParts {
+            samples: pixels,
             metadata: self.metadata,
             flags: self.flags,
             flat_gain: self.flat_gain,
@@ -115,8 +115,8 @@ impl Image {
     /// be copied rather than taken.
     fn to_planar(&self) -> Result<LinearImage, FrameDescError> {
         frame_desc_of(self.desc())?;
-        Ok(LinearImage::from(LinearParts {
-            pixels: self.planar().into_owned(),
+        Ok(LinearImage::from(FrameParts {
+            samples: self.planar().into_owned(),
             metadata: self.metadata.clone(),
             flags: self.flags.clone(),
             flat_gain: self.flat_gain.clone(),
@@ -168,7 +168,7 @@ impl Image {
                 DisplayStretch::AUTO
                     .apply(&mut frame)
                     .map_err(DisplayStretchError::Stretch)?;
-                Ok(preview.planes_to_rgba8(&LinearParts::from(frame).pixels))
+                Ok(preview.planes_to_rgba8(&FrameParts::from(frame).samples))
             }
         }
     }
@@ -256,12 +256,12 @@ impl From<PlanarImage> for Image {
 /// The planes and what they carry beside them, each moved.
 impl From<LinearImage> for Image {
     fn from(image: LinearImage) -> Self {
-        let LinearParts {
-            pixels,
+        let FrameParts {
+            samples: pixels,
             metadata,
             flags,
             flat_gain,
-        } = LinearParts::from(image);
+        } = FrameParts::from(image);
         Self {
             pixels: Pixels::Planar(pixels),
             metadata,

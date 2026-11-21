@@ -24,13 +24,21 @@ const GUIDED_POOL_FRACTIONS: [f64; 2] = [0.25, 0.50];
 /// A minimal sample's largest size: a homography's four points, with room to spare.
 const MAX_SAMPLE_SIZE: usize = 8;
 
+/// One guided phase: the pairs it samples from, the most confident, and its iterations.
+#[derive(Debug, Clone, Copy)]
+struct GuidedPhase {
+    pool_size: usize,
+    iterations: usize,
+}
+
 /// Draws one estimation's minimal samples: the guided phases first, then uniform ones.
 #[derive(Debug)]
 pub(super) struct Sampler {
     rng: ChaCha8Rng,
     sample_size: usize,
-    /// Iterations in each guided phase.
-    phase_len: usize,
+    /// Each guided phase's pool, and its iterations: the configured length, held to the distinct
+    /// samples the pool holds, as more would draw a sample again.
+    phases: [GuidedPhase; GUIDED_POOL_FRACTIONS.len()],
     /// The pairs by descending confidence, ties in index order.
     by_confidence: Vec<usize>,
     /// Each pair's sampling weight, `(confidence + 0.1)²`, which favours the confident ones.
@@ -44,14 +52,29 @@ pub(super) struct Sampler {
 impl Sampler {
     /// The sampler of minimal samples of `sample_size` over pairs at `confidences`, seeded and
     /// phased as `config` sets.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "the sampling fraction of a pair count is non-negative"
+    )]
     pub(super) fn new(confidences: &[f64], sample_size: usize, config: &RansacConfig) -> Self {
         debug_assert!(sample_size <= MAX_SAMPLE_SIZE);
         let mut by_confidence: Vec<usize> = (0..confidences.len()).collect();
         by_confidence.sort_by(|&a, &b| confidences[b].total_cmp(&confidences[a]));
+        let phase_len = guided_phase_iterations(sample_size, config);
+        let n = confidences.len();
+        let phases = GUIDED_POOL_FRACTIONS.map(|fraction| {
+            let pool_size = ((n as f64 * fraction).ceil() as usize)
+                .max(sample_size)
+                .min(n);
+            GuidedPhase {
+                pool_size,
+                iterations: phase_len.min(distinct_samples(pool_size, sample_size)),
+            }
+        });
         Self {
             rng: ChaCha8Rng::seed_from_u64(config.seed),
             sample_size,
-            phase_len: guided_phase_iterations(sample_size, config),
+            phases,
             by_confidence,
             weights: confidences
                 .iter()
@@ -63,24 +86,21 @@ impl Sampler {
     }
 
     /// The iterations the guided phases take, which the adaptive stop does not count.
-    pub(super) const fn guided_iterations(&self) -> usize {
-        GUIDED_POOL_FRACTIONS.len() * self.phase_len
+    pub(super) fn guided_iterations(&self) -> usize {
+        self.phases.iter().map(|phase| phase.iterations).sum()
     }
 
     /// The sample of `iteration`, numbered from 1, into `sample`.
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "the sampling fraction of a pair count is non-negative"
-    )]
     pub(super) fn draw(&mut self, iteration: usize, sample: &mut Vec<usize>) {
-        match GUIDED_POOL_FRACTIONS.get((iteration - 1) / self.phase_len) {
-            Some(&fraction) => {
-                let n = self.by_confidence.len();
-                let pool_size = ((n as f64 * fraction).ceil() as usize).max(self.sample_size);
-                self.weighted(pool_size, sample);
+        let mut left = iteration - 1;
+        for phase in self.phases {
+            if left < phase.iterations {
+                self.weighted(phase.pool_size, sample);
+                return;
             }
-            None => self.uniform(sample),
+            left -= phase.iterations;
         }
+        self.uniform(sample);
     }
 
     /// A weighted sample of distinct pairs from the `pool_size` most confident, by Algorithm A-Res
@@ -170,6 +190,15 @@ pub(super) fn adaptive_iterations(
     let log_outlier = (1.0 - w_n).libm_ln();
 
     ((log_conf / log_outlier).ceil() as usize).clamp(1, max_iterations)
+}
+
+/// The distinct samples of `size` a pool of `pool` holds, `C(pool, size)`, saturating: a phase that
+/// long already draws each of them about once.
+fn distinct_samples(pool: usize, size: usize) -> usize {
+    debug_assert!(size <= pool);
+    (0..size).fold(1usize, |count, taken| {
+        count.saturating_mul(pool - taken) / (taken + 1)
+    })
 }
 
 #[cfg(test)]

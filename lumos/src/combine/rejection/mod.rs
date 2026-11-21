@@ -10,6 +10,7 @@ pub(crate) mod gesd_config;
 pub(crate) mod linear_fit_clip_config;
 pub(crate) mod normal_scores;
 pub(crate) mod pass;
+mod percent;
 pub(crate) mod rejection_scale;
 pub(crate) mod scratch_buffers;
 pub(crate) mod sigma_bounds;
@@ -28,15 +29,20 @@ use crate::combine::rejection::rejection_scale::RejectionScale;
 use crate::combine::rejection::scratch_buffers::{MethodScratch, ScratchBuffers};
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
-use crate::combine::rejection::trim_config::TrimConfig;
+use crate::combine::rejection::trim_config::{TrimBounds, TrimConfig};
 use crate::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
+use crate::combine::stack_config::small_n::SmallN;
 use crate::error::InvalidConfigField;
 
-/// Pixel rejection algorithm applied before combining.
+/// The frames below which sigma clip and linear fit are too unreliable to trust and the combine
+/// falls back to the median. GESD has its own stricter floor. Winsorized clips once, about an
+/// estimate of every sample, and trim measures no spread, so neither has one.
+const MIN_FRAMES_FOR_REJECTION: usize = 5;
+const MIN_FRAMES_FOR_GESD: usize = 15;
+
+/// Pixel rejection algorithm applied before a mean.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Rejection {
-    /// No rejection.
-    None,
     /// Iterative sigma clipping about the median, symmetric or asymmetric.
     SigmaClip(SigmaClipConfig),
     /// Sigma clipping about a Huber estimate of the centre and σ.
@@ -47,12 +53,6 @@ pub enum Rejection {
     Trim(TrimConfig),
     /// Generalized ESD test (best for large stacks >50 frames).
     Gesd(GesdConfig),
-}
-
-impl Default for Rejection {
-    fn default() -> Self {
-        Self::SigmaClip(SigmaClipConfig::default())
-    }
 }
 
 impl Rejection {
@@ -66,7 +66,9 @@ impl Rejection {
 
     /// Winsorized sigma clipping to `sigma` either side.
     pub const fn winsorized(sigma: f32) -> Self {
-        Self::Winsorized(WinsorizedClipConfig::new(SigmaBounds::symmetric(sigma)))
+        Self::Winsorized(WinsorizedClipConfig {
+            sigma: SigmaBounds::symmetric(sigma),
+        })
     }
 
     /// Linear fit clipping to `sigma` either side, for at most 4 passes.
@@ -79,7 +81,9 @@ impl Rejection {
 
     /// Create a trim of the same share from each end.
     pub const fn trim(percent: f32) -> Self {
-        Self::Trim(TrimConfig::new(percent, percent))
+        Self::Trim(TrimConfig {
+            percent: TrimBounds::symmetric(percent),
+        })
     }
 
     /// GESD at its default significance and test count.
@@ -87,10 +91,22 @@ impl Rejection {
         Self::Gesd(GesdConfig::DEFAULT)
     }
 
-    /// Validate the held configuration, if any.
+    /// The fallback below the frames this method's statistics need: the median below 5 for sigma
+    /// clip and linear fit, below 15 for GESD, none for Winsorized and trim, which clip once about
+    /// every sample or measure no spread.
+    pub const fn small_n(&self) -> Option<SmallN> {
+        match self {
+            Self::SigmaClip(_) | Self::LinearFit(_) => {
+                Some(SmallN::median_below(MIN_FRAMES_FOR_REJECTION))
+            }
+            Self::Gesd(_) => Some(SmallN::median_below(MIN_FRAMES_FOR_GESD)),
+            Self::Winsorized(_) | Self::Trim(_) => None,
+        }
+    }
+
+    /// Validate the held configuration.
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         match self {
-            Self::None => Ok(()),
             Self::SigmaClip(config) => config.validate(),
             Self::Winsorized(config) => config.validate(),
             Self::LinearFit(config) => config.validate(),
@@ -110,28 +126,32 @@ impl Rejection {
         )
     }
 
-    /// What a clipped pixel's dispersion is multiplied by to read the frames' full scatter: the
-    /// reciprocal of a unit normal's variance truncated to the method's band, for the methods that
-    /// clip in a band of σ, and 1 for the others, whose cut is not one in σ.
-    pub(super) fn dispersion_correction(&self) -> f32 {
+    /// The variance of a unit normal truncated to the method's band, `tv`, for the methods that
+    /// clip in a band of σ — sigma clip, winsorized, linear fit; `None` for trim and GESD, whose
+    /// cut is not one in σ.
+    ///
+    /// What choosing the survivors from the data costs: a mean of samples clipped at ±k about a
+    /// centre the data set has the asymptotic variance `σ²/(n·Z·tv)`, `Z` the band's mass (Huber,
+    /// *Robust Statistics*, §3.2, `E[ψ²]/E[ψ′]²` for `ψ(x) = x·1{|x| ≤ k}`), where the same
+    /// survivors taken as fixed have `σ²/(n·Z)`: `tv` times less.
+    pub(super) fn band_variance(&self) -> Option<f64> {
         let bounds = match self {
             Self::SigmaClip(config) => config.sigma,
             Self::Winsorized(config) => config.sigma,
             Self::LinearFit(config) => config.sigma,
-            Self::None | Self::Trim(_) | Self::Gesd(_) => return 1.0,
+            Self::Trim(_) | Self::Gesd(_) => return None,
         };
-        (1.0 / bounds.truncated_variance()) as f32
+        Some(bounds.truncated_variance())
     }
 
     /// Whether the method measures a spread, and so needs the frames' noise as its floor.
     pub(super) const fn measures_spread(&self) -> bool {
-        !matches!(self, Self::None | Self::Trim(_))
+        !matches!(self, Self::Trim(_))
     }
 
     /// The most passes the method runs.
     const fn passes(&self) -> usize {
         match self {
-            Self::None => 0,
             Self::SigmaClip(config) => config.max_iterations as usize,
             Self::LinearFit(config) => config.max_iterations as usize,
             Self::Winsorized(_) | Self::Trim(_) | Self::Gesd(_) => 1,
@@ -147,7 +167,6 @@ impl Rejection {
 
     fn narrow(&self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Narrowing {
         match *self {
-            Self::None => Narrowing::Settled,
             Self::SigmaClip(config) => config.narrow(pass, scratch),
             Self::Winsorized(config) => config.narrow(pass, scratch),
             Self::LinearFit(config) => config.narrow(pass, scratch),

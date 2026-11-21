@@ -1,5 +1,6 @@
 //! [`StampMetrics`]: what a star's stamp measures of its light, whatever found its centre.
 
+use crate::star_detection::centroid::circular_aperture::CircularAperture;
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::stamp::{MAX_STAMP_PIXELS, StampAt};
 use crate::star_detection::centroid::star_noise::StarNoise;
@@ -32,10 +33,17 @@ pub(super) struct StampMetrics<'a> {
 }
 
 impl<'a> StampMetrics<'a> {
-    /// The metrics over `stamp` against `bg`, the roundness against a PSF of `psf_sigma`.
-    /// `None` when the stamp leaves the frame or holds no star — no net or no positive light, a
-    /// non-finite flux or SNR, or a marginal with no height.
-    pub(super) fn measure(stamp: StampAt<'a>, psf_sigma: f64, bg: StarBg) -> Option<Self> {
+    /// The metrics over `stamp` against `bg`, the roundness against a PSF of `psf_sigma`, the flux
+    /// and SNR over a circle of `aperture` pixels about the star's centre, each pixel weighed by its
+    /// exact area inside ([`CircularAperture`]), and the pixels the SNR counts their sum. `None`
+    /// when the stamp leaves the frame or holds no star — no net or no positive light, a non-finite
+    /// flux or SNR, or a marginal with no height.
+    pub(super) fn measure(
+        stamp: StampAt<'a>,
+        psf_sigma: f64,
+        aperture: f64,
+        bg: StarBg,
+    ) -> Option<Self> {
         let StampAt {
             residual,
             pos,
@@ -48,7 +56,13 @@ impl<'a> StampMetrics<'a> {
         // pixel at zero would turn it into a positive bias of about 0.4σ per pixel. The second
         // moments are weights, and a weight cannot be negative, so they take the clipped residual
         // and normalize by its own sum.
+        let circle = CircularAperture {
+            centre: pos,
+            radius: aperture,
+        };
         let mut flux = 0.0f64;
+        let mut area = 0.0f64;
+        let mut net = 0.0f64;
         let mut weight_sum = 0.0f64;
         let mut core_flux = 0.0f64;
         let mut sum_x2 = 0.0f64;
@@ -64,7 +78,10 @@ impl<'a> StampMetrics<'a> {
                 let signal = f64::from(px_row[x] - offset);
                 values[my * stamp_size + mx] = signal;
                 let value = signal.max(0.0);
-                flux += signal;
+                let overlap = circle.overlap(x as f64, y as f64);
+                flux += overlap * signal;
+                area += overlap;
+                net += signal;
                 weight_sum += value;
                 if mx.abs_diff(stamp_radius) <= 1 && ady <= 1 {
                     core_flux += signal;
@@ -78,12 +95,12 @@ impl<'a> StampMetrics<'a> {
         }
 
         // No net signal above the sky, or nothing positive to weight the moments with: not a star.
-        if flux < f64::EPSILON || weight_sum < f64::EPSILON {
+        if net < f64::EPSILON || flux < f64::EPSILON || weight_sum < f64::EPSILON {
             return None;
         }
 
         let npix = stamp_size * stamp_size;
-        let snr = bg.noise.snr(flux, npix, bg.sky_samples);
+        let snr = bg.noise.snr(flux, area, bg.sky_samples);
         if !flux.is_finite() || !snr.is_finite() {
             return None;
         }

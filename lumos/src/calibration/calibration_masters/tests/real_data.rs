@@ -48,7 +48,7 @@ fn raw_frame_info_matches_full_decode() {
     );
     assert_eq!(
         peeked.cfa_type,
-        loaded.cfa_type(),
+        Some(loaded.cfa_type()),
         "the peeked sensor pattern must be the decoded frame's"
     );
 }
@@ -69,13 +69,13 @@ fn builds_full_master_set() {
     );
 
     // Every supplied role yields a master; the flat-dark is spent on the flat and not kept.
-    let dark = masters.dark.as_ref().expect("master dark");
+    let dark = masters.additive.dark().expect("master dark");
     let flat = masters
         .flat
         .as_ref()
         .expect("prepared master flat")
         .divisor();
-    let bias = masters.bias.as_ref().expect("master bias");
+    let bias = masters.additive.bias().expect("master bias");
 
     // All masters share the single sensor geometry (one CFA plane each).
     let size = dark.data().size();

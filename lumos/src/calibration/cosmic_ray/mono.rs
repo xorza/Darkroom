@@ -4,8 +4,8 @@
 //! → fine structure `F` → flag → grow → in-paint → iterate. Also serves each deinterleaved Bayer
 //! phase, whose dense neighbours are same-color in the mosaic.
 
+use std::array;
 use std::ops::Range;
-use std::{array, fmt};
 
 use common::{Buffer2, PerWorker, par};
 use rayon::prelude::*;
@@ -14,7 +14,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
-use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBg};
+use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBgSource};
 use crate::math::statistics;
 use common::USize2;
 use glam::USizeVec2;
@@ -66,9 +66,7 @@ const S_REACH: usize = SIGNIFICANCE_REACH + 2;
 /// `(0, 0)` is the largest phase and runs first, so no later one grows the buffers — without the
 /// caller having to thread a scratch through by hand and know that rule.
 #[derive(Debug)]
-pub(super) struct MonoDetector<'a> {
-    config: &'a CosmicRayConfig,
-    noise: NoiseModel,
+pub(super) struct MonoDetector {
     scratch: MonoScratch,
     /// The masks of the detection at hand, cleared for each plane.
     masks: CrMasks,
@@ -95,11 +93,9 @@ pub(crate) enum Recompute {
     EveryRow,
 }
 
-impl<'a> MonoDetector<'a> {
-    pub(super) fn new(config: &'a CosmicRayConfig, noise: NoiseModel) -> Self {
+impl MonoDetector {
+    pub(super) fn new() -> Self {
         Self {
-            config,
-            noise,
             scratch: MonoScratch::default(),
             masks: CrMasks::empty(),
             windows: PerWorker::new(WindowScratch::default),
@@ -136,13 +132,16 @@ impl<'a> MonoDetector<'a> {
     pub(super) fn reject(
         &mut self,
         data: &mut Buffer2<f32>,
-        local: &(dyn Fn(usize) -> PixelBg + Sync),
-        kept_out: Option<&KeptOut>,
+        detection: Detection<'_>,
     ) -> &BitBuffer2 {
         let size = data.size();
-        let Self {
+        let Detection {
             config,
             noise: noise_model,
+            local,
+            kept_out,
+        } = detection;
+        let Self {
             scratch,
             masks,
             windows,
@@ -157,7 +156,7 @@ impl<'a> MonoDetector<'a> {
         }
         masks.clear_to(size);
         let noise_of = PixelNoise {
-            model: *noise_model,
+            model: noise_model,
             local,
         };
         let width = size.width;
@@ -481,21 +480,22 @@ fn median_of_lanes(lanes: &mut [[i32; LANES]]) -> [i32; LANES] {
     }
 }
 
+/// What one detection reads beside the plane: its configuration, the frame's noise model, each
+/// pixel's background, and the pixels kept out of it.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Detection<'a> {
+    pub(super) config: &'a CosmicRayConfig,
+    pub(super) noise: NoiseModel,
+    pub(super) local: PixelBgSource<'a>,
+    pub(super) kept_out: Option<&'a KeptOut>,
+}
+
 /// Each pixel's noise `N`: the noise model at the pixel's local background.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct PixelNoise<'a> {
     model: NoiseModel,
     /// Each pixel's background sky and σ and its flat gain, by flat index into the plane.
-    local: &'a (dyn Fn(usize) -> PixelBg + Sync),
-}
-
-/// Hand-written: the `local` closure has no `Debug`.
-impl fmt::Debug for PixelNoise<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PixelNoise")
-            .field("model", &self.model)
-            .finish_non_exhaustive()
-    }
+    local: PixelBgSource<'a>,
 }
 
 impl PixelNoise<'_> {
@@ -509,7 +509,7 @@ impl PixelNoise<'_> {
             .zip(&m5[span])
             .enumerate()
             .for_each(|(idx, (out, &signal))| {
-                *out = self.model.noise(signal, (self.local)(first + idx));
+                *out = self.model.noise(signal, self.local.at(first + idx));
             });
     }
 }
@@ -540,28 +540,19 @@ fn rows_within(changed: &[bool], reach: usize, bands: &mut Vec<Range<usize>>) {
 /// off the cache lines its neighbours read: aliasing through a raw pointer would be sound but
 /// measures slower on the `reject/mono` bench, from false sharing. The copy lands in the caller's
 /// `snapshot` buffer, so it is a memcpy, not an allocation.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub(super) struct PixelRepair<'a> {
     pub(super) flagged: &'a BitBuffer2,
     pub(super) unread: Option<&'a BitBuffer2>,
     /// Each pixel's local background, whose sky stands in where no neighbour within
     /// [`REPAIR_REACH`] is measured.
-    pub(super) local: &'a (dyn Fn(usize) -> PixelBg + Sync),
+    pub(super) local: PixelBgSource<'a>,
 }
 
 /// The widest ring a repair reaches for a measured neighbour, a 15×15 window: past twice the
 /// 5×5 window's reach, a pixel's neighbours describe the star or gradient around the hit less well
 /// than the local sky does.
 const REPAIR_REACH: usize = 7;
-
-impl fmt::Debug for PixelRepair<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Repair")
-            .field("flagged", &self.flagged)
-            .field("unread", &self.unread)
-            .finish_non_exhaustive()
-    }
-}
 
 impl PixelRepair<'_> {
     /// In-paint `data` in place, reading its copy in `snapshot`.
@@ -606,7 +597,7 @@ impl PixelRepair<'_> {
                         }
                     }
                     *o = if buf.is_empty() {
-                        local(size.idx_of(USizeVec2::new(x, y))).local.sky
+                        local.at(size.idx_of(USizeVec2::new(x, y))).local.sky
                     } else {
                         statistics::median_mut(buf)
                     };
@@ -641,9 +632,9 @@ pub(crate) mod internals {
     use crate::bit_buffer2::BitBuffer2;
     use crate::calibration::cosmic_ray::cosmic_ray_config::{CosmicRayConfig, NoiseEstimation};
     use crate::calibration::cosmic_ray::mono::{
-        MonoDetector, MonoScratch, OutputBand, Recompute, WindowMedian, WindowScratch,
+        Detection, MonoDetector, MonoScratch, OutputBand, Recompute, WindowMedian, WindowScratch,
     };
-    use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBg};
+    use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBg, PixelBgSource};
     use crate::image::metadata::image_metadata::ImageMetadata;
 
     /// The `(2r+1)²` window median of `data`, into a fresh plane.
@@ -658,11 +649,16 @@ pub(crate) mod internals {
         out
     }
 
-    /// A mono detector on `config`, against a flat background of sky 0.1 and σ 0.01.
-    fn detector(config: &CosmicRayConfig) -> MonoDetector<'_> {
-        let noise = NoiseModel::resolve(&NoiseEstimation::Measured, &ImageMetadata::default())
-            .expect("the measured model needs nothing from the frame");
-        MonoDetector::new(config, noise)
+    /// A detection under `config` against a flat background of sky 0.1 and σ 0.01, with the
+    /// measured noise model.
+    fn detection(config: &CosmicRayConfig) -> Detection<'_> {
+        Detection {
+            config,
+            noise: NoiseModel::resolve(&NoiseEstimation::Measured, &ImageMetadata::default())
+                .expect("the measured model needs nothing from the frame"),
+            local: PixelBgSource::Flat(FLAT),
+            kept_out: None,
+        }
     }
 
     const FLAT: PixelBg = PixelBg {
@@ -680,9 +676,9 @@ pub(crate) mod internals {
         config: &CosmicRayConfig,
         recompute: Recompute,
     ) -> BitBuffer2 {
-        let mut detector = detector(config);
+        let mut detector = MonoDetector::new();
         detector.recompute = recompute;
-        detector.reject(data, &|_| FLAT, None).clone()
+        detector.reject(data, detection(config)).clone()
     }
 
     /// Total capacity, in floats, of the mono detector's working set after a run on `data` — what
@@ -692,8 +688,8 @@ pub(crate) mod internals {
     /// Destructured rather than summed through a helper, so a plane added to or dropped from
     /// [`MonoScratch`] fails to compile here instead of silently drifting from the constant.
     pub(crate) fn mono_scratch_floats(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usize {
-        let mut detector = detector(config);
-        detector.reject(data, &|_| FLAT, None);
+        let mut detector = MonoDetector::new();
+        detector.reject(data, detection(config));
         let MonoScratch {
             significance,
             fine,

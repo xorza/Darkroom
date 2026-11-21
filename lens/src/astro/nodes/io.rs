@@ -1,6 +1,6 @@
 //! Astro path types and image loading.
 
-use lumos::{LoadCtx, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
+use lumos::{DecodeConfig, LoadCtx, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 use scenarium::{
     DataType, DynamicValue, FileKind, FileKindId, FileMode, Func, FuncId, InputDecl, Invocation,
     LibraryBuilder, OutputDecl, async_lambda,
@@ -53,10 +53,7 @@ pub(crate) fn register(library: &mut LibraryBuilder) {
 
                 let path = inputs[0].required_fs_path().to_owned();
                 let image = runtime::run_cancellable(cancel, move |cancel| {
-                    let ctx = LoadCtx {
-                        cancel,
-                        ..Default::default()
-                    };
+                    let ctx = LoadCtx::new(DecodeConfig::default(), cancel);
                     ctx.preview(&path)
                 })
                 .await?;

@@ -4,31 +4,19 @@ use thiserror::Error;
 
 use crate::combine::error::StackError;
 use crate::error::InvalidConfigField;
-use crate::frame_store::error::{FrameStoreError, LoadError};
+use crate::frame_store::error::{FrameLoadError, FrameStoreError};
 use crate::image::error::FrameDescError;
 use crate::ingest::error::AdmissionError;
 use crate::io::error::ImageError;
-
-/// Invalid [`crate::DrizzleConfig`] parameters.
-///
-/// Plain range checks report through [`InvalidConfigField`]; the variant below constrains two
-/// fields against the kernel, so it isn't one.
-#[derive(Debug, Error, Clone, PartialEq)]
-pub enum DrizzleConfigError {
-    #[error(transparent)]
-    Field(#[from] InvalidConfigField),
-
-    #[error("Lanczos requires scale=1 and pixfrac=1, got scale={scale}, pixfrac={pixfrac}")]
-    InvalidLanczosSampling { scale: f32, pixfrac: f32 },
-}
 
 /// Errors that can occur during drizzle stacking: the drizzle's own configuration, or a failure of
 /// the run it shares with the combine — no frames, a cancel, a decode, a frame refused at
 /// admission, a frame store — each with the one spelling [`StackError`] gives it.
 #[derive(Debug, Error)]
 pub enum DrizzleError {
-    #[error(transparent)]
-    Config(#[from] DrizzleConfigError),
+    /// A [`DrizzleConfig`](crate::DrizzleConfig) field out of its range.
+    #[error("invalid drizzle configuration")]
+    Config(#[from] InvalidConfigField),
 
     #[error(transparent)]
     Stack(#[from] StackError),
@@ -57,8 +45,8 @@ impl From<AdmissionError> for DrizzleError {
     }
 }
 
-impl From<LoadError> for DrizzleError {
-    fn from(error: LoadError) -> Self {
+impl From<FrameLoadError> for DrizzleError {
+    fn from(error: FrameLoadError) -> Self {
         Self::Stack(StackError::from(error))
     }
 }

@@ -6,13 +6,48 @@ use fits_well::header::{Header, Keyword};
 use crate::image::flags::flag_counts::FlagCounts;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::metadata::dark_comparison_keywords::DarkComparisonKeywords;
-use crate::stack_product::run_report::RunReport;
+use crate::stack_product::run_report::{
+    CalibrationReport, CombineReport, DrizzleReport, MemoryReport, RunReport,
+};
 
-/// A field of the report, by its keyword.
-type Field<T> = (Keyword, fn(&mut RunReport) -> &mut T);
+/// A field of a report group, by its keyword.
+type Field<R, T> = (Keyword, fn(&mut R) -> &mut T);
 
-/// Each count the report holds beside its flag counts, by its keyword.
-const COUNTS: [Field<u64>; 12] = [
+/// The combine's counts, by their keywords.
+const COMBINE_COUNTS: [Field<CombineReport, u64>; 1] = [(Keyword::new("LUMSMLN"), |report| {
+    &mut report.small_n_fallback_pixels
+})];
+
+/// The combine's yes or no, by its keyword.
+const COMBINE_DECISIONS: [Field<CombineReport, bool>; 1] = [(Keyword::new("LUMVBKG"), |report| {
+    &mut report.variance_bg_only
+})];
+
+/// The prefix of each of the combine's flag counts' keywords, the flag's bit after it.
+const COMBINE_FLAG_COUNTS: [Field<CombineReport, FlagCounts>; 2] = [
+    (Keyword::new("LUMEXC"), |report| {
+        &mut report.excluded_samples
+    }),
+    (Keyword::new("LUMKEP"), |report| {
+        &mut report.kept_flagged_samples
+    }),
+];
+
+/// The memory group's counts, by their keywords.
+const MEMORY_COUNTS: [Field<MemoryReport, u64>; 3] = [
+    (Keyword::new("LUMSPIL"), |report| &mut report.spilled_frames),
+    (Keyword::new("LUMPARK"), |report| &mut report.parked_lights),
+    (Keyword::new("LUMOVCB"), |report| {
+        &mut report.overcommit_bytes
+    }),
+];
+
+/// The peak the memory plan expected, by its keyword, absent for a run with no plan.
+const PLANNED_PEAK: Keyword = Keyword::new("LUMPLNB");
+
+/// The calibration group's counts, by their keywords: all present for a run that calibrated, none
+/// for one that did not.
+const CALIBRATION_COUNTS: [Field<CalibrationReport, u64>; 9] = [
     (Keyword::new("LUMUDEX"), |report| {
         &mut report.unverified_dark_exposures
     }),
@@ -32,87 +67,121 @@ const COUNTS: [Field<u64>; 12] = [
     (Keyword::new("LUMFFLP"), |report| {
         &mut report.floored_flat_pixels
     }),
-    (Keyword::new("LUMSPIL"), |report| &mut report.spilled_frames),
-    (Keyword::new("LUMSMLN"), |report| {
-        &mut report.small_n_fallback_pixels
+    (Keyword::new("LUMUSET"), |report| {
+        &mut report.unverified_settings
     }),
-    (Keyword::new("LUMOVCB"), |report| {
-        &mut report.overcommit_bytes
-    }),
-    (Keyword::new("LUMPARK"), |report| &mut report.parked_lights),
-    (Keyword::new("LUMUNCP"), |report| {
-        &mut report.unconverged_points
+    (Keyword::new("LUMFILD"), |report| {
+        &mut report.filter_differences
     }),
 ];
 
-/// Each count the report holds for some runs alone, by its keyword, absent for the others.
-const OPTIONAL_COUNTS: [Field<Option<u64>>; 1] = [(Keyword::new("LUMPLNB"), |report| {
-    &mut report.planned_peak_bytes
+/// The drizzle group's counts, by their keywords: present for a drizzle alone.
+const DRIZZLE_COUNTS: [Field<DrizzleReport, u64>; 1] = [(Keyword::new("LUMUNCP"), |report| {
+    &mut report.unconverged_points
 })];
 
-/// Each yes or no the report holds, by its keyword.
-const DECISIONS: [Field<bool>; 1] = [(Keyword::new("LUMVBKG"), |report| {
-    &mut report.variance_bg_only
-})];
-
-/// The prefix of each flag count's keyword, the flag's bit after it.
-const FLAG_COUNTS: [Field<FlagCounts>; 2] = [
-    (Keyword::new("LUMEXC"), |report| {
-        &mut report.excluded_samples
-    }),
-    (Keyword::new("LUMKEP"), |report| {
-        &mut report.kept_flagged_samples
-    }),
-];
-
-/// Write `report` into `header`, every field of it.
+/// Write `report` into `header`, every group the run had.
 pub(super) fn write(header: &mut Header, report: &RunReport) -> fits_well::Result<()> {
-    let mut report = *report;
-    for (keyword, field) in COUNTS {
-        header.set(keyword, integer(*field(&mut report)))?;
+    let RunReport {
+        mut combine,
+        mut memory,
+        calibration,
+        drizzle,
+    } = *report;
+    write_counts(header, &mut combine, &COMBINE_COUNTS)?;
+    for (keyword, field) in COMBINE_DECISIONS {
+        header.set(keyword, *field(&mut combine))?;
     }
-    for (keyword, field) in OPTIONAL_COUNTS {
-        if let Some(count) = *field(&mut report) {
-            header.set(keyword, integer(count))?;
-        }
-    }
-    for (keyword, field) in DECISIONS {
-        header.set(keyword, *field(&mut report))?;
-    }
-    for (prefix, field) in FLAG_COUNTS {
-        for (bit, &count) in field(&mut report).per_bit().iter().enumerate() {
+    for (prefix, field) in COMBINE_FLAG_COUNTS {
+        for (bit, &count) in field(&mut combine).per_bit().iter().enumerate() {
             header.set(prefix.indexed(bit)?, integer(count))?;
         }
     }
-    DarkComparisonKeywords::FLAT_DARK.write(header, report.flat_dark)
+    write_counts(header, &mut memory, &MEMORY_COUNTS)?;
+    if let Some(peak) = memory.planned_peak_bytes {
+        header.set(PLANNED_PEAK, integer(peak))?;
+    }
+    if let Some(mut calibration) = calibration {
+        write_counts(header, &mut calibration, &CALIBRATION_COUNTS)?;
+        DarkComparisonKeywords::FLAT_DARK.write(header, calibration.flat_dark)?;
+    }
+    if let Some(mut drizzle) = drizzle {
+        write_counts(header, &mut drizzle, &DRIZZLE_COUNTS)?;
+    }
+    Ok(())
 }
 
-/// The report `header` states, refused when a field is missing or a count is negative.
+/// The report `header` states, refused when a field of a group it holds is missing, or a count is
+/// negative.
 pub(super) fn read(header: &Header) -> Result<RunReport, FitsLoadError> {
-    let mut report = RunReport::default();
-    for (keyword, field) in COUNTS {
-        *field(&mut report) = count(header, keyword)?;
-    }
-    for (keyword, field) in OPTIONAL_COUNTS {
-        *field(&mut report) = header
-            .get_integer(keyword)?
-            .map(|value| non_negative(keyword, value))
-            .transpose()?;
-    }
-    for (keyword, field) in DECISIONS {
-        *field(&mut report) = header
+    let mut combine =
+        read_counts(header, &COMBINE_COUNTS)?.ok_or_else(|| missing(COMBINE_COUNTS[0].0))?;
+    for (keyword, field) in COMBINE_DECISIONS {
+        *field(&mut combine) = header
             .get_logical(keyword)?
             .ok_or_else(|| missing(keyword))?;
     }
-    for (prefix, field) in FLAG_COUNTS {
+    for (prefix, field) in COMBINE_FLAG_COUNTS {
         let mut per_bit = [0; 8];
         for (bit, count_of_bit) in per_bit.iter_mut().enumerate() {
             *count_of_bit = count(header, prefix.indexed(bit)?)?;
         }
-        *field(&mut report) = FlagCounts::from_per_bit(per_bit);
+        *field(&mut combine) = FlagCounts::from_per_bit(per_bit);
     }
-    report.flat_dark = DarkComparisonKeywords::FLAT_DARK.read(header);
-    Ok(report)
+    let mut memory: MemoryReport =
+        read_counts(header, &MEMORY_COUNTS)?.ok_or_else(|| missing(MEMORY_COUNTS[0].0))?;
+    memory.planned_peak_bytes = header
+        .get_integer(PLANNED_PEAK)?
+        .map(|value| non_negative(PLANNED_PEAK, value))
+        .transpose()?;
+    let calibration =
+        read_counts(header, &CALIBRATION_COUNTS)?.map(|calibration| CalibrationReport {
+            flat_dark: DarkComparisonKeywords::FLAT_DARK.read(header),
+            ..calibration
+        });
+    Ok(RunReport {
+        combine,
+        memory,
+        calibration,
+        drizzle: read_counts(header, &DRIZZLE_COUNTS)?,
+    })
+}
+
+/// Write each count of `group` that `table` names.
+fn write_counts<R>(
+    header: &mut Header,
+    group: &mut R,
+    table: &[Field<R, u64>],
+) -> fits_well::Result<()> {
+    for &(keyword, field) in table {
+        header.set(keyword, integer(*field(group)))?;
+    }
+    Ok(())
+}
+
+/// The group whose counts `table` names: `None` when `header` states none of them, refused when it
+/// states some alone.
+fn read_counts<R: Default>(
+    header: &Header,
+    table: &[Field<R, u64>],
+) -> Result<Option<R>, FitsLoadError> {
+    let mut group = R::default();
+    let mut stated = false;
+    let mut first_missing = None;
+    for &(keyword, field) in table {
+        match header.get_integer(keyword)? {
+            Some(value) => {
+                *field(&mut group) = non_negative(keyword, value)?;
+                stated = true;
+            }
+            None => first_missing = first_missing.or(Some(keyword)),
+        }
+    }
+    match (stated, first_missing) {
+        (false, _) => Ok(None),
+        (true, Some(keyword)) => Err(missing(keyword)),
+        (true, None) => Ok(Some(group)),
+    }
 }
 
 /// A count as FITS states an integer: a count of samples, pixels, frames or bytes stays far below

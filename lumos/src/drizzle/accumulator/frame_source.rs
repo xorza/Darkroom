@@ -17,7 +17,7 @@ use crate::drizzle::output_grid::OutputGrid;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
-use crate::image::stackable_image::StackableImage;
+use crate::image::frame::{Frame, Samples};
 use common::USize2;
 
 /// Area below which a square drop is discarded: the transform has collapsed the input pixel to
@@ -105,7 +105,7 @@ impl<'a> FrameSource<'a> {
     /// `frame`'s image under its warp — reference to input, as registration produces it — onto
     /// `grid`, its samples reaching the output as `deposit` says.
     pub(super) fn new(
-        frame: &'a DrizzleFrame<impl StackableImage>,
+        frame: &'a DrizzleFrame<Frame<impl Samples>>,
         deposit: Deposit,
         grid: OutputGrid,
     ) -> Self {

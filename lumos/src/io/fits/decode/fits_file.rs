@@ -18,7 +18,6 @@ use crate::io::fits::decode::DecodedFitsImage;
 use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
 use crate::io::fits::error::FitsLoadError;
 use crate::io::load_ctx::LoadCtx;
-use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
 /// A FITS file open over `R`, and the image of it the load's options select: what a header read
 /// leaves for the frame's load, which reads on from the HDU list the reader scanned and the tile
@@ -35,7 +34,7 @@ impl FitsFile {
         fs::open(path)
             .map_err(FitsLoadError::from)
             .and_then(|file| Self::new(file, ctx))
-            .map_err(|error| ImageError::fits_load(path, error))
+            .map_err(|error| ImageError::new(path, error))
     }
 }
 
@@ -105,8 +104,7 @@ impl<R: Read + Seek> FitsFile<R> {
         let cfa = self
             .read(ctx, Checksum::Judged, &SharedGains::default())?
             .into_cfa(cfa_type)?;
-        let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
-        Ok(cfa.demosaic(ctx.xtrans_passes, noise, &ctx.cancel)?)
+        Ok(ctx.demosaic_preview(cfa)?)
     }
 
     fn refuse_mosaic(&self) -> Result<(), FitsLoadError> {

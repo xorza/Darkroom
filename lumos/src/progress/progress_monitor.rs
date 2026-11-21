@@ -20,6 +20,13 @@ impl ProgressMonitor {
     /// A run nobody watches or stops: its progress reported nowhere, under a token that never
     /// cancels.
     pub fn unattended() -> Self {
-        Self::new(ProgressCallback::default(), CancelToken::never())
+        Self::from(CancelToken::never())
+    }
+}
+
+/// A run stopped through `cancel` whose progress is reported nowhere.
+impl From<CancelToken> for ProgressMonitor {
+    fn from(cancel: CancelToken) -> Self {
+        Self::new(ProgressCallback::default(), cancel)
     }
 }

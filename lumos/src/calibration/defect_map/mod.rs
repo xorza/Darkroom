@@ -102,6 +102,76 @@ pub(crate) struct HotPixels {
     pub(crate) noise: Vec<f32>,
 }
 
+impl HotPixels {
+    /// The most hot pixels a color of `photosites` keeps: [`MAX_HOT_PERCENT`] of them, at least
+    /// [`MIN_HOT_CAP`].
+    const fn cap(photosites: usize) -> usize {
+        let share = photosites * MAX_HOT_PERCENT / 100;
+        if share > MIN_HOT_CAP {
+            share
+        } else {
+            MIN_HOT_CAP
+        }
+    }
+
+    /// These hot pixels with each color past [`Self::cap`] held to it: its brightest excesses
+    /// kept, the first in index order of those tied at the cut.
+    fn capped(self, cfa: &CfaType, size: USize2) -> Self {
+        let photosites = cfa.photosites_per_color(size);
+        let color_of = |idx: usize| cfa.slot_at(size.point_of(idx));
+        let mut counts = [0usize; 3];
+        for &idx in &self.idxs {
+            counts[color_of(idx)] += 1;
+        }
+        let mut cut = [None; 3];
+        for (color, &photosites) in photosites.iter().enumerate() {
+            let cap = Self::cap(photosites);
+            if counts[color] <= cap {
+                continue;
+            }
+            let mut excesses: Vec<f32> = self
+                .idxs
+                .iter()
+                .zip(&self.excess)
+                .filter(|&(&idx, _)| color_of(idx) == color)
+                .map(|(_, &excess)| excess)
+                .collect();
+            let (_, &mut threshold, _) =
+                excesses.select_nth_unstable_by(cap - 1, |a, b| b.total_cmp(a));
+            let above = excesses
+                .iter()
+                .filter(|&&excess| excess > threshold)
+                .count();
+            cut[color] = Some((threshold, cap - above));
+        }
+        if cut.iter().all(Option::is_none) {
+            return self;
+        }
+        let mut kept = Self::default();
+        for ((idx, excess), noise) in self.idxs.into_iter().zip(self.excess).zip(self.noise) {
+            let keep = match &mut cut[color_of(idx)] {
+                None => true,
+                Some((threshold, ties)) => {
+                    if excess > *threshold {
+                        true
+                    } else if excess == *threshold && *ties > 0 {
+                        *ties -= 1;
+                        true
+                    } else {
+                        false
+                    }
+                }
+            };
+            if keep {
+                kept.idxs.push(idx);
+                kept.excess.push(excess);
+                kept.noise.push(noise);
+            }
+        }
+        kept
+    }
+}
+
 impl DefectMap {
     /// An empty map for a sensor of `size`, ready for [`Self::detect_hot`] and
     /// [`Self::detect_cold`].
@@ -174,6 +244,10 @@ impl DefectMap {
         let color_of = |idx: usize| cfa.slot_at(self.size.point_of(idx));
         for &idx in &self.hot.idxs {
             colors.slot_mut(color_of(idx)).hot += 1;
+        }
+        for (slot, &photosites) in photosites.iter().enumerate() {
+            let defects = colors.slot_mut(slot);
+            defects.at_hot_cap = defects.hot == HotPixels::cap(photosites);
         }
         for &idx in &self.cold_idxs {
             colors.slot_mut(color_of(idx)).cold += 1;
@@ -276,18 +350,34 @@ impl DefectMap {
         };
         let lattice = CfaLattice::new(&image.cfa_type());
         let mut scratch = Gathered::default();
+        let mut repaired = Vec::with_capacity(self.hot.idxs.len() + self.cold_idxs.len());
         for &idx in self.hot.idxs.iter().chain(&self.cold_idxs) {
             let plane = MaskedPlane {
                 pixels: image.data(),
                 mask: Some(mask),
             };
-            image.data_mut()[idx] = lattice.median(plane, self.size.point_of(idx), &mut scratch);
+            // A defect whose every neighbour is masked keeps its value, flagged a defect alone.
+            if let Some(value) = lattice.median(plane, self.size.point_of(idx), &mut scratch) {
+                image.data_mut()[idx] = value;
+                repaired.push(idx);
+            }
         }
         for idxs in [&self.hot.idxs, &self.cold_idxs] {
-            image.add_flags_at(QualityFlags::DEFECT.union(QualityFlags::REPAIRED), idxs);
+            image.add_flags_at(QualityFlags::DEFECT, idxs);
         }
+        image.add_flags_at(QualityFlags::REPAIRED, &repaired);
     }
 }
+
+/// The most hot pixels a color keeps, as a share of its photosites: 1%, the share Siril's cosmetic
+/// correction flags in red. A dark of many frames measures its σ so finely that a fixed multiple of
+/// it reaches into the dark current's own spread; past this share the cut rises to the excess that
+/// keeps it, the brightest, which a dark-scale fit and a repair want most.
+const MAX_HOT_PERCENT: usize = 1;
+/// The least cap a color takes, whatever its photosites: a share of a crop of a few thousand
+/// photosites would cap a handful of pixels, where a share means nothing. Every sensor of a
+/// megapixel and up caps at its share.
+const MIN_HOT_CAP: usize = 64;
 
 /// Maximum number of samples per color channel for median estimation.
 const MAX_MEDIAN_SAMPLES: usize = 100_000;
@@ -377,7 +467,8 @@ fn detect_hot_pixels(
         idxs,
         excess,
         noise,
-    })
+    }
+    .capped(&cfa_type, size))
 }
 
 fn residual_sigma_floor(image: &CfaImage) -> f32 {
@@ -424,8 +515,10 @@ fn detect_cold_pixels(
                     return false;
                 }
                 let plane = MaskedPlane::from(data);
-                let local = lattice.median(plane, size.point_of(i), &mut scratch);
-                data[i] < dead_fraction * local
+                // A photosite with no neighbour of its color to compare has no local response.
+                lattice
+                    .median(plane, size.point_of(i), &mut scratch)
+                    .is_some_and(|local| data[i] < dead_fraction * local)
             })
         })
         .collect();

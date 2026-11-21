@@ -5,6 +5,7 @@ use glam::DVec2;
 
 use crate::registration::error::{RegistrationCatalog, RegistrationError, StarField};
 use crate::registration::register::median_fwhm;
+use crate::registration::registrar::Registrar;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::star_detection::star::Star;
 
@@ -46,9 +47,7 @@ fn register_rejects_non_finite_positions_in_both_catalogs() {
         };
         stars[3].pos = DVec2::new(f64::NAN, 4.0);
 
-        let error = RegistrationConfig::default()
-            .registrar()
-            .unwrap()
+        let error = Registrar::new(RegistrationConfig::default())
             .register(&ref_stars, &target_stars)
             .unwrap_err();
         match error {
@@ -83,9 +82,7 @@ fn register_checks_the_fields_it_reads_in_both_catalogs() {
         stars[6].pos_sigma = 0.0;
         stars[7].snr = f32::NAN;
 
-        let error = RegistrationConfig::default()
-            .registrar()
-            .unwrap()
+        let error = Registrar::new(RegistrationConfig::default())
             .register(&ref_stars, &target_stars)
             .unwrap_err();
         match error {
@@ -106,9 +103,7 @@ fn register_checks_the_fields_it_reads_in_both_catalogs() {
             RegistrationCatalog::Target => &mut target_stars,
         };
         stars[5].fwhm = 2.0;
-        let error = RegistrationConfig::default()
-            .registrar()
-            .unwrap()
+        let error = Registrar::new(RegistrationConfig::default())
             .register(&ref_stars, &target_stars)
             .unwrap_err();
         assert!(
@@ -132,10 +127,8 @@ fn register_checks_the_fields_it_reads_in_both_catalogs() {
             RegistrationCatalog::Target => &mut target_stars,
         };
         stars[6].pos_sigma = 0.1;
-        let error = RegistrationConfig::default()
-            .registrar()
-            .unwrap()
-            .register(&ref_stars, &target_stars);
+        let error =
+            Registrar::new(RegistrationConfig::default()).register(&ref_stars, &target_stars);
         assert!(
             !matches!(error, Err(RegistrationError::InvalidStarField { .. })),
             "{error:?}"
@@ -167,9 +160,7 @@ fn too_few_unsaturated_stars_name_their_catalog() {
             RegistrationCatalog::Reference => (&saturated, &stars),
             RegistrationCatalog::Target => (&stars, &saturated),
         };
-        let error = config
-            .registrar()
-            .unwrap()
+        let error = Registrar::new(config.clone())
             .register(reference, target)
             .unwrap_err();
         assert!(

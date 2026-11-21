@@ -37,7 +37,7 @@ use common::USize2;
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
 /// another layout decodes into plausible nonsense instead of failing. [`SIDECAR_FORMAT`] is derived
 /// from this pin, so the change that moves the layout also changes the tag every commit carries.
-const SIDECAR_PIN: &str = "63678a06bb280341";
+const SIDECAR_PIN: &str = "4d096c68e3b9d98d";
 
 /// The tag every commit carries.
 const SIDECAR_FORMAT: u64 = fnv1a::fingerprint(&[SIDECAR_PIN.as_bytes()]);

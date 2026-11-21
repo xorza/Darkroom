@@ -2,11 +2,11 @@
 
 use std::mem;
 
+use lumos::ProgressMonitor;
 use lumos::{
     AlignStackConfig, CalibratedLights, CalibrationMasters, IngestConfig, LinearImage,
     QualityPlanes, Reference,
 };
-use lumos::{ProgressCallback, ProgressMonitor};
 use scenarium::async_lambda;
 use scenarium::{
     DataType, DynamicValue, Func, FuncId, InputDecl, IntSpan, Invocation, InvokeError,
@@ -86,28 +86,29 @@ pub(crate) fn register(library: &mut LibraryBuilder) {
                         CalibratedLights {
                             paths: &lights,
                             masters,
+                            cosmic_ray: None,
                         },
                         &IngestConfig::default(),
-                        ProgressMonitor::new(ProgressCallback::default(), cancel),
+                        ProgressMonitor::from(cancel),
                     )
                 })
                 .await?;
 
                 let product = result.product;
+                let size = product.image.desc().size();
                 outputs[0] = DynamicValue::from_custom(Image::from(product.image));
                 if quality.coverage {
                     let coverage = product
                         .coverage
                         .expect("the stack produces the coverage it was asked for");
-                    outputs[1] =
-                        DynamicValue::from_custom(Image::from(LinearImage::from(coverage)));
+                    outputs[1] = DynamicValue::from_custom(Image::from(coverage.into_image(size)));
                 }
                 if quality.weight {
                     let weight = product
                         .weight
                         .expect("the stack produces the weight it was asked for");
                     outputs[2] =
-                        DynamicValue::from_custom(Image::from(LinearImage::from(weight)));
+                        DynamicValue::from_custom(Image::from(LinearImage::from(weight.map)));
                 }
                 Ok(())
             }),

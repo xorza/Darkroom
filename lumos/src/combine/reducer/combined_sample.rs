@@ -3,6 +3,7 @@
 use crate::combine::reducer::pixel_samples::PixelSamples;
 use crate::combine::reducer::sample_quality::SampleQuality;
 use crate::math::statistics;
+use crate::math::statistics::median_variance::median_variance_factor;
 use crate::stack_product::PixelQuality;
 
 /// One reduced channel sample: the combined value and — when the caller asked for the quality
@@ -32,6 +33,9 @@ impl CombinedSample {
     /// the figure is unbiased; noise weighting makes the weights so at the sky where no warp
     /// averaged and no flat amplified the samples, and equal weights make it the squared standard
     /// error of the mean. NaN for fewer than two survivors, whose scatter says nothing.
+    ///
+    /// The three sums run in f64, as the mean's own do ([`crate::math::sum`]), and round once: an
+    /// f32 running sum of a thousand frames carries some 2⁻¹⁴ of relative error into each plane.
     pub(crate) fn from_survivors(
         value: f32,
         samples: &PixelSamples<'_>,
@@ -43,31 +47,31 @@ impl CombinedSample {
             noise,
         } = samples;
         let mut count = 0usize;
-        let mut weight = 0.0f32;
-        let mut weighted_variance = 0.0f32;
-        let mut weighted_squares = 0.0f32;
+        let mut weight = 0.0f64;
+        let mut weighted_variance = 0.0f64;
+        let mut weighted_squares = 0.0f64;
         for idx in survivors {
-            let survivor_weight = weights[idx];
+            let survivor_weight = f64::from(weights[idx]);
             count += 1;
             weight += survivor_weight;
-            let deviation = values[idx] - value;
+            let deviation = f64::from(values[idx]) - f64::from(value);
             weighted_squares += survivor_weight * deviation * deviation;
             if let Some(noise) = noise {
                 weighted_variance +=
-                    survivor_weight * survivor_weight * noise.variance_at(idx, value);
+                    survivor_weight * survivor_weight * f64::from(noise.variance_at(idx, value));
             }
         }
         Self {
             value,
-            weight,
+            weight: weight as f32,
             // `+∞` where the model says the samples hold no noise: an exact pixel, honestly.
             inverse_variance: if weight > 0.0 {
-                weight * weight / weighted_variance
+                (weight * weight / weighted_variance) as f32
             } else {
                 PixelQuality::UNMEASURED.inverse_variance
             },
             dispersion: if count > 1 && weight > 0.0 {
-                weighted_squares / ((count - 1) as f32 * weight)
+                (weighted_squares / ((count - 1) as f64 * weight)) as f32
             } else {
                 PixelQuality::UNMEASURED.dispersion
             },
@@ -88,12 +92,50 @@ impl CombinedSample {
         match quality {
             SampleQuality::Measured => Self {
                 value,
-                weight: weights.iter().sum(),
+                weight: weight_sum(weights),
                 inverse_variance: PixelQuality::UNMEASURED.inverse_variance,
                 dispersion: PixelQuality::UNMEASURED.dispersion,
                 small_n_fallback: false,
             },
             SampleQuality::ValueOnly => Self::value_only(value),
+        }
+    }
+
+    /// The median of a pixel the small-sample fallback combines, three samples or more of a stack
+    /// whose rejection needs more, which keeps them all: its weight is their `Σwᵢ`, as a mean's is;
+    /// its inverse variance the equal-weight model's, `n / (f(n)·v̄)`, with `v̄` the samples' mean
+    /// model variance at the median and `f(n)` the Gaussian median's small-sample factor
+    /// ([`median_variance_factor`]): exact for samples of one variance, an approximation
+    /// otherwise. Without noise columns it reads `+∞`, as [`Self::from_survivors`]'s does. Its
+    /// dispersion is NaN, as any median's: it is no linear combination to read a scatter of.
+    pub(crate) fn of_small_median(samples: PixelSamples<'_>, quality: SampleQuality) -> Self {
+        let PixelSamples {
+            values,
+            weights,
+            noise,
+        } = samples;
+        let count = values.len();
+        debug_assert!(count >= 3, "one or two samples take their mean");
+        // Reorders the values in place, away from their weights and noise: only sums over every
+        // sample, which no order changes, are read after it.
+        let value = statistics::median_mut(values);
+        if quality == SampleQuality::ValueOnly {
+            return Self::value_only(value);
+        }
+        let variance_sum: f64 = noise.map_or(0.0, |noise| {
+            (0..count)
+                .map(|idx| f64::from(noise.variance_at(idx, value)))
+                .sum()
+        });
+        let count_f64 = count as f64;
+        Self {
+            value,
+            weight: weight_sum(weights),
+            inverse_variance: (count_f64 * count_f64
+                / (median_variance_factor(count) * variance_sum))
+                as f32,
+            dispersion: PixelQuality::UNMEASURED.dispersion,
+            small_n_fallback: false,
         }
     }
 
@@ -125,4 +167,9 @@ impl CombinedSample {
             small_n_fallback: false,
         }
     }
+}
+
+/// `Σwᵢ` in f64, rounded once, as [`CombinedSample::from_survivors`] sums its own.
+fn weight_sum(weights: &[f32]) -> f32 {
+    weights.iter().map(|&weight| f64::from(weight)).sum::<f64>() as f32
 }

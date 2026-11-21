@@ -161,7 +161,7 @@ fn deblend_separation_controls_split() {
 }
 
 /// A group too big for one candidate is still deblended: sixteen 0.3 stars on a 6-px grid form
-/// one component of over 500 px — the default `max_area` — holding sixteen peaks. The area bound
+/// one component of over 500 px holding sixteen peaks. The area bound
 /// applies to the regions the deblender makes, each a 6-px cell, so every star is a candidate,
 /// under both deblenders.
 #[test]
@@ -190,11 +190,11 @@ fn a_crowded_group_splits_into_every_star() {
         };
         let result = detect_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config);
         // One component split — the group, the sky's lone noise pixels staying whole and under
-        // the area floor — into sixteen regions that together hold more than `max_area`.
+        // the area floor — into sixteen regions that together hold more than 500 px.
         assert_eq!(result.deblended_components, 1, "{deblend:?}");
         assert_eq!(result.regions.len(), 16, "{deblend:?}");
         let group_area: usize = result.regions.iter().map(|region| region.area).sum();
-        assert!(group_area > config.max_area, "{deblend:?}: {group_area} px");
+        assert!(group_area > 500, "{deblend:?}: {group_area} px");
         assert_eq!(
             matched_truths(&result.regions, &truths, fwhm::to_sigma(4.0)),
             16,

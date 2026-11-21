@@ -7,15 +7,17 @@
 )]
 
 use crate::internals::init_tracing;
+use crate::internals::synthetic::patterns;
+use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::internals::visual::drawing::{self, draw_circle, draw_cross};
 use crate::internals::visual::{ToneMap, mono_to_rgb, save_image};
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detector::stages::detect::internals::detect_stars_test;
 use crate::star_detection::tests::stage_effects::{bg_estimate, peaks};
 use crate::star_detection::tests::{ISOLATION, Scenario, isolated, near};
-use common::Buffer2;
 use common::Libm;
-use glam::DVec2;
+use common::{Buffer2, USize2};
+use glam::{DVec2, Vec2};
 
 /// How far from a star's centre its candidate's peak pixel can lie. Noiseless, the peak is the
 /// nearest pixel, within √2/2; noise can lift a neighbour over it, but every pixel past 2 px holds
@@ -209,4 +211,37 @@ fn the_area_floor_drops_cosmic_rays_and_keeps_stars() {
             );
         }
     }
+}
+
+/// A bright star with wings is one candidate, its footprint unbounded: a Moffat β 2.5 star of FWHM
+/// 4 at peak SNR 5000 stands above the 4σ threshold out to `α·√(1250^0.4 − 1)` = 3.54 × 4.04 =
+/// 14.3 px, some 640 px of footprint, which a bound of 500 would drop whole.
+#[test]
+fn a_bright_moffat_star_is_one_candidate() {
+    const BETA: f32 = 2.5;
+    let alpha = 4.0 / (2.0 * (2.0f32.libm_powf(1.0 / BETA) - 1.0).sqrt());
+    let mut pixels = SyntheticStar::new(
+        Vec2::new(64.3, 63.6),
+        0.5,
+        StarProfile::Moffat { alpha, beta: BETA },
+    )
+    .stamp(USize2::new(128, 128), 0.1);
+    patterns::add_gaussian_noise(pixels.pixels_mut(), 1e-4, 17);
+    let bg = bg_estimate(&pixels);
+    let residual = bg.residual_of(&pixels);
+    let detect = |max_area| {
+        detect_stars_test(
+            &residual,
+            &bg.sky_noise(),
+            &ExtractionConfig {
+                max_area,
+                ..ExtractionConfig::default()
+            },
+        )
+    };
+    let candidates = detect(None);
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(peaks(&candidates), [DVec2::new(64.0, 64.0)]);
+    assert!(candidates[0].area > 500, "{} px", candidates[0].area);
+    assert!(detect(Some(500)).is_empty());
 }

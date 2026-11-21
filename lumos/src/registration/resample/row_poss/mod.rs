@@ -29,16 +29,17 @@ impl RowPoss {
         self.poss.clear();
         self.poss.reserve_exact(width);
         let y = y as f64;
-        if let Some(sip) = &transform.sip {
+        if let Some(sip) = transform.sip() {
             let row = sip.row(y);
             self.poss.extend((0..width).map(|x| {
-                SourcePos::within(transform.transform.apply(row.correct(x as f64)), source)
+                SourcePos::within(transform.linear().apply(row.correct(x as f64)), source)
             }));
             return;
         }
-        let m = transform.transform.matrix();
+        let linear = transform.linear();
+        let m = linear.matrix();
         let (by, ey) = (m[1] * y, m[4] * y);
-        if transform.transform.transform_type() == TransformType::Homography {
+        if linear.transform_type() == TransformType::Homography {
             let hy = m[7] * y;
             self.poss.extend((0..width).map(|x| {
                 let x = x as f64;

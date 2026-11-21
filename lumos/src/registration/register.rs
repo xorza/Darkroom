@@ -1,9 +1,7 @@
-//! [`PreparedPair`]: one frame pair's catalogs checked and prepared for registration, and their
+//! [`PreparedPair`]: a target's catalog checked and prepared beside the reference's, and the pair's
 //! registration.
 
 use std::time::Instant;
-
-use glam::DVec2;
 
 use crate::math::statistics;
 use crate::registration::error::{RegistrationCatalog, RegistrationError, StarField};
@@ -12,107 +10,68 @@ use crate::registration::kd_tree::KdTree;
 use crate::registration::model_search::ModelSearch;
 use crate::registration::point_pairs::PointPairs;
 use crate::registration::ransac::RansacEstimator;
+use crate::registration::registrar::ReferenceCatalog;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::registration_result::RegistrationResult;
 use crate::registration::triangle::voting::PointMatch;
 use crate::registration::tuning;
 use crate::star_detection::star::Star;
 
-/// Two catalogs checked against a configuration and prepared for its stages: the noise scale
-/// RANSAC scores at, the catalogs the final fit reads, each catalog's brightest stars as a tree for
-/// triangle matching, and the origin a SIP correction is taken about when the configuration names
-/// none.
+/// A target checked against the reference's configuration and prepared beside the reference for
+/// the stages: the noise scale RANSAC scores at, the catalogs the final fit reads, and the
+/// target's brightest stars as a tree for triangle matching.
 #[derive(Debug)]
 pub(super) struct PreparedPair<'a> {
-    config: &'a RegistrationConfig,
+    reference: &'a ReferenceCatalog<'a>,
     max_sigma: f64,
     catalogs: FitCatalogs,
-    reference: KdTree,
     target: KdTree,
-    origin: DVec2,
 }
 
 impl<'a> PreparedPair<'a> {
-    /// `ref_stars` and `target_stars` prepared under `config`, which its caller validated.
+    /// `target` prepared beside `reference`.
     ///
     /// # Errors
     ///
     /// A star registration cannot read, or a catalog below the star gates.
     pub(super) fn new(
-        config: &'a RegistrationConfig,
-        ref_stars: &[Star],
-        target_stars: &[Star],
+        reference: &'a ReferenceCatalog<'a>,
+        target: &[Star],
     ) -> Result<Self, RegistrationError> {
-        validate_catalog(ref_stars, RegistrationCatalog::Reference)?;
-        validate_catalog(target_stars, RegistrationCatalog::Target)?;
-
-        // The gate is keyed to the transform model unless `min_stars` overrides it.
-        let required_stars = config.matching.required_stars(config.model);
-        for stars in [ref_stars, target_stars] {
-            if stars.len() < required_stars {
-                return Err(RegistrationError::TooFewStars {
-                    found: stars.len(),
-                    required: required_stars,
-                });
-            }
-        }
-
-        // The final fit reads no saturated star, so each catalog needs as many unsaturated ones
-        // as the fit needs pairs.
-        for (stars, catalog) in [
-            (ref_stars, RegistrationCatalog::Reference),
-            (target_stars, RegistrationCatalog::Target),
-        ] {
-            let usable = stars.iter().filter(|star| !star.saturated).count();
-            if usable < config.matching.min_matches {
-                return Err(RegistrationError::TooFewUnsaturatedStars {
-                    catalog,
-                    found: usable,
-                    required: config.matching.min_matches,
-                });
-            }
-        }
-
-        // The brightest `max_stars` of each set, as trees: triangle matching forms its triangles
-        // over both, and RANSAC samples their matches for every model.
-        let brightest = |stars: &[Star]| {
-            KdTree::build(
-                brightest_idxs(stars, config.matching.max_stars)
-                    .into_iter()
-                    .map(|idx| stars[idx].pos)
-                    .collect(),
-            )
-            .expect("the star gates leave at least three stars in each set")
-        };
+        let target_tree = check_catalog(reference.config(), target, RegistrationCatalog::Target)?;
         Ok(Self {
-            config,
-            max_sigma: tuning::max_sigma_from_fwhm(median_fwhm(ref_stars, target_stars)),
-            catalogs: FitCatalogs::new(ref_stars, target_stars),
-            reference: brightest(ref_stars),
-            target: brightest(target_stars),
-            origin: bounding_box_centre(ref_stars),
+            reference,
+            max_sigma: tuning::max_sigma_from_fwhm(median_fwhm(reference.stars(), target)),
+            catalogs: FitCatalogs::new(reference.stars(), target),
+            target: target_tree,
         })
     }
 
     /// The triangle matches between the brightest stars of each catalog.
     pub(super) fn matches(&self) -> Vec<PointMatch> {
-        self.config
-            .matching
-            .triangle
-            .match_trees(&self.reference, &self.target, self.max_sigma)
+        self.reference.config().matching.triangle.match_trees(
+            self.reference.brightest(),
+            &self.target,
+            self.max_sigma,
+        )
     }
 
     /// The model search over `matches`: RANSAC on their positions, and the final fit over the
     /// catalogs.
     pub(super) fn search(&self, matches: &[PointMatch]) -> ModelSearch<'_> {
+        let config = self.reference.config();
         ModelSearch {
-            pairs: PointPairs::from_matches(matches, self.reference.points(), self.target.points()),
+            pairs: PointPairs::from_matches(
+                matches,
+                self.reference.brightest().points(),
+                self.target.points(),
+            ),
             confidences: matches.iter().map(|m| m.confidence).collect(),
             catalogs: &self.catalogs,
-            ransac: RansacEstimator::new(self.config.ransac, self.max_sigma),
+            ransac: RansacEstimator::new(config.ransac, self.max_sigma),
             recovery_radius: tuning::recovery_radius(self.max_sigma),
-            min_matches: self.config.matching.min_matches,
-            max_rms_error: self.config.max_rms_error,
+            min_matches: config.matching.min_matches,
+            max_rms_error_px: config.max_rms_error_px,
         }
     }
 
@@ -122,6 +81,7 @@ impl<'a> PreparedPair<'a> {
     ///
     /// Too few matches, every model's failure, or a fit past the RMS gate.
     pub(super) fn register(&self) -> Result<RegistrationResult, RegistrationError> {
+        let config = self.reference.config();
         let start = Instant::now();
         let matches = self.matches();
         tracing::debug!(
@@ -129,25 +89,64 @@ impl<'a> PreparedPair<'a> {
             match_count = matches.len(),
             "Triangle matching complete"
         );
-        if matches.len() < self.config.matching.min_matches {
+        if matches.len() < config.matching.min_matches {
             return Err(RegistrationError::NoMatchingPatterns {
                 found: matches.len(),
-                required: self.config.matching.min_matches,
+                required: config.matching.min_matches,
             });
         }
-        let fit = self.search(&matches).fit(self.config.model, self.origin)?;
+        let fit = self
+            .search(&matches)
+            .fit(config.model, self.reference.origin())?;
         tracing::debug!(
             register_ms = start.elapsed().as_secs_f64() * 1000.0,
             "Registration complete"
         );
-        if fit.rms_error > self.config.max_rms_error {
+        let rms_error_px = fit.result.rms_error_px();
+        if rms_error_px > config.max_rms_error_px {
             return Err(RegistrationError::AccuracyTooLow {
-                rms_error: fit.rms_error,
-                max_allowed: self.config.max_rms_error,
+                rms_error: rms_error_px,
+                max_allowed: config.max_rms_error_px,
             });
         }
-        Ok(RegistrationResult::new(fit.warp, fit.matches))
+        Ok(fit.result)
     }
+}
+
+/// `stars` checked as `catalog` under `config` — every star readable, and as many stars and
+/// unsaturated stars as the gates ask — and its brightest `max_stars` as the tree triangle matching
+/// forms its triangles over, and RANSAC samples their matches from.
+pub(super) fn check_catalog(
+    config: &RegistrationConfig,
+    stars: &[Star],
+    catalog: RegistrationCatalog,
+) -> Result<KdTree, RegistrationError> {
+    validate_catalog(stars, catalog)?;
+    let required = config.model.required_stars();
+    if stars.len() < required {
+        return Err(RegistrationError::TooFewStars {
+            catalog,
+            found: stars.len(),
+            required,
+        });
+    }
+    // The final fit reads no saturated star, so each catalog needs as many unsaturated ones as the
+    // fit needs pairs.
+    let usable = stars.iter().filter(|star| !star.saturated).count();
+    if usable < config.matching.min_matches {
+        return Err(RegistrationError::TooFewUnsaturatedStars {
+            catalog,
+            found: usable,
+            required: config.matching.min_matches,
+        });
+    }
+    Ok(KdTree::build(
+        brightest_idxs(stars, config.matching.max_stars)
+            .into_iter()
+            .map(|idx| stars[idx].pos)
+            .collect(),
+    )
+    .expect("the star gates leave at least three stars in each set"))
 }
 
 /// Every star of `catalog` carries what registration reads in a form it can use: a finite position
@@ -196,41 +195,25 @@ fn brightest_idxs(stars: &[Star], count: usize) -> Vec<usize> {
     idxs
 }
 
-/// The centre of the stars' bounding box: the SIP origin when none is configured, shared by every
-/// frame registered to the same reference.
-fn bounding_box_centre(stars: &[Star]) -> DVec2 {
-    let (low, high) = stars.iter().fold(
-        (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
-        |(low, high), star| (low.min(star.pos), high.max(star.pos)),
-    );
-    (low + high) / 2.0
-}
-
-/// The median FWHM over both catalogs.
+/// The median FWHM over both catalogs' unsaturated stars, whose width is the seeing's; over every
+/// star where all are saturated.
 pub(super) fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
-    let mut fwhms: Vec<f32> = ref_stars
-        .iter()
-        .chain(target_stars)
-        .map(|s| s.fwhm)
-        .collect();
+    let stars = || ref_stars.iter().chain(target_stars);
+    let mut fwhms: Vec<f32> = stars().filter(|s| !s.saturated).map(|s| s.fwhm).collect();
+    if fwhms.is_empty() {
+        fwhms.extend(stars().map(|s| s.fwhm));
+    }
     f64::from(statistics::median_mut(&mut fwhms))
 }
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
-    use glam::DVec2;
-
     use crate::registration::register::PreparedPair;
 
     impl PreparedPair<'_> {
         /// The noise scale RANSAC scores at, from the stars' median FWHM.
         pub(crate) const fn max_sigma(&self) -> f64 {
             self.max_sigma
-        }
-
-        /// The origin a SIP correction is taken about when the configuration names none.
-        pub(crate) const fn origin(&self) -> DVec2 {
-            self.origin
         }
     }
 }

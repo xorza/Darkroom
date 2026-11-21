@@ -40,9 +40,10 @@ use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::{fits_bytes, fits_refusal, load_cfa, load_linear, write_fits};
+use crate::io::decode_config::DecodeConfig;
 use crate::io::decoder::cfa_decoder::{CfaDecoder, CfaRead};
 use crate::io::decoder::{Decoder, Peek};
-use crate::io::error::{ImageError, ScientificRefusal};
+use crate::io::error::{ImageError, LoadError, ScientificRefusal};
 use crate::io::fits::error::FitsLoadError;
 use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale, FitsLoadConfig};
@@ -80,13 +81,15 @@ fn one_pixel_header() -> Header {
 /// and the frame loads; a keyword that decides how the samples are read still fails the load.
 #[test]
 fn optional_metadata_degrades_and_load_deciding_keywords_fail() {
-    // An integer image, whose scale its BITPIX settles, so DATAMAX is metadata only.
+    // An integer image, whose scale its BITPIX settles, so DATAMAX and SATURATE are metadata
+    // only: a SATURATE given as text states no level, and flags nothing.
     let mut mistyped = one_pixel_header();
     mistyped.set("BITPIX", 32).unwrap();
     mistyped.set("DATAMAX", "not a real").unwrap();
+    mistyped.set("SATURATE", "not a real").unwrap();
     mistyped.set("ISOSPEED", -1).unwrap();
     let image = header_and_load(&mistyped).unwrap();
-    assert_eq!(image.metadata.header.data_max, None);
+    assert!(!image.metadata.derived.saturation_flagged());
     assert_eq!(image.metadata.header.iso, None);
 
     // A float image's DATAMAX is how its scale is decided, so there it fails the load.
@@ -206,12 +209,17 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
     let image = Image::new(vec![4, 1], pixels.clone(), Scaling::IDENTITY).unwrap();
     let fits = fits_bytes(image.view(), Some(&Header::new()));
 
-    let with_scale = |scale| LoadCtx {
-        fits: FitsLoadConfig {
-            float_scale: scale,
-            ..Default::default()
-        },
-        ..LoadCtx::default()
+    let with_scale = |scale| {
+        LoadCtx::new(
+            DecodeConfig {
+                fits: FitsLoadConfig {
+                    float_scale: scale,
+                    ..Default::default()
+                },
+                ..DecodeConfig::default()
+            },
+            CancelToken::never(),
+        )
     };
 
     // No DATAMAX, so `Auto` takes the samples as normalized, and they reach 65535: refused, which is
@@ -239,7 +247,7 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
     assert_eq!(forced.channel(0).pixels(), &*pixels);
 
     // A scale that would invert or erase the samples is rejected rather than applied.
-    for bad in [0.0, -1.0, f32::NAN] {
+    for bad in [0.0, -1.0, f64::NAN] {
         let reason = fits_refusal(
             load_linear(&fits, &with_scale(FitsFloatScale::FullScale(bad))).unwrap_err(),
         );
@@ -298,13 +306,16 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
         FitsRefusal::UndeclaredFloatScale { maximum: 65_535.0 }
     );
     let bare_fits = fits_bytes(image.view(), Some(&Header::new()));
-    let normalized_options = LoadCtx {
-        fits: FitsLoadConfig {
-            float_scale: FitsFloatScale::Normalized,
-            ..Default::default()
+    let normalized_options = LoadCtx::new(
+        DecodeConfig {
+            fits: FitsLoadConfig {
+                float_scale: FitsFloatScale::Normalized,
+                ..Default::default()
+            },
+            ..DecodeConfig::default()
         },
-        ..LoadCtx::default()
-    };
+        CancelToken::never(),
+    );
     let bare = load_linear(&bare_fits, &normalized_options).unwrap();
     assert_eq!(bare.channel(0).pixels(), &*pixels);
 
@@ -319,9 +330,9 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     let normalized_fits = fits_bytes(unit_image.view(), Some(&normalized_header));
     let normalized = load_linear(&normalized_fits, &LoadCtx::default()).unwrap();
     assert_eq!(normalized.channel(0).pixels(), &*unit_pixels);
-    assert_eq!(normalized.metadata.header.data_max, Some(1.0));
+    assert!(!normalized.metadata.derived.saturation_flagged());
 
-    // DATAMAX = 65535: a saturation level far above unity, so the samples are ADU and divide by
+    // DATAMAX = 65535: a maximum far above unity, so the samples are ADU and divide by
     // the 16-bit full scale. -5/65535 = -7.629511e-5, 0.5/65535 = 7.629511e-6, 65535/65535 = 1.
     let mut adu_header = Header::new();
     adu_header.set("DATAMAX", 65_535.0).unwrap();
@@ -332,9 +343,8 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     assert_eq!(decoded[1], 0.0);
     assert_close!(decoded[2], 7.629_511e-6, 1e-10, "{decoded:?}");
     assert_eq!(decoded[3], 1.0);
-    // DATAMAX follows the samples, so the round-trip is stable: saving and reloading this frame
-    // sees DATAMAX = 1 and leaves it alone rather than dividing a second time.
-    assert_eq!(adu.metadata.header.data_max, Some(1.0));
+    // A maximum flags nothing: the standard's DATAMAX states no saturation.
+    assert!(!adu.metadata.derived.saturation_flagged());
 
     // The two frames hold the same ADU data and were divided by spans 65535 apart, which is exactly
     // the mismatch a stack has to be able to detect. The sample domain is what makes it detectable
@@ -440,13 +450,16 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     let dir = TempDir::new("lumos-fits-roundtrip");
     let float_fits = fits_bytes(float_image.view(), Some(&Header::new()));
     // ADU with no declared scale, which `Auto` refuses; the caller says how to read them.
-    let float_ctx = LoadCtx {
-        fits: FitsLoadConfig {
-            float_scale: FitsFloatScale::Normalized,
-            ..Default::default()
+    let float_ctx = LoadCtx::new(
+        DecodeConfig {
+            fits: FitsLoadConfig {
+                float_scale: FitsFloatScale::Normalized,
+                ..Default::default()
+            },
+            ..DecodeConfig::default()
         },
-        ..LoadCtx::default()
-    };
+        CancelToken::never(),
+    );
     let float = load_linear(&float_fits, &float_ctx).unwrap();
 
     // BITPIX = 16 with BSCALE/BZERO identity, and -32768 declared as BLANK. fits-well maps that
@@ -495,10 +508,13 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     assert_close!(integer_filled[2], expected, 1e-9, "{integer_filled:?}");
 
     // And the policy that refuses them still does, naming how many and where the first one is.
-    let strict = LoadCtx {
-        nulls: NullPolicy::Reject,
-        ..float_ctx.clone()
-    };
+    let strict = LoadCtx::new(
+        DecodeConfig {
+            nulls: NullPolicy::Reject,
+            ..float_ctx.decode.clone()
+        },
+        CancelToken::never(),
+    );
     let refused = load_linear(&float_fits, &strict).unwrap_err();
     assert!(
         matches!(
@@ -522,8 +538,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
         ..StackConfig::light()
     };
     let ingest = |ctx: &LoadCtx| IngestConfig {
-        fits: ctx.fits.clone(),
-        nulls: ctx.nulls,
+        decode: ctx.decode.clone(),
         ..IngestConfig::with_cache_dir(dir.join("cache"))
     };
     let stacked = config.stack_paths(&paths, &ingest(&float_ctx), ProgressMonitor::unattended());
@@ -532,9 +547,11 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     assert!(
         matches!(
             refused,
-            Err(StackError::ImageLoad(ImageError::NullSamples {
-                count: 1,
-                first_idx: 2,
+            Err(StackError::ImageLoad(ImageError {
+                kind: LoadError::NullSamples(NullSamples {
+                    count: 1,
+                    first_idx: 2
+                }),
                 ..
             }))
         ),
@@ -543,7 +560,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     let refused = DrizzleConfig::default().drizzle_paths(
         vec![DrizzleFrame::new(
             float_path,
-            WarpTransform::new(Transform::identity()),
+            WarpTransform::from(Transform::identity()),
         )],
         &ingest(&strict),
         ProgressMonitor::unattended(),
@@ -551,13 +568,13 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     assert!(
         matches!(
             refused,
-            Err(DrizzleError::Stack(StackError::ImageLoad(
-                ImageError::NullSamples {
+            Err(DrizzleError::Stack(StackError::ImageLoad(ImageError {
+                kind: LoadError::NullSamples(NullSamples {
                     count: 1,
-                    first_idx: 2,
-                    ..
-                }
-            )))
+                    first_idx: 2
+                }),
+                ..
+            })))
         ),
         "{refused:?}"
     );
@@ -579,7 +596,8 @@ fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
 
 /// A mono sensor frame (`CFATYPE = 'MONO'`, which this crate writes) has no mosaic, so it loads as
 /// linear data. A three-plane cube keeps the `BAYERPAT` of the sensor it was demosaiced from,
-/// which describes none of its planes, so it loads too.
+/// which describes none of its planes, so it loads too. The default context refuses the cube as
+/// science, whose planes it cannot name, and previews it as RGB.
 #[test]
 fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
     let mut mono_header = Header::new();
@@ -603,19 +621,32 @@ fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
     let samples: Vec<f32> = (0..12).map(|i| i as f32 / 16.0).collect();
     let cube = Image::new(vec![2, 2, 3], samples.clone(), Scaling::IDENTITY).unwrap();
     let fits = fits_bytes(cube.view(), Some(&stale));
-    let ctx = LoadCtx {
-        fits: FitsLoadConfig {
-            cube: FitsCubeInterpretation::Rgb,
-            ..FitsLoadConfig::default()
+    let ctx = LoadCtx::new(
+        DecodeConfig {
+            fits: FitsLoadConfig {
+                cube: FitsCubeInterpretation::Rgb,
+                ..FitsLoadConfig::default()
+            },
+            ..DecodeConfig::default()
         },
-        ..LoadCtx::default()
-    };
+        CancelToken::never(),
+    );
     let loaded = load_linear(&fits, &ctx).unwrap();
-    for channel in 0..3 {
-        assert_eq!(
-            loaded.channel(channel).pixels(),
-            &samples[channel * 4..(channel + 1) * 4]
-        );
+    assert_eq!(
+        fits_refusal(load_linear(&fits, &LoadCtx::default()).unwrap_err()),
+        FitsRefusal::CubeNeedsRgb
+    );
+    let dir = TempDir::new("lumos-preview-cube");
+    let path = dir.join("cube.fits");
+    write_fits(&path, cube.view(), Some(&stale));
+    let preview = LoadCtx::default().preview(&path).unwrap();
+    for image in [&loaded, &preview] {
+        for channel in 0..3 {
+            assert_eq!(
+                image.channel(channel).pixels(),
+                &samples[channel * 4..(channel + 1) * 4]
+            );
+        }
     }
 }
 
@@ -644,8 +675,8 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
 
     assert!(matches!(
         LoadCtx::default().linear(&path),
-        Err(ImageError::ScientificInputRejected {
-            reason: ScientificRefusal::MosaicFits,
+        Err(ImageError {
+            kind: LoadError::Refused(ScientificRefusal::MosaicFits),
             ..
         })
     ));
@@ -665,7 +696,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         Some(info),
         Some(FrameInfo {
             desc: PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
-            cfa_type: pattern,
+            cfa_type: Some(pattern),
             decoder: DecoderBytes {
                 source: 0,
                 beside: 4096 + 16 + 2 * 2880,
@@ -696,6 +727,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         Some(crate::ImageProvenance {
             color: ColorProvenance::SensorRgb,
             demosaic: crate::DemosaicProvenance::LumosRcd,
+            clipped: true,
             ..
         })
     ));

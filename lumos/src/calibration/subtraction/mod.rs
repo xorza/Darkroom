@@ -9,7 +9,7 @@ use crate::calibration::error::SubtractionFault;
 use crate::calibration::imposed_flags;
 use crate::calibration::master_role::MasterRole;
 use crate::calibration::subtractor::Subtractor;
-use crate::frame::capture_conditions::CaptureConditions;
+use crate::frame::capture_conditions::{CaptureConditions, SensorSetting, SettingsCompared};
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::metadata::sample_domain::{DomainMap, SampleDomain};
@@ -24,6 +24,8 @@ use crate::image::metadata::sample_domain::{DomainMap, SampleDomain};
 #[derive(Debug)]
 pub(crate) struct Subtraction<'a> {
     terms: ArrayVec<Term<'a>, 2>,
+    /// Whether every master's sensor setting was compared with the frame's in full.
+    pub(crate) settings: SettingsCompared,
     /// The frame's domain once every term is removed.
     domain: Option<SampleDomain>,
 }
@@ -60,8 +62,9 @@ impl<'a> Subtraction<'a> {
     ///
     /// # Errors
     ///
-    /// A [`SubtractionFault`]: a master that holds dark signal was taken under other conditions
-    /// than the frame, or a master's domain cannot be expressed in the frame's.
+    /// A [`SubtractionFault`]: a master was read at another sensor setting than the frame, one that
+    /// holds dark signal was taken at another exposure it cannot be scaled from, or a master's
+    /// domain cannot be expressed in the frame's.
     pub(crate) fn resolve(
         frame: &CfaImage,
         subtractors: impl IntoIterator<Item = Subtractor<'a>>,
@@ -69,9 +72,20 @@ impl<'a> Subtraction<'a> {
         let conditions = CaptureConditions::of(&frame.metadata);
         let mut domain = frame.metadata.derived.domain().cloned();
         let mut terms = ArrayVec::new();
+        let mut settings = SettingsCompared::All;
         for subtractor in subtractors {
             let master = subtractor.master;
             let removes = subtractor.removes();
+            let compared = conditions
+                .setting
+                .compare(SensorSetting::of(&master.metadata))
+                .map_err(|source| SubtractionFault::Conditions {
+                    role: subtractor.role,
+                    source: source.into(),
+                })?;
+            if compared == SettingsCompared::Partly {
+                settings = SettingsCompared::Partly;
+            }
             let matched = removes
                 .thermal
                 .then(|| {
@@ -96,7 +110,11 @@ impl<'a> Subtraction<'a> {
                 matched,
             });
         }
-        Ok(Self { terms, domain })
+        Ok(Self {
+            terms,
+            settings,
+            domain,
+        })
     }
 
     /// The term of the master of `role`, when the subtraction takes one.

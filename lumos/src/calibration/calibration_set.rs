@@ -39,6 +39,25 @@ impl<T> CalibrationSet<T> {
         }
     }
 
+    /// Each role's value made into another by `f`, in [`MasterRole::ALL`] order.
+    pub fn map<U>(self, mut f: impl FnMut(T) -> U) -> CalibrationSet<U> {
+        let Self {
+            dark,
+            flat,
+            bias,
+            flat_dark,
+        } = self;
+        let dark = f(dark);
+        let flat = f(flat);
+        let bias = f(bias);
+        CalibrationSet {
+            dark,
+            flat,
+            bias,
+            flat_dark: f(flat_dark),
+        }
+    }
+
     /// The four roles in [`MasterRole::ALL`] order, each with its value. The one place that
     /// decides what "all the roles" means: a fifth role is a compile error here, not an omission.
     pub fn iter(&self) -> impl Iterator<Item = (MasterRole, &T)> {

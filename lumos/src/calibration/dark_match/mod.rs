@@ -1,6 +1,6 @@
 //! [`DarkMatch`]: how a master holding dark signal is taken from a frame.
 
-use crate::calibration::error::DarkMismatch;
+use crate::calibration::error::MasterMismatch;
 use crate::frame::capture_condition::CaptureCondition;
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::image::metadata::calibration_state::CalibrationState;
@@ -49,7 +49,7 @@ impl DarkMatch {
         frame: CaptureConditions,
         dark: CaptureConditions,
         bias: DarkBias,
-    ) -> Result<Self, DarkMismatch> {
+    ) -> Result<Self, MasterMismatch> {
         let compared = [
             (
                 TemperatureSource::Sensor,
@@ -88,7 +88,7 @@ impl DarkMatch {
             None
         } else if bias == DarkBias::Held || dark == 0.0 {
             // A dark of 0 s holds no dark signal to scale.
-            return Err(DarkMismatch::Exposure { frame, dark });
+            return Err(MasterMismatch::Exposure { frame, dark });
         } else {
             Some(frame / dark)
         };

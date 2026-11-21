@@ -8,7 +8,7 @@
     (
         label: "mono background sigmas",
         value: F32s([
-            0.001411035,
+            0.001408718,
         ]),
     ),
     (

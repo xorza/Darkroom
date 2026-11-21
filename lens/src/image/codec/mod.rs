@@ -17,7 +17,7 @@ use crate::image::{Image, Pixels};
 
 /// The version of the layout `encode` writes: a cache of another version is rebuilt rather than
 /// misread.
-const VERSION: u32 = 6;
+const VERSION: u32 = 7;
 /// Channel count and sample type, then the width, the height and the record's length as
 /// little-endian `u64`s.
 const HEADER_LEN: u64 = 2 + 8 + 8 + 8;

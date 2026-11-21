@@ -113,9 +113,10 @@ impl StarDetector {
 
         if !stars.is_empty() {
             let values = &mut resources.values;
+            // A clipped core's width is no seeing's.
             values.clear();
-            values.extend(stars.iter().map(|s| s.fwhm));
-            diagnostics.median_fwhm = Some(statistics::median_mut(values));
+            values.extend(stars.iter().filter(|s| !s.saturated).map(|s| s.fwhm));
+            diagnostics.median_fwhm = (!values.is_empty()).then(|| statistics::median_mut(values));
             values.clear();
             values.extend(stars.iter().map(|s| s.snr));
             diagnostics.median_snr = Some(statistics::median_mut(values));

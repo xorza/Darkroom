@@ -42,21 +42,6 @@ impl SigmaClipConfig {
         scale: RejectionScale::Robust,
     };
 
-    /// Clipping to `sigma` in the robust unit, for at most `max_iterations` passes.
-    pub const fn new(sigma: SigmaBounds, max_iterations: u32) -> Self {
-        Self {
-            sigma,
-            max_iterations,
-            ..Self::DEFAULT
-        }
-    }
-
-    /// The same clip in another unit.
-    #[must_use]
-    pub const fn with_scale(self, scale: RejectionScale) -> Self {
-        Self { scale, ..self }
-    }
-
     /// Validate the clip thresholds and pass count: the cap leaves at least one pass to run.
     pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
         self.sigma.validate()?;

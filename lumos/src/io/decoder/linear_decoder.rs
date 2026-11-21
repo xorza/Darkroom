@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use imaginarium::PlanarImage;
+
 use crate::frame::frame_info::DecoderBytes;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
@@ -18,7 +20,7 @@ use crate::io::raster;
 pub(crate) struct LinearDecoder;
 
 impl Decoder for LinearDecoder {
-    type Image = LinearImage;
+    type Samples = PlanarImage;
     type Read = FitsFile;
     const KIND: DecoderKind = DecoderKind::Linear;
 

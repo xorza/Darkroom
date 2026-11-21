@@ -20,7 +20,7 @@ use std::time::Instant;
 use common::{fs, internals};
 use lumos::{
     AlignStackConfig, CalibratedLights, CalibrationMasters, CalibrationSet, IngestConfig,
-    MasterBuild, NoMasterCache, ProgressMonitor, SigmaThreshold,
+    MastersConfig, ProgressMonitor,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -54,16 +54,17 @@ fn main() {
             CalibratedLights {
                 paths: &light_paths,
                 masters: &masters,
+                cosmic_ray: None,
             },
             &IngestConfig::default(),
             ProgressMonitor::unattended(),
         )
         .expect("calibrate_align_stack failed");
     tracing::info!(
-        registered = result.registered(),
+        registered = result.stacked_count(),
         total = light_paths.len(),
-        reference = result.reference,
-        dropped = ?result.dropped(),
+        reference = result.reference(),
+        dropped = ?result.dropped().collect::<Vec<_>>(),
         width = result.product.image.width(),
         height = result.product.image.height(),
         elapsed = elapsed(step),
@@ -113,16 +114,13 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
     // Each role stacks under its own preset, the flats with the bias taken from every frame; the
     // set is assembled once every master exists.
     let masters = CalibrationMasters::build(
-        MasterBuild {
-            frames: CalibrationSet {
-                dark: darks.as_slice(),
-                flat: flats.as_slice(),
-                bias: bias.as_slice(),
-                flat_dark: &[],
-            },
-            sigma_threshold: SigmaThreshold::DEFAULT,
-            cache: &NoMasterCache,
+        CalibrationSet {
+            dark: darks.as_slice(),
+            flat: flats.as_slice(),
+            bias: bias.as_slice(),
+            flat_dark: &[],
         },
+        &MastersConfig::default(),
         &IngestConfig::default(),
         ProgressMonitor::unattended(),
     )

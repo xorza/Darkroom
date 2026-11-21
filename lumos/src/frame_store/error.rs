@@ -61,7 +61,7 @@ pub enum FrameStoreError {
 
 /// Why a frame could not be read through a run's storage: its decode, or the decode cache.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum LoadError {
+pub(crate) enum FrameLoadError {
     #[error(transparent)]
     Decode(#[from] ImageError),
     #[error(transparent)]

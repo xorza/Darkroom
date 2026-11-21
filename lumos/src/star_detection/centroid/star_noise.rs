@@ -21,12 +21,12 @@ impl StarNoise {
         }
     }
 
-    /// The SNR of `flux` summed over `pixels`, its sky measured from `sky_samples` of them when
-    /// it was: `F / √(F/G + n·σ_B²·(1 + n/n_B))`, the last factor the error the sky's own estimate
+    /// The SNR of `flux` summed over `pixels`, an aperture's area, its sky measured from
+    /// `sky_samples` of them when it was: `F / √(F/G + n·σ_B²·(1 + n/n_B))`, the last factor the error the sky's own estimate
     /// carries into every summed pixel alike (Merline & Howell). A sky from the global map, measured
     /// from thousands of samples per tile, adds no term.
-    pub(super) fn snr(self, flux: f64, pixels: usize, sky_samples: Option<usize>) -> f64 {
-        let n = pixels as f64;
+    pub(super) fn snr(self, flux: f64, pixels: f64, sky_samples: Option<usize>) -> f64 {
+        let n = pixels;
         let sky_error = sky_samples.map_or(0.0, |samples| n / samples as f64);
         let bg = n * self.bg_sigma * self.bg_sigma * (1.0 + sky_error);
         let source = self
@@ -50,13 +50,13 @@ mod tests {
             bg_sigma: 0.02,
             electrons_per_unit: None,
         };
-        assert!((bg.snr(2.0, 4, None) - 50.0).abs() < 1e-12);
+        assert!((bg.snr(2.0, 4.0, None) - 50.0).abs() < 1e-12);
         let gain = StarNoise {
             electrons_per_unit: Some(1000.0),
             ..bg
         };
-        assert!((gain.snr(2.0, 4, None) - 2.0 / 0.0036f64.sqrt()).abs() < 1e-12);
-        assert!((gain.snr(2.0, 4, Some(16)) - 2.0 / 0.004f64.sqrt()).abs() < 1e-12);
+        assert!((gain.snr(2.0, 4.0, None) - 2.0 / 0.0036f64.sqrt()).abs() < 1e-12);
+        assert!((gain.snr(2.0, 4.0, Some(16)) - 2.0 / 0.004f64.sqrt()).abs() < 1e-12);
         assert!((gain.variance(0.5) - 0.0009).abs() < 1e-15);
         assert!((gain.variance(-0.5) - 0.0004).abs() < 1e-15);
     }

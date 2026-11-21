@@ -7,6 +7,7 @@ pub(crate) mod error;
 pub(crate) mod extension_claims;
 pub(crate) mod fits_load_config;
 pub(crate) mod flags_extension;
+pub(crate) mod frame_file;
 pub(crate) mod gain_extension;
 pub(crate) mod linear;
 pub(crate) mod lumos_extension;

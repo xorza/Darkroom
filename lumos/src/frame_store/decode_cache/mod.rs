@@ -5,9 +5,10 @@ pub(crate) mod cached_source;
 pub(crate) mod frame_spill;
 pub(crate) mod kept_frame;
 
-use common::MutexExt;
+use common::{ErrorChain, MutexExt, fs};
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 
 use crate::frame::admitted::Admitted;
 use crate::frame_store::decode_cache::cached_source::CachedSource;
@@ -17,16 +18,21 @@ use crate::frame_store::disk_root::DiskRoot;
 use crate::frame_store::error::FrameStoreError;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::gain_key::GainKey;
-use crate::image::stackable_image::StackableImage;
+use crate::image::frame::{Frame, Samples};
 
 /// The directory under the cache root a kept frame lives in.
 const DIR: &str = "decode-cache";
+
+/// A day: longer than any one plane takes to write, so a temporary this old is one a killed
+/// process left, never a write in progress — the rule scenarium's disk store sweeps its own by.
+const STALE_TEMP: Duration = Duration::from_hours(24);
 
 /// Decoded frames keyed by their source and decoder, kept across runs: what `keep_cache` writes and
 /// a later run reuses. Only content-keyed frames go here, each committed under its
 /// [`CacheKey`](crate::frame_store::decode_cache::cache_key::CacheKey) (see
 /// [`FrameSpill::cached`]); what one run alone needs goes to its
-/// [`RunScratch`](crate::frame_store::run_scratch::RunScratch). Lumos never removes it.
+/// [`RunScratch`](crate::frame_store::run_scratch::RunScratch). Lumos never removes a committed
+/// frame; a temporary a killed run left goes at the next open.
 #[derive(Debug)]
 pub(crate) struct DecodeCache {
     root: DiskRoot,
@@ -36,10 +42,14 @@ pub(crate) struct DecodeCache {
 }
 
 impl DecodeCache {
-    /// The cache under `root`, created if missing.
+    /// The cache under `root`, created if missing, with each temporary a write left there over
+    /// [`STALE_TEMP`] ago removed: a run that panics under `panic = "abort"`, or is killed, never
+    /// runs the drop that removes its own.
     pub(crate) fn open(root: &Path) -> Result<Self, FrameStoreError> {
+        let root = DiskRoot::create(&root.join(DIR))?;
+        sweep_stale_temporaries(root.path(), SystemTime::now());
         Ok(Self {
-            root: DiskRoot::create(&root.join(DIR))?,
+            root,
             gains: Mutex::new(Vec::new()),
         })
     }
@@ -74,7 +84,7 @@ impl DecodeCache {
     pub(crate) fn keep(
         &self,
         source: &CachedSource,
-        image: &impl StackableImage,
+        image: &Frame<impl Samples>,
         admitted: Admitted,
     ) -> Result<KeptFrame, FrameStoreError> {
         source.ensure_unchanged()?;
@@ -98,6 +108,38 @@ impl DecodeCache {
     }
 }
 
+/// Remove each temporary of [`fs::publish`] in `dir` last written [`STALE_TEMP`] before `now`: one
+/// listing. Best effort, as the cache works without it: a file that cannot be listed or removed is
+/// logged and left.
+fn sweep_stale_temporaries(dir: &Path, now: SystemTime) {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            tracing::warn!(error = %ErrorChain::new(&error), "cannot list the decode cache");
+            return;
+        }
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name.to_str().and_then(fs::temporary_destination).is_none() {
+            continue;
+        }
+        let stale = fs::entry_metadata(&entry)
+            .and_then(|metadata| metadata.modified())
+            .is_ok_and(|modified| {
+                now.duration_since(modified)
+                    .is_ok_and(|age| age > STALE_TEMP)
+            });
+        if stale && let Err(error) = fs::remove_file(entry.path()) {
+            tracing::warn!(
+                path = %entry.path().display(),
+                error = %ErrorChain::new(&error),
+                "cannot remove a stale decode-cache temporary"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod internals {
     use std::path::Path;
@@ -108,6 +150,7 @@ pub(crate) mod internals {
     use crate::frame_store::decode_cache::cached_source::CachedSource;
     use crate::frame_store::decode_cache::kept_frame::KeptFrame;
     use crate::image::flat_gain::shared_gains::SharedGains;
+    use crate::image::frame::Frame;
     use crate::io::decoder::Decoder;
     use crate::io::load_ctx::LoadCtx;
 
@@ -118,7 +161,7 @@ pub(crate) mod internals {
             &self,
             path: &Path,
             ctx: &LoadCtx,
-        ) -> Option<D::Image> {
+        ) -> Option<Frame<D::Samples>> {
             let source = CachedSource::of(path, D::KIND, ctx).ok()?;
             KeptFrame::reuse_image(
                 &self.spill(&source),
@@ -146,6 +189,42 @@ pub(crate) mod internals {
             edit(&mut plane);
             fs::write(&plane_path, bytemuck::cast_slice(&plane)).unwrap();
             spill.reseal();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use common::{TempDir, fs};
+
+    use crate::frame_store::decode_cache::{STALE_TEMP, sweep_stale_temporaries};
+
+    /// A temporary written a day and a second ago goes; one written just under a day ago stays, a
+    /// write that may be in progress; a committed file and a foreign one stay whatever their age.
+    #[test]
+    fn an_open_removes_the_temporaries_a_killed_run_left() {
+        let dir = TempDir::new("decode_cache_sweep");
+        let now = SystemTime::now();
+        let second = Duration::from_secs(1);
+        let files = [
+            ("frame.ch0.bin.4242.0.tmp", STALE_TEMP + second, false),
+            ("frame.ch0.bin.4242.1.tmp", STALE_TEMP - second, true),
+            ("frame.ch0.bin", STALE_TEMP + second, true),
+            ("notes.tmp", STALE_TEMP + second, true),
+        ];
+        for (name, age, _) in files {
+            let path = dir.path().join(name);
+            fs::write(&path, [0u8]).unwrap();
+            fs::open_write(&path)
+                .unwrap()
+                .set_modified(now - age)
+                .unwrap();
+        }
+        sweep_stale_temporaries(dir.path(), now);
+        for (name, _, kept) in files {
+            assert_eq!(fs::exists(dir.path().join(name)), kept, "{name}");
         }
     }
 }

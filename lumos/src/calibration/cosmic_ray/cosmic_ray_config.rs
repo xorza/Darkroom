@@ -66,8 +66,12 @@ impl CosmicRayConfig {
 #[derive(Debug, Clone)]
 pub enum NoiseEstimation {
     /// The gain the frame states (its `EGAIN` over a declared scale). Without one, `k` is
-    /// `σ²/max(sky, σ)`, which takes the background as sky-photon-dominated: on read-noise-dominated
-    /// frames it over-estimates the noise in bright regions and under-flags there slightly.
+    /// `σ²/max(sky − pedestal, σ)`, which takes the background above the pedestal the values keep
+    /// as sky-photon-dominated: on read-noise-dominated frames it over-estimates the noise in
+    /// bright regions and under-flags there slightly. A frame whose values keep an offset they do
+    /// not state, and lost no bias, is refused ([`CosmicRayError::UnknownPedestal`]).
+    ///
+    /// [`CosmicRayError::UnknownPedestal`]: crate::CosmicRayError::UnknownPedestal
     Measured,
     /// A gain the caller states, in e⁻/ADU. The ADU one sample unit is worth comes from the frame:
     /// its declared scale, else the ADC step its decoder recorded as the quantization σ, and a frame

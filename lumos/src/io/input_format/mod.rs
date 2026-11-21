@@ -5,7 +5,7 @@ use std::path::Path;
 
 use imaginarium::{RasterFormat, SUPPORTED_EXTENSIONS};
 
-use crate::io::error::ImageError;
+use crate::io::error::{ImageError, LoadError};
 
 /// The extensions of a FITS file: the three the FITS standard's users write, and fpack's `fz`, the
 /// last extension of a tile-compressed `.fits.fz`.
@@ -72,9 +72,7 @@ impl InputFormat {
             extension
                 .and_then(RasterFormat::from_extension)
                 .map(Self::Raster)
-                .ok_or_else(|| ImageError::UnsupportedFormat {
-                    path: path.to_path_buf(),
-                })
+                .ok_or_else(|| ImageError::new(path, LoadError::UnsupportedFormat))
         }
     }
 }

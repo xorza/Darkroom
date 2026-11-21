@@ -4,11 +4,12 @@ use std::path::PathBuf;
 
 use crate::calibration::cosmic_ray::error::CosmicRayError;
 use crate::calibration::error::CalibrationError;
-use crate::combine::error::{StackConfigError, StackError};
+use crate::combine::error::StackError;
 use crate::error::{Cancelled, InvalidConfigField};
-use crate::frame_store::error::{FrameStoreError, LoadError};
+use crate::frame_store::error::{FrameLoadError, FrameStoreError};
 use crate::ingest::error::AdmissionError;
-use crate::io::error::ImageError;
+use crate::io::error::{ImageError, LoadError};
+use crate::registration::error::RegistrationError;
 
 /// Failures from calibrated-image and RAW registered stacking.
 #[derive(Debug, thiserror::Error)]
@@ -26,11 +27,12 @@ pub enum AlignStackError {
     /// The configuration cannot run over these lights, found before any light is worked.
     #[error("invalid configuration")]
     Config(#[from] AlignStackConfigError),
-    #[error("reference frame {idx} has only {found} stars (need {required})")]
-    ReferenceInsufficientStars {
+    /// The reference's stars, which no light could register to.
+    #[error("reference frame {idx} cannot be registered to")]
+    Reference {
         idx: usize,
-        found: usize,
-        required: usize,
+        #[source]
+        source: RegistrationError,
     },
     #[error("all {count} non-reference frames failed to register")]
     AllFramesDropped { count: usize },
@@ -65,21 +67,12 @@ pub enum AlignStackConfigError {
     Detection(InvalidConfigField),
     #[error("registration: {0}")]
     Registration(InvalidConfigField),
-    #[error("warp: {0}")]
-    Warp(InvalidConfigField),
     #[error("cosmic-ray rejection: {0}")]
     CosmicRay(InvalidConfigField),
-    #[error("combine")]
-    Stack(#[from] StackConfigError),
+    #[error("combine: {0}")]
+    Stack(InvalidConfigField),
     #[error("reference index {idx} out of range ({count} frames)")]
     ReferenceOutOfRange { idx: usize, count: usize },
-    /// A cosmic-ray pass asked of lights that are already linear: the pass runs on a mosaic
-    /// before its demosaic would smear a hit across pixels, and these lights have none.
-    #[error(
-        "single-frame cosmic-ray rejection runs on mosaic lights before their demosaic; these \
-         lights are already linear, so leave it to stack-time rejection"
-    )]
-    CosmicRayOnLinearLights,
 }
 
 impl From<Cancelled> for AlignStackError {
@@ -92,18 +85,18 @@ impl From<Cancelled> for AlignStackError {
 /// as the file's.
 impl From<ImageError> for AlignStackError {
     fn from(error: ImageError) -> Self {
-        match error {
-            ImageError::Cancelled { .. } => Self::Cancelled,
-            error => Self::Load(Box::new(error)),
+        match error.kind {
+            LoadError::Cancelled => Self::Cancelled,
+            _ => Self::Load(Box::new(error)),
         }
     }
 }
 
-impl From<LoadError> for AlignStackError {
-    fn from(error: LoadError) -> Self {
+impl From<FrameLoadError> for AlignStackError {
+    fn from(error: FrameLoadError) -> Self {
         match error {
-            LoadError::Decode(error) => error.into(),
-            LoadError::Store(error) => error.into(),
+            FrameLoadError::Decode(error) => error.into(),
+            FrameLoadError::Store(error) => error.into(),
         }
     }
 }
@@ -126,7 +119,7 @@ impl From<StackError> for AlignStackError {
             StackError::NoFrames => Self::NoFrames,
             StackError::FrameStore(error) => Self::FrameStore(error),
             StackError::Admission(error) => Self::Admission(error),
-            StackError::Config(error) => Self::Config(error.into()),
+            StackError::Config(error) => Self::Config(AlignStackConfigError::Stack(error)),
             error => Self::Stack(error),
         }
     }
@@ -137,7 +130,7 @@ mod tests {
     use std::io;
     use std::path::PathBuf;
 
-    use crate::io::error::ImageError;
+    use crate::io::error::{ImageError, LoadError};
     use crate::pipeline::error::AlignStackError;
 
     /// A decode the run's token stopped is the run's cancel, and a file failure names its path
@@ -145,16 +138,16 @@ mod tests {
     #[test]
     fn a_decode_error_converts_by_its_case() {
         let path = PathBuf::from("/lights/l1.fits");
-        let cancelled = AlignStackError::from(ImageError::Cancelled { path: path.clone() });
+        let cancelled = AlignStackError::from(ImageError::new(&path, LoadError::Cancelled));
         assert!(
             matches!(cancelled, AlignStackError::Cancelled),
             "{cancelled:?}"
         );
 
-        let missing = AlignStackError::from(ImageError::Io {
-            path,
-            source: io::Error::from(io::ErrorKind::NotFound),
-        });
+        let missing = AlignStackError::from(ImageError::new(
+            &path,
+            io::Error::from(io::ErrorKind::NotFound),
+        ));
         assert!(matches!(missing, AlignStackError::Load(_)), "{missing:?}");
         assert_eq!(missing.to_string().matches("/lights/l1.fits").count(), 1);
     }

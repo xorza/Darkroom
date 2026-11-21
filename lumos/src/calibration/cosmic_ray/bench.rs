@@ -5,8 +5,8 @@ use common::bench::{self, Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::scene::{FRAME, Field};
-use crate::calibration::cosmic_ray;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
+use crate::calibration::cosmic_ray::cosmic_ray_detector::CosmicRayDetector;
 use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
@@ -25,9 +25,10 @@ pub(crate) fn atomic(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(operation, field.name()), |b| {
             let mosaic = field.mosaic(FRAME, cfa_type);
             let config = CosmicRayConfig::default();
+            let mut detector = CosmicRayDetector::new();
             b.iter_batched_ref(
                 || mosaic.clone(),
-                |mosaic| cosmic_ray::reject(mosaic, &config).unwrap(),
+                |mosaic| detector.reject(mosaic, &config).unwrap(),
                 bench::fresh_copies(size_of_val(mosaic.data().pixels())),
             );
         });

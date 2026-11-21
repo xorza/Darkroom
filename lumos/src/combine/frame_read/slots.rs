@@ -26,7 +26,7 @@ impl Slots {
     /// The slots of `frames`, whose sources the set's facts agreed on, at `desc`.
     pub(crate) fn of_frames(frames: &[StoredFrame], desc: PlanarDesc) -> Self {
         Self::new(
-            frames[0].facts.cfa_type.and_then(CfaType::mosaic),
+            frames[0].admitted.facts.cfa_type.and_then(CfaType::mosaic),
             desc.channel_count(),
         )
     }

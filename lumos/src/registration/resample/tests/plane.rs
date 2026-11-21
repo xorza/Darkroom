@@ -16,7 +16,7 @@ use crate::registration::warp_transform::WarpTransform;
 use common::USize2;
 
 /// An integer shift samples every output pixel at a pixel centre, so it copies the source pixel
-/// there, and outside the source it is the border.
+/// there, and outside the source it reads 0.
 ///
 /// Nearest, bilinear and bicubic weigh the centre tap 1 and the rest exactly 0, so they copy it
 /// exactly, clamp or none: the clamp sees no negative lobe, and splits the value into its parts
@@ -35,7 +35,7 @@ fn integer_shifts_copy_the_source() {
     let range = 30.0 / 9.0;
     let largest = 1.7f32;
     for shift in [(0, 0), (2, -1), (-3, 4), (7, 0)] {
-        let transform = WarpTransform::new(Transform::translation(DVec2::new(
+        let transform = WarpTransform::from(Transform::translation(DVec2::new(
             f64::from(shift.0),
             f64::from(shift.1),
         )));
@@ -63,7 +63,7 @@ fn integer_shifts_copy_the_source() {
                     let expected = if inside {
                         input[(source_x as usize, source_y as usize)]
                     } else {
-                        params.border_value
+                        0.0
                     };
                     let actual = output[(x, y)];
                     assert!(
@@ -76,15 +76,14 @@ fn integer_shifts_copy_the_source() {
     }
 }
 
-/// A homography's horizon maps to infinity: the column on it takes the border and has no coverage,
+/// A homography's horizon maps to infinity: the column on it reads 0 and has no coverage,
 /// and nothing anywhere turns non-finite — at the horizon itself, and a hair short of it, where the
 /// position is finite but past `i32::MAX`.
 #[test]
-fn a_homography_horizon_takes_the_border_and_no_coverage() {
+fn a_homography_horizon_reads_zero_and_no_coverage() {
     const WIDTH: usize = 16;
     const HEIGHT: usize = 8;
     const HORIZON_X: usize = 8;
-    const BORDER: f32 = -0.25;
 
     let input = LinearImage::from_interleaved(
         PlanarDesc::new((WIDTH, HEIGHT), ChannelLayout::Mono),
@@ -101,7 +100,7 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
             -horizon_scale / HORIZON_X as f64,
             0.0,
         ]);
-        let wt = WarpTransform::new(transform);
+        let wt = WarpTransform::from(transform);
         let horizon = wt.apply(DVec2::new(HORIZON_X as f64, 0.0));
         if horizon_scale == 1.0 {
             assert!(!horizon.is_finite());
@@ -113,7 +112,6 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
         for method in InterpolationMethod::ALL {
             let params = WarpConfig {
                 method,
-                border_value: BORDER,
                 ..Default::default()
             };
             let warped = params.warp(&input, &wt);
@@ -123,7 +121,7 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
             for y in 0..HEIGHT {
                 assert_eq!(
                     output[(HORIZON_X, y)],
-                    BORDER,
+                    0.0,
                     "{method:?} horizon value at y={y}"
                 );
                 assert_eq!(
@@ -153,7 +151,7 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
 fn an_image_smaller_than_the_kernel_reads_a_constant_back() {
     let size = USize2::new(3, 3);
     let input = Buffer2::new_filled(size, 0.5f32);
-    let wt = WarpTransform::new(Transform::translation(DVec2::new(0.3, -0.2)));
+    let wt = WarpTransform::from(Transform::translation(DVec2::new(0.3, -0.2)));
     let tolerance = 2.0 * 64.0 * f32::EPSILON * 8.0 * 0.5;
     for method in [
         InterpolationMethod::Lanczos2,

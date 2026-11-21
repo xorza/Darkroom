@@ -39,11 +39,11 @@ impl CombineCost {
             workers,
         } = self;
         Stage {
-            kept,
-            held: quality.pixel_bytes(desc.channel_count(), coverage_planes, flag_planes)
+            kept_bytes: kept,
+            held_bytes: quality.pixel_bytes(desc.channel_count(), coverage_planes, flag_planes)
                 * desc.pixel_count()
                 + workers.saturating_mul(CombineScratch::heap_bytes(frame_count)),
-            in_flight: CHUNK_COPIES * frame_pixel_bytes * desc.width(),
+            in_flight_bytes: CHUNK_COPIES * frame_pixel_bytes * desc.width(),
             units: Units::Rows(desc.height()),
         }
     }

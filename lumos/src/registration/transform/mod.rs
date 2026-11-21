@@ -34,7 +34,7 @@ const MIN_HOMOGENEOUS_SCALE: f64 = UNIT_ROUNDOFF * COORDINATE_RANGE / NORMALIZAT
 /// A concrete transformation model, in increasing degrees of freedom.
 ///
 /// Ordered by complexity, which [`Transform::compose`] uses to pick the more general of two.
-/// Choosing a model is [`TransformModel::Auto`](crate::TransformModel::Auto), a different type.
+/// Choosing a model is [`ModelChoice::Auto`](crate::ModelChoice::Auto), a different type.
 /// No `Default`: nothing asks for "the" model, so any pick would be invented for the derive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TransformType {
@@ -263,12 +263,12 @@ impl Transform {
     ///
     /// ```no_run
     /// use glam::DVec2;
-    /// use lumos::{RegistrationConfig, Star};
+    /// use lumos::{Registrar, RegistrationConfig, Star};
     ///
     /// # fn example(ref_stars: &[Star], target_stars: &[Star], ref_pos: DVec2)
     /// # -> Result<(), Box<dyn std::error::Error>> {
-    /// let result = RegistrationConfig::default().registrar()?.register(ref_stars, target_stars)?;
-    /// let transform = result.transform();
+    /// let result = Registrar::new(RegistrationConfig::default()).register(ref_stars, target_stars)?;
+    /// let transform = result.warp().linear();
     ///
     /// // Map a reference point to its corresponding target location
     /// let target_pos = transform.apply(ref_pos);

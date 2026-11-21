@@ -14,7 +14,7 @@ use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
 use crate::image::metadata::fits_transfer_provenance::FitsTransferProvenance;
 use crate::image::metadata::image_provenance::SourceProvenance;
-use crate::io::error::ImageError;
+use crate::io::error::{ImageError, LoadError};
 use crate::io::fits::decode::fits_file::FitsFile;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::load_ctx::LoadCtx;
@@ -99,8 +99,8 @@ pub(crate) trait FitsFailure: std::fmt::Debug {
 
 impl FitsFailure for ImageError {
     fn refusal(self) -> Option<FitsRefusal> {
-        match self {
-            Self::FitsUnsupported { reason, .. } => Some(reason),
+        match self.kind {
+            LoadError::Fits(error) => error.refusal(),
             _ => None,
         }
     }

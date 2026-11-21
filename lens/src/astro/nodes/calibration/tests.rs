@@ -1,22 +1,21 @@
-use std::path::PathBuf;
-use std::{io, slice};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
-use common::{Buffer2, CancelToken, TempDir, fs};
+use common::{Buffer2, CancelToken, MutexExt, TempDir, fs};
 use lumos::{
-    CachedMaster, CalibrationSet, CfaImage, CfaType, FitsChecksumPolicy, ImageMetadata,
-    IngestConfig, MasterBuildError, MasterCache, MasterInputs, MasterRecipe, MasterRole,
-    SigmaThreshold,
+    CalibrationSet, CfaImage, CfaType, ImageMetadata, MasterBuildError, MasterCache, MasterKey,
+    MasterRole, MasterSlot, SigmaThreshold,
 };
 
 use crate::astro::nodes::calibration::{
-    CacheError, CachePlace, Caching, MastersRequest, RoleCachePaths, SourceDirCache, frame_set_key,
+    CacheError, Caching, MastersRequest, RoleCachePaths, SourceDirCache,
 };
 
 #[test]
 fn role_cache_requires_one_source_directory() {
     let frames = [
-        PathBuf::from("calibration/darks/a.raf"),
-        PathBuf::from("calibration/darks/b.raf"),
+        Path::new("calibration/darks/a.raf"),
+        Path::new("calibration/darks/b.raf"),
     ];
     let paths = RoleCachePaths::beside(&frames, "master_dark.fits").unwrap();
     assert_eq!(
@@ -29,8 +28,8 @@ fn role_cache_requires_one_source_directory() {
     );
 
     let mixed = [
-        PathBuf::from("calibration/darks/a.raf"),
-        PathBuf::from("archive/darks/b.raf"),
+        Path::new("calibration/darks/a.raf"),
+        Path::new("archive/darks/b.raf"),
     ];
     let error = RoleCachePaths::beside(&mixed, "master_dark.fits").unwrap_err();
     assert!(matches!(
@@ -42,52 +41,25 @@ fn role_cache_requires_one_source_directory() {
     ));
 }
 
+/// A master is read back under the key it was stored with and no other: the marker beside it
+/// holds the key, and a slot of another key — other frames, another recipe — finds none. A store
+/// that fails leaves no marker, so no master is read under a key it was not written for; the cache
+/// reports it and the build keeps its master.
 #[test]
-fn master_source_key_changes_with_the_frame_set() {
-    let dir = TempDir::new("lens-master-source-key");
-    let first = dir.join("a.raf");
-    let second = dir.join("b.raf");
-    fs::write(&first, b"a").unwrap();
-    let one_frame = frame_set_key(slice::from_ref(&first)).unwrap();
-    assert_eq!(frame_set_key(slice::from_ref(&first)).unwrap(), one_frame);
-
-    fs::write(&second, b"bb").unwrap();
-    let two_frames = frame_set_key(&[first.clone(), second.clone()]).unwrap();
-    assert_ne!(two_frames, one_frame);
-    // The key follows the selection order: a reordered set sums in another
-    // order, so its master can differ in the last bits.
-    let reordered = frame_set_key(&[second.clone(), first.clone()]).unwrap();
-    assert_ne!(reordered, two_frames);
-    fs::write(&first, b"aaa").unwrap();
-    let edited = frame_set_key(&[first.clone(), second]).unwrap();
-    assert_ne!(edited, two_frames);
-    assert_ne!(frame_set_key(&[]).unwrap(), edited);
-
-    fs::remove_file(&first).unwrap();
-    let error = frame_set_key(slice::from_ref(&first)).unwrap_err();
-    assert!(matches!(
-        error,
-        CacheError::FrameMetadata { path, source }
-            if path == first && source.kind() == io::ErrorKind::NotFound
-    ));
-}
-
-/// A master is kept under its frames as the cache read them before the stack: a frame
-/// rewritten while its role is stacked leaves the marker on the old content, so the next build
-/// stacks the role again rather than reuse a master of frames that are gone. One stored under
-/// frames that stayed is read back, under its own recipe and no other.
-#[test]
-fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
-    let dir = TempDir::new("lens-master-key-before-stack");
+fn a_master_is_read_back_under_its_key_alone() {
+    let dir = TempDir::new("lens-master-cache");
     let frame = dir.join("a.raf");
     fs::write(&frame, b"a").unwrap();
-    let frames = [frame.clone()];
-    let inputs = MasterInputs {
+    let frames = [frame.as_path()];
+    let slot = |key| MasterSlot {
         role: MasterRole::Dark,
         frames: &frames,
-        subtracted: &[],
-        recipe: MasterRecipe::of(MasterRole::Dark, &IngestConfig::default()),
+        key,
     };
+    let other_frame = dir.join("b.raf");
+    fs::write(&other_frame, b"b").unwrap();
+    let key = lumos_key(&frames);
+    let other = lumos_key(&[other_frame.as_path()]);
     let cache = SourceDirCache {
         cancel: &CancelToken::never(),
     };
@@ -96,63 +68,68 @@ fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
         CfaType::Mono,
         ImageMetadata::default(),
     );
-    let missing = || match cache.load(&inputs).unwrap() {
-        CachedMaster::Missing(place) => place,
-        CachedMaster::Kept(_) => panic!("no master is kept for the frames as they are"),
-    };
 
-    let place = missing();
-    let read = place.key.clone();
-    fs::write(&frame, b"bb").unwrap();
-    cache.store(place, &master).unwrap();
+    assert!(cache.load(&slot(key)).is_none());
+    cache.store(&slot(key), &master);
     assert_eq!(
         fs::read_to_string(dir.join("master_dark.fits.source")).unwrap(),
-        read
+        key.to_string()
     );
-    let place = missing();
-    assert_ne!(place.key, read);
+    assert_eq!(
+        cache.load(&slot(key)).map(|kept| kept.data().clone()),
+        Some(master.data().clone())
+    );
+    assert!(cache.load(&slot(other)).is_none());
 
-    cache.store(place, &master).unwrap();
-    assert!(matches!(
-        cache.load(&inputs).unwrap(),
-        CachedMaster::Kept(kept) if kept.data() == master.data()
-    ));
-
-    // A store that fails leaves no marker, so no master is read under a key it was not written
-    // for: here the master's path is a directory, which the write cannot replace.
-    let place = CachePlace::of(&inputs).unwrap();
+    // The master's path is a directory, which the write cannot replace.
     let master_path = dir.join("master_dark.fits");
     fs::remove_file(&master_path).unwrap();
     fs::create_dir(&master_path).unwrap();
     assert!(matches!(
-        cache.store(place, &master),
+        SourceDirCache::try_store(&slot(key), &master),
         Err(CacheError::WriteMaster { .. })
     ));
+    cache.store(&slot(key), &master);
     assert!(!fs::exists(dir.join("master_dark.fits.source")));
     fs::remove_dir(&master_path).unwrap();
-    assert!(matches!(
-        cache.load(&inputs).unwrap(),
-        CachedMaster::Missing(_)
-    ));
-
-    // Another recipe over the same frames, as another lumos or other decode options give, finds
-    // none.
-    let mut strict = IngestConfig::default();
-    strict.fits.checksum = FitsChecksumPolicy::RequireValid;
-    let restacked = MasterInputs {
-        recipe: MasterRecipe::of(MasterRole::Dark, &strict),
-        ..inputs
-    };
-    assert!(matches!(
-        cache.load(&restacked).unwrap(),
-        CachedMaster::Missing(_)
-    ));
+    assert!(cache.load(&slot(key)).is_none());
 }
 
-/// A missing frame fails the key's `stat` with the cache on, and with it off the key is never
-/// computed: the stack is what reports the missing file.
+/// A key as lumos composes one for a dark of `frames`, by building its master through a cache that
+/// records it.
+fn lumos_key(frames: &[&Path]) -> MasterKey {
+    #[derive(Debug, Default)]
+    struct Recorder(Mutex<Option<MasterKey>>);
+    impl MasterCache for Recorder {
+        fn load(&self, slot: &MasterSlot<'_>) -> Option<CfaImage> {
+            *self.0.lock_unpoisoned() = Some(slot.key);
+            None
+        }
+
+        fn store(&self, _: &MasterSlot<'_>, _: &CfaImage) {}
+    }
+    let recorder = Recorder::default();
+    // The frames are not images: the stack fails after the cache was read.
+    lumos::CalibrationMasters::build(
+        CalibrationSet {
+            dark: frames,
+            ..CalibrationSet::default()
+        },
+        &lumos::MastersConfig {
+            hot_sigma: SigmaThreshold::DEFAULT,
+            cache: Some(&recorder),
+        },
+        &lumos::IngestConfig::default(),
+        lumos::ProgressMonitor::unattended(),
+    )
+    .unwrap_err();
+    recorder.0.lock_unpoisoned().expect("the cache was read")
+}
+
+/// A missing frame is reported by its stack, cache on or off: lumos keys no master it cannot read
+/// the frames of, and the cache is not asked.
 #[test]
-fn frame_set_key_runs_only_with_the_cache_on() {
+fn a_missing_frame_fails_the_stack_with_the_cache_on_or_off() {
     let dir = TempDir::new("lens-master-key-cache-off");
     let missing = dir.join("missing.raf");
     let build = |caching| {
@@ -167,9 +144,7 @@ fn frame_set_key_runs_only_with_the_cache_on() {
         .build(&CancelToken::never())
         .unwrap_err()
     };
-    assert!(matches!(
-        build(Caching::BesideFrames),
-        MasterBuildError::Cache(CacheError::FrameMetadata { .. })
-    ));
-    assert!(matches!(build(Caching::Off), MasterBuildError::Stack(_)));
+    for caching in [Caching::BesideFrames, Caching::Off] {
+        assert!(matches!(build(caching), MasterBuildError::Stack(_)));
+    }
 }

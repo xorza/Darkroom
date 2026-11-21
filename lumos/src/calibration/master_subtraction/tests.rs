@@ -1,4 +1,4 @@
-use crate::calibration::error::DarkMismatch;
+use crate::calibration::error::MasterMismatch;
 use crate::calibration::master_subtraction::*;
 use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -80,7 +80,7 @@ fn each_frame_loses_what_the_subtractor_holds() {
         unscalable.apply(3, &mut frame(0.5, 2.0)),
         Err(SubtractionError::SubtractorConditions {
             idx: 3,
-            source: DarkMismatch::Exposure {
+            source: MasterMismatch::Exposure {
                 frame: 2.0,
                 dark: 1.0
             }

@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flags::pixel_flags::PixelFlags;
-use crate::image::flags::quality_flags::{QualityFlags, SATURATION_FRACTION};
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::metadata::fits_checksum_provenance::FitsChecksumProvenance;
 use crate::image::metadata::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
 use crate::image::metadata::image_provenance::{
@@ -115,17 +115,13 @@ impl HduDecode<'_> {
                 step as f32 * QUANTIZATION_SIGMA_PER_STEP
             }),
         };
-        let pedestal = domain_keywords::read_pedestal(header)?.unwrap_or(ctx.fits.pedestal);
+        let pedestal = domain_keywords::read_pedestal(header)?.unwrap_or(ctx.decode.fits.pedestal);
         let mut metadata = metadata::read(header, plan.sample_type);
-        // DATAMAX is a saturation level in the file's sample units, so it only stays comparable to
-        // the samples if it is divided by the same span they were.
-        metadata.header.data_max = plan
-            .data_max
-            .map(|data_max| data_max / plan.sample_scale.divisor);
-        let saturation = metadata
-            .header
-            .data_max
-            .map(|data_max| SATURATION_FRACTION * data_max as f32);
+        // The level is in the file's sample units, so it only stays comparable to the samples once
+        // divided by the same span they were.
+        let saturation = plan
+            .saturation
+            .map(|level| (level / plan.sample_scale.divisor) as f32);
         let saturation_flagged =
             saturation.is_some() || domain_keywords::read_saturation_flagged(header)?;
         let flags = self.resolve_flags(&mut planes, saturation)?;
@@ -194,6 +190,7 @@ impl HduDecode<'_> {
             .collect();
         let flags = self
             .ctx
+            .decode
             .nulls
             .resolve(&mut counted, desc.size(), saturation)?;
         if has_nulls {

@@ -7,155 +7,101 @@ use thiserror::Error;
 
 use crate::error::Cancelled;
 use crate::image::frame_desc::MAX_SIDE;
-use crate::io::fits::error::{FitsLoadError, FitsRefusal};
+use crate::io::fits::error::FitsLoadError;
 use crate::io::null_policy::NullSamples;
 use crate::io::raw::error::RawError;
 
-/// Errors that can occur when loading an astronomical image from disk.
+/// A load of the file at `path` that failed, for `kind`.
 #[derive(Debug, Error)]
-pub enum ImageError {
-    #[error("image load cancelled for '{path}'")]
-    Cancelled { path: PathBuf },
-
-    #[error("failed to load FITS file '{path}'")]
-    Fits {
-        path: PathBuf,
-        source: fits_well::FitsError,
-    },
-
-    #[error("unsupported FITS file '{path}': {reason}")]
-    FitsUnsupported { path: PathBuf, reason: FitsRefusal },
-
-    #[error("failed to load image '{path}'")]
-    Image {
-        path: PathBuf,
-        source: imaginarium::CodecError,
-    },
-
-    #[error("failed to load raw file '{path}'")]
-    Raw { path: PathBuf, source: RawError },
-
-    #[error("failed to read file '{path}'")]
-    Io { path: PathBuf, source: io::Error },
-
-    #[error("no decoder reads the extension of '{path}'")]
-    UnsupportedFormat { path: PathBuf },
-
-    #[error("raster '{path}' is {size}, which has a side past {max} px", max = MAX_SIDE)]
-    RasterSideTooLong { path: PathBuf, size: USize2 },
-
-    #[error("scientific image input '{path}' was rejected: {reason}")]
-    ScientificInputRejected {
-        path: PathBuf,
-        reason: ScientificRefusal,
-    },
-
-    #[error(
-        "image '{path}' contains {count} null/non-finite samples, first at linear index \
-         {first_idx}, and the load's NullPolicy rejects them"
-    )]
-    NullSamples {
-        path: PathBuf,
-        /// Samples, each channel's nulls counted separately.
-        count: usize,
-        /// In the channel-major sample space `count` belongs to.
-        first_idx: usize,
-    },
+#[error("failed to load '{}'", path.display())]
+pub struct ImageError {
+    pub path: PathBuf,
+    #[source]
+    pub kind: LoadError,
 }
 
 impl ImageError {
-    /// LibRaw's or the decoder's `source` failure reading `path`: [`Self::Cancelled`] where LibRaw
-    /// stopped because the load's cancel token asked it to.
-    pub(crate) fn raw(path: &Path, source: RawError) -> Self {
-        match source {
-            RawError::Cancelled => Self::cancelled(path),
-            RawError::Libraw(error) if error.is_cancelled() => Self::cancelled(path),
-            source => Self::Raw {
-                path: path.to_path_buf(),
-                source,
-            },
-        }
-    }
-
-    /// The FITS load of `path` that failed for `error`.
-    pub(crate) fn fits_load(path: &Path, error: FitsLoadError) -> Self {
-        match error {
-            FitsLoadError::Io(source) => Self::Io {
-                path: path.to_path_buf(),
-                source,
-            },
-            FitsLoadError::Fits(source) => Self::fits(path, source),
-            FitsLoadError::Refused(reason) => Self::fits_unsupported(path, reason),
-            FitsLoadError::NullSamples(NullSamples { count, first_idx }) => {
-                Self::null_samples(path, count, first_idx)
-            }
-            FitsLoadError::Scientific(reason) => Self::scientific_rejection(path, reason),
-            FitsLoadError::Cancelled => Self::cancelled(path),
-        }
-    }
-
-    /// The load of `path` stopped by its cancel token.
-    pub(crate) fn cancelled(path: &Path) -> Self {
-        Self::Cancelled {
+    /// The load of `path` that failed for `kind`.
+    pub(crate) fn new(path: &Path, kind: impl Into<LoadError>) -> Self {
+        Self {
             path: path.to_path_buf(),
-        }
-    }
-
-    /// fits-well's `source` failure reading `path`.
-    pub(crate) fn fits(path: &Path, source: fits_well::FitsError) -> Self {
-        Self::Fits {
-            path: path.to_path_buf(),
-            source,
-        }
-    }
-
-    /// A FITS file at `path` this decoder refuses, for `reason`.
-    fn fits_unsupported(path: &Path, reason: FitsRefusal) -> Self {
-        Self::FitsUnsupported {
-            path: path.to_path_buf(),
-            reason,
-        }
-    }
-
-    /// The `count` null samples of the image at `path`, the first at `first_idx`, under
-    /// [`NullPolicy::Reject`](crate::NullPolicy::Reject).
-    pub(super) fn null_samples(path: &Path, count: usize, first_idx: usize) -> Self {
-        Self::NullSamples {
-            path: path.to_path_buf(),
-            count,
-            first_idx,
-        }
-    }
-
-    /// The raster load of `path` that failed for `error`.
-    pub(crate) fn raster_load(path: &Path, error: RasterLoadError) -> Self {
-        let path = path.to_path_buf();
-        match error {
-            RasterLoadError::Io(source) => Self::Io { path, source },
-            RasterLoadError::Codec(source) => Self::Image { path, source },
-            RasterLoadError::Refused(reason) => Self::ScientificInputRejected { path, reason },
-            RasterLoadError::SideTooLong(size) => Self::RasterSideTooLong { path, size },
-            RasterLoadError::NullSamples(NullSamples { count, first_idx }) => Self::NullSamples {
-                path,
-                count,
-                first_idx,
-            },
-            RasterLoadError::Cancelled => Self::Cancelled { path },
-        }
-    }
-
-    /// An image at `path` refused as scientific input, for `reason`.
-    pub(super) fn scientific_rejection(path: &Path, reason: ScientificRefusal) -> Self {
-        Self::ScientificInputRejected {
-            path: path.to_path_buf(),
-            reason,
+            kind: kind.into(),
         }
     }
 }
 
-/// Why a raster load failed, before the entry point names the file.
+/// Why a load failed: one case per decoder, each keeping its own error, and the outcomes a caller
+/// tells apart whichever decoder met them — a cancel, a refusal as scientific input, nulls the
+/// policy refuses — each one case alone, never inside a decoder's.
 #[derive(Debug, Error)]
-pub(crate) enum RasterLoadError {
+pub enum LoadError {
+    #[error("cancelled")]
+    Cancelled,
+    #[error("no decoder reads the file's extension")]
+    UnsupportedFormat,
+    /// The format cannot serve the entry it was read through.
+    #[error("refused as scientific input: {0}")]
+    Refused(ScientificRefusal),
+    #[error(transparent)]
+    NullSamples(NullSamples),
+    #[error("failed to read the file")]
+    Io(#[source] io::Error),
+    #[error("failed to decode the FITS file")]
+    Fits(#[source] FitsLoadError),
+    #[error("failed to decode the raster")]
+    Raster(#[source] RasterLoadError),
+    #[error("failed to decode the camera RAW")]
+    Raw(#[source] RawError),
+}
+
+impl From<io::Error> for LoadError {
+    fn from(source: io::Error) -> Self {
+        Self::Io(source)
+    }
+}
+
+impl From<ScientificRefusal> for LoadError {
+    fn from(reason: ScientificRefusal) -> Self {
+        Self::Refused(reason)
+    }
+}
+
+impl From<FitsLoadError> for LoadError {
+    fn from(source: FitsLoadError) -> Self {
+        match source {
+            FitsLoadError::Cancelled => Self::Cancelled,
+            FitsLoadError::Scientific(reason) => Self::Refused(reason),
+            FitsLoadError::NullSamples(nulls) => Self::NullSamples(nulls),
+            source => Self::Fits(source),
+        }
+    }
+}
+
+impl From<RasterLoadError> for LoadError {
+    fn from(source: RasterLoadError) -> Self {
+        match source {
+            RasterLoadError::Cancelled => Self::Cancelled,
+            RasterLoadError::Refused(reason) => Self::Refused(reason),
+            RasterLoadError::NullSamples(nulls) => Self::NullSamples(nulls),
+            source => Self::Raster(source),
+        }
+    }
+}
+
+/// LibRaw stopping because the load's cancel token asked it to is the load's cancellation.
+impl From<RawError> for LoadError {
+    fn from(source: RawError) -> Self {
+        match source {
+            RawError::Cancelled => Self::Cancelled,
+            RawError::Libraw(error) if error.is_cancelled() => Self::Cancelled,
+            source => Self::Raw(source),
+        }
+    }
+}
+
+/// Why a raster decode failed.
+#[derive(Debug, Error)]
+pub enum RasterLoadError {
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]

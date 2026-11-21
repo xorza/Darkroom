@@ -13,7 +13,7 @@ use crate::frame::frame_stats::FrameStats;
 /// scaled it; `None` unless *every* frame of `stats` declares a usable one — a set where one
 /// source's digitization is unknown has no figure to propagate, so the whole concern is skipped
 /// rather than guessed at.
-pub(super) fn largest_step<'a>(
+pub(crate) fn largest_step<'a>(
     stats: impl IntoIterator<Item = &'a FrameStats>,
     frame_norms: Option<&[FrameNorm]>,
 ) -> Option<f32> {

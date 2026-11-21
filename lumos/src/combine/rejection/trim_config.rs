@@ -1,6 +1,7 @@
 //! Trimming: drop a fixed share of the sorted samples from each end, and average the rest.
 
 use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};
+use crate::combine::rejection::percent;
 use crate::combine::rejection::scratch_buffers::MethodScratch;
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
@@ -14,10 +15,34 @@ use crate::math::statistics::spread::Spread;
 /// rejects by the deviation from the median as a fraction of the median.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TrimConfig {
-    /// The share to drop from the low end, in percent, from 0 to 50.
-    pub low_percent: f32,
-    /// The share to drop from the high end, in percent, from 0 to 50.
-    pub high_percent: f32,
+    /// The share to drop from each end, in percent.
+    pub percent: TrimBounds,
+}
+
+/// The shares a trim drops from the two ends of the sorted samples, in percent, each from 0 to 50
+/// and together below 100: a pair, as [`SigmaBounds`](crate::SigmaBounds) is, so a low share
+/// cannot reach the trim as its high one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrimBounds {
+    /// The share to drop from the low end.
+    pub low: f32,
+    /// The share to drop from the high end.
+    pub high: f32,
+}
+
+impl TrimBounds {
+    /// The same share from each end.
+    pub const fn symmetric(percent: f32) -> Self {
+        Self {
+            low: percent,
+            high: percent,
+        }
+    }
+
+    /// Separate shares, as for a trim of the bright end alone.
+    pub const fn asymmetric(low: f32, high: f32) -> Self {
+        Self { low, high }
+    }
 }
 
 /// How many samples a [`TrimConfig`] drops from each end.
@@ -36,53 +61,29 @@ impl Default for TrimConfig {
 impl TrimConfig {
     /// 10% from each end.
     pub const DEFAULT: Self = Self {
-        low_percent: 10.0,
-        high_percent: 10.0,
+        percent: TrimBounds::symmetric(10.0),
     };
-
-    pub const fn new(low_percent: f32, high_percent: f32) -> Self {
-        Self {
-            low_percent,
-            high_percent,
-        }
-    }
 
     /// Validate that each end drops a sane share and that together they leave survivors.
     pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
-        ConfigField::new("low_percent", self.low_percent)
+        let TrimBounds { low, high } = self.percent;
+        ConfigField::new("percent.low", low)
             .finite_and("finite and between 0 and 50", |value| {
                 (0.0..=50.0).contains(&value)
             })?;
-        ConfigField::new("high_percent", self.high_percent)
+        ConfigField::new("percent.high", high)
             .finite_and("finite and between 0 and 50", |value| {
                 (0.0..=50.0).contains(&value)
             })?;
-        let total = self.low_percent + self.high_percent;
-        ConfigField::new("low_percent + high_percent", total).must_be("below 100", total < 100.0)
+        let total = low + high;
+        ConfigField::new("percent.low + percent.high", total).must_be("below 100", total < 100.0)
     }
 
-    /// The counts for `n` samples, exact. `p·n` is exact in f64, a 24-bit significand times an
-    /// integer below 2²⁹, and so are the multiples of 100 near it; only the quotient rounds, so the
-    /// multiples settle its floor. `(p/100)·n` in f32 gives 62 for 42% of 150.
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "validate holds both percentages in [0, 50]"
-    )]
+    /// The counts for `n` samples, exact.
     pub(crate) fn counts(self, n: usize) -> TrimCounts {
-        debug_assert!(n < 1 << 29);
-        let count = |percent: f32| {
-            let product = f64::from(percent) * n as f64;
-            let mut count = (product / 100.0).floor();
-            if count * 100.0 > product {
-                count -= 1.0;
-            } else if (count + 1.0) * 100.0 <= product {
-                count += 1.0;
-            }
-            count as usize
-        };
         TrimCounts {
-            low: count(self.low_percent),
-            high: count(self.high_percent),
+            low: percent::share_of(self.percent.low, n),
+            high: percent::share_of(self.percent.high, n),
         }
     }
 

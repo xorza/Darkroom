@@ -13,6 +13,14 @@ pub enum CosmicRayError {
          not record; use the measured noise model for it"
     )]
     UnknownAdcStep,
+    /// The measured noise model with no gain reads the photon noise off the sky above zero signal,
+    /// which a frame whose values carry an undeclared offset and lost no bias does not state: a
+    /// third-party FITS of a camera's offset, uncalibrated.
+    #[error(
+        "the measured cosmic-ray noise model needs the sky above zero signal, and this frame keeps \
+         an offset it does not state; subtract a bias, or state a gain"
+    )]
+    UnknownPedestal,
     /// The frame is an X-Trans mosaic. Its red and blue photosites have no point-symmetric
     /// same-color pair near enough for a second difference, so no statistic tells a hit from a
     /// star's wing there, and no reference tool runs L.A.Cosmic on one.

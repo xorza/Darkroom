@@ -32,12 +32,18 @@ pub enum ProductRefusal {
         LumosExtension::Mask
     )]
     MaskDisagrees { idx: usize },
-    /// A stack product that states a uniform coverage and holds a `COVERAGE` extension too.
+    /// A stack product that states a full coverage and holds a `COVERAGE` extension too.
     #[error(
-        "the product states a uniform coverage and holds a {} extension",
+        "the product states a full coverage and holds a {} extension",
         LumosExtension::Coverage
     )]
     CoverageTwice,
+    /// A stack product that states its frame weights' kind and holds no `WEIGHT` extension.
+    #[error(
+        "the product states its frame weights' kind and holds no {} extension",
+        LumosExtension::Weight
+    )]
+    WeightKindAlone,
 }
 
 /// Why [`StackProduct::read_fits`](crate::StackProduct::read_fits) could not read a product.

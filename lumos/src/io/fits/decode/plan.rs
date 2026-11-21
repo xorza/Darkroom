@@ -11,22 +11,32 @@ use fits_well::io::StreamSource;
 use fits_well::{FitsError, ImageReader};
 use imaginarium::{ChannelLayout, PlanarDesc};
 
+use crate::image::flags::quality_flags::SATURATION_FRACTION;
 use crate::image::frame_desc::MAX_SIDE;
 use crate::image::metadata::sample_domain::ScaleOrigin;
 use crate::io::fits::CHUNK_BYTES;
 use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
-use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale};
+use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsDataMax, FitsFloatScale};
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::domain_keywords;
 
-/// Above this, a floating-point HDU's `DATAMAX` is read as declaring an ADU saturation level rather
-/// than a normalized one. Siril's threshold, and well clear of both the `[0, 1]` convention and the
+/// Above this, a floating-point HDU's `DATAMAX` is read as declaring ADU samples rather than
+/// normalized ones. Siril's threshold, and well clear of both the `[0, 1]` convention and the
 /// slight overshoot an interpolated or stacked frame can carry past unity.
 const FLOAT_ADU_DATAMAX_MIN: f64 = 10.0;
 
 /// What such a frame is divided by: the 16-bit full scale, which is the depth essentially every
 /// camera that writes ADU into a float FITS digitizes at. Siril and PixInsight both use it.
 const FLOAT_ADU_DIVISOR: f64 = 65_535.0;
+
+/// How a load reads one HDU's samples: what a three-plane image is, how a floating-point image is
+/// scaled, and what its `DATAMAX` states.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct HduRule {
+    pub(super) cube: FitsCubeInterpretation,
+    pub(super) float_scale: FitsFloatScale,
+    pub(super) data_max: FitsDataMax,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FitsHduDescription<'a> {
@@ -61,23 +71,22 @@ impl<'a> FitsHduDescription<'a> {
         }
     }
 
-    /// How the image decodes under `cube` and `float_scale`: its shape, its scale, the rows a chunk
-    /// reads, and the memory each step holds, refused when a size overflows. A chunk spans every
-    /// plane, and an image tiled in `tiles` reads whole rows of its tiles, so each tile decodes
-    /// once; `reader` gives what fits-well's reader holds reading the chunks.
+    /// How the image decodes under `rule`: its shape, its scale, the level it flags saturation at,
+    /// the rows a chunk reads, and the memory each step holds, refused when a size overflows. A
+    /// chunk spans every plane, and an image tiled in `tiles` reads whole rows of its tiles, so
+    /// each tile decodes once; `reader` gives what fits-well's reader holds reading the chunks.
     pub(super) fn plan(
         self,
-        cube: FitsCubeInterpretation,
-        float_scale: FitsFloatScale,
+        rule: HduRule,
         tiles: Option<&[usize]>,
         reader: impl FnOnce(&[ArrayVec<Range<usize>, 3>]) -> Result<u64, FitsError>,
     ) -> Result<FitsDecodePlan, FitsLoadError> {
-        let desc = desc_from_shape(self.image.shape, cube)?;
+        let desc = desc_from_shape(self.image.shape, rule.cube)?;
         let stored_bitpix = self.image.bitpix;
         let scaling = self.image.scaling;
         let sample_type = SampleType::from_scaling(stored_bitpix, scaling);
-        let data_max = self.data_max(float_scale)?;
-        let sample_scale = self.sample_scale(float_scale, data_max)?;
+        let sample_scale = self.sample_scale(rule.float_scale)?;
+        let saturation = self.saturation(rule.data_max);
         let decoded_bytes = checked_bytes(
             desc.sample_count(),
             size_of::<f32>(),
@@ -108,7 +117,7 @@ impl<'a> FitsHduDescription<'a> {
         .next_multiple_of(size_of::<u64>() as u64);
         // A byte per pixel, which the decode builds beside the planes once it meets a null or a
         // saturation level to flag against.
-        let flag_plane_bytes = if may_carry_nulls(sample_type, &scaling) || data_max.is_some() {
+        let flag_plane_bytes = if may_carry_nulls(sample_type, &scaling) || saturation.is_some() {
             checked_bytes(desc.pixel_count(), 1, FitsAllocation::FlagPlane)?
         } else {
             0
@@ -126,7 +135,7 @@ impl<'a> FitsHduDescription<'a> {
             sample_type,
             scaling,
             sample_scale,
-            data_max,
+            saturation,
             source_bytes: self.source_bytes,
             decoded_bytes,
             flag_plane_bytes,
@@ -135,21 +144,27 @@ impl<'a> FitsHduDescription<'a> {
         })
     }
 
-    /// The header's `DATAMAX`, a positive saturation level in the file's sample units.
-    ///
-    /// Where it decides the scale — a float HDU read with [`FitsFloatScale::Auto`] that records no
-    /// scale of its own — a card of the wrong type fails the load, as every keyword that decides
-    /// how the samples are read does. Elsewhere it is metadata, skipped with the reason logged. A
-    /// non-positive level is no level either way: "not computed" is how a header writes it.
-    fn data_max(&self, float_scale: FitsFloatScale) -> Result<Option<f64>, FitsLoadError> {
-        let decides_scale = matches!(self.image.bitpix, FitsBitpix::F32 | FitsBitpix::F64)
-            && float_scale == FitsFloatScale::Auto
-            && self.header.get(domain_keywords::SCALE_ORIGIN)?.is_none();
-        if !decides_scale {
-            return Ok(metadata::read_data_max(self.header));
-        }
-        let level = self.header.get_real("DATAMAX")?;
-        Ok(level.filter(|&level| metadata::is_saturation_level(level)))
+    /// The level, in the file's sample units, at or above which the decode flags a sample
+    /// saturated: `SATURATE`, the level itself, as SExtractor's `SATUR_KEY` reads it; else, where
+    /// `data_max` reads `DATAMAX` as a saturation level, [`SATURATION_FRACTION`] of it, the margin
+    /// a sensor's response leaves below its stated ceiling. `None` when the header states neither:
+    /// then nothing is flagged, and a consumer flags against the normalized full scale. Each is
+    /// metadata, skipped with the reason logged when given in a form it cannot have.
+    fn saturation(&self, data_max: FitsDataMax) -> Option<f64> {
+        metadata::read_saturate(self.header).or_else(|| match data_max {
+            FitsDataMax::DataMaximum => None,
+            FitsDataMax::SaturationLevel => metadata::read_data_max(self.header)
+                .map(|ceiling| f64::from(SATURATION_FRACTION) * ceiling),
+        })
+    }
+
+    /// The header's `DATAMAX`, for the scale of a float HDU read with [`FitsFloatScale::Auto`]
+    /// that records no scale of its own. A card of the wrong type fails the load, as every keyword
+    /// that decides how the samples are read does; a non-positive one is no maximum, as "not
+    /// computed" is how a header writes it.
+    fn scale_data_max(&self) -> Result<Option<f64>, FitsLoadError> {
+        let maximum = self.header.get_real("DATAMAX")?;
+        Ok(maximum.filter(|&maximum| maximum > 0.0))
     }
 
     /// What one full-scale span of the stored integer type measures, in physical units.
@@ -162,11 +177,11 @@ impl<'a> FitsHduDescription<'a> {
     /// noise tail that the calibration path depends on (see [`crate::io::raw`]'s unclamped
     /// normalization).
     ///
-    /// A floating-point `BITPIX` declares no full scale, so the only evidence is `data_max`, the
-    /// header's `DATAMAX` as [`metadata::read_data_max`] reads it: a saturation level above
-    /// [`FLOAT_ADU_DATAMAX_MIN`] means ADU, divided by [`FLOAT_ADU_DIVISOR`], Siril's threshold and
-    /// divisor. Anything else is taken as already normalized, PixInsight's default for a float
-    /// FITS, which keeps a Lumos-written master round-tripping.
+    /// A floating-point `BITPIX` declares no full scale, so the only evidence is the header's
+    /// `DATAMAX`: a maximum above [`FLOAT_ADU_DATAMAX_MIN`] means ADU, divided by
+    /// [`FLOAT_ADU_DIVISOR`], Siril's threshold and divisor. Anything else is taken as already
+    /// normalized, PixInsight's default for a float FITS, which keeps a Lumos-written master
+    /// round-tripping.
     ///
     /// The divisor comes from the *header*, never from the pixels, which is where this departs
     /// from Siril: with `DATAMAX` absent it scans the data (three sampled pixels on its
@@ -174,11 +189,7 @@ impl<'a> FitsHduDescription<'a> {
     /// read off each frame's own extrema differs frame to frame, which `combine` rejects a frame
     /// set for. The scan still decides one thing: a frame taken as normalized whose samples reach
     /// past Siril's threshold is refused ([`SampleScale::verify_normalized`]).
-    fn sample_scale(
-        &self,
-        float_scale: FitsFloatScale,
-        data_max: Option<f64>,
-    ) -> Result<SampleScale, FitsLoadError> {
+    fn sample_scale(&self, float_scale: FitsFloatScale) -> Result<SampleScale, FitsLoadError> {
         let (header, stored, scaling) = (self.header, self.image.bitpix, &self.image.scaling);
         let divided_by = |divisor: f64, origin| SampleScale {
             divisor,
@@ -215,9 +226,9 @@ impl<'a> FitsHduDescription<'a> {
                                 scale,
                             }));
                         }
-                        Ok(divided_by(f64::from(scale), ScaleOrigin::Declared))
+                        Ok(divided_by(scale, ScaleOrigin::Declared))
                     }
-                    FitsFloatScale::Auto => Ok(match data_max {
+                    FitsFloatScale::Auto => Ok(match self.scale_data_max()? {
                         Some(max) if max > FLOAT_ADU_DATAMAX_MIN => {
                             divided_by(FLOAT_ADU_DIVISOR, ScaleOrigin::Assumed)
                         }
@@ -255,11 +266,13 @@ pub(super) struct FitsDecodePlan {
     /// How the stored samples reach the pipeline's `[0, 1]` domain. See
     /// [`FitsHduDescription::sample_scale`].
     pub(super) sample_scale: SampleScale,
-    /// The header's `DATAMAX`, in the file's sample units: the decode flags saturation against it.
-    pub(super) data_max: Option<f64>,
+    /// The level the decode flags a sample saturated at, in the file's sample units — see
+    /// [`FitsHduDescription::saturation`].
+    pub(super) saturation: Option<f64>,
     pub(super) source_bytes: u64,
     pub(super) decoded_bytes: u64,
-    /// The flag plane the decode builds when the header allows a null or declares a `DATAMAX`.
+    /// The flag plane the decode builds when the header allows a null or states a saturation
+    /// level.
     flag_plane_bytes: u64,
     pub(super) peak_bytes: u64,
     pub(super) rows_per_chunk: usize,

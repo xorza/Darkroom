@@ -1,6 +1,6 @@
 use super::*;
 
-/// A hypothesis is plausible when its rotation is at most `max_rotation` in magnitude and both its
+/// A hypothesis is plausible when its rotation is at most `max_rotation_rad` in magnitude and both its
 /// principal stretches inside `scale_range`, either check off when its limit is `None`; it never
 /// mirrors, and every support point lies in front of a homography's horizon. The first column alone
 /// reads `[[1, 0], [0, 3]]`, the shear `[[1, 0.6], [0, 1]]` and the mirror `[[1, 0], [0, −1]]` as
@@ -9,11 +9,11 @@ use super::*;
 #[test]
 fn plausibility_hand_cases() {
     let ten_degrees = Some(10.0f64.to_radians());
-    let usual = Some(ScaleRange { min: 0.8, max: 1.2 });
+    let usual = Some(ScaleRange::new(0.8, 1.2));
     let similarity = |angle_deg: f64, scale| {
         Transform::similarity(DVec2::new(5.0, -3.0), angle_deg.to_radians(), scale)
     };
-    for (transform, max_rotation, scale_range, plausible, why) in [
+    for (transform, max_rotation_rad, scale_range, plausible, why) in [
         (
             similarity(9.9, 1.0),
             ten_degrees,
@@ -91,10 +91,7 @@ fn plausibility_hand_cases() {
         (
             Transform::translation(DVec2::new(100.0, -50.0)),
             Some(1.0f64.to_radians()),
-            Some(ScaleRange {
-                min: 0.99,
-                max: 1.01,
-            }),
+            Some(ScaleRange::new(0.99, 1.01)),
             true,
             "a translation has rotation 0 and scale 1",
         ),
@@ -102,7 +99,7 @@ fn plausibility_hand_cases() {
         let estimator = estimator(
             1.0,
             RansacConfig {
-                max_rotation,
+                max_rotation_rad,
                 scale_range,
                 ..Default::default()
             },
@@ -119,7 +116,7 @@ fn plausibility_hand_cases() {
 /// The 10° rotation limit the plausibility tests set; the default sets none.
 fn ten_degree_limit() -> RansacConfig {
     RansacConfig {
-        max_rotation: Some(10.0f64.to_radians()),
+        max_rotation_rad: Some(10.0f64.to_radians()),
         ..Default::default()
     }
 }
@@ -191,7 +188,7 @@ fn the_limits_steer_ransac_to_the_plausible_group() {
     let unlimited = estimator(
         1.0,
         RansacConfig {
-            max_rotation: None,
+            max_rotation_rad: None,
             scale_range: None,
             ..Default::default()
         },

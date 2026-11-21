@@ -91,6 +91,9 @@ impl StarField {
 
     fn write(&self, path: &Path, idx: usize, layout: Layout) {
         let mut header = Header::new();
+        // The sky stands on zero signal: a cosmic-ray pass with no gain reads its photon noise off
+        // it, and a frame keeping an offset it does not state is refused.
+        header.set("LUMPED", "REMOVED").unwrap();
         if layout == Layout::Mosaic {
             header.set("BAYERPAT", "RGGB").unwrap();
         }
@@ -103,7 +106,6 @@ impl StarField {
                 Some(&header),
             )
             .unwrap();
-        writer.into_inner().sync_all().unwrap();
     }
 
     /// The pixels of exposure `idx`: the stars at its dither over the sky, and noise drawn from

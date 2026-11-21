@@ -6,6 +6,7 @@ use common::Buffer2;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
+use crate::calibration::cosmic_ray::cosmic_ray_detector::CosmicRayDetector;
 use crate::calibration::cosmic_ray::masks::internals::new_cr_mask;
 use crate::calibration::cosmic_ray::mono::MONO_SCRATCH_PLANES;
 use crate::calibration::cosmic_ray::mono::internals::mono_scratch_floats;
@@ -56,11 +57,12 @@ fn cosmic_ray_float_scratch_is_five_frame_planes() {
 
     // The spike has to be flagged, or the measurement below would come from a detect-only first
     // pass that never reaches `PixelRepair::apply`'s snapshot buffer.
-    let repaired = cosmic_ray::reject(
-        &mut cfa_from_plane(data.clone(), CfaType::Mono),
-        &CosmicRayConfig::default(),
-    )
-    .unwrap();
+    let repaired = CosmicRayDetector::new()
+        .reject(
+            &mut cfa_from_plane(data.clone(), CfaType::Mono),
+            &CosmicRayConfig::default(),
+        )
+        .unwrap();
     assert_eq!(repaired, 1, "the fixture must in-paint something");
 
     let floats = mono_scratch_floats(&mut data, &CosmicRayConfig::default());

@@ -22,34 +22,49 @@ use crate::image::metadata::fits_transfer_provenance::FitsTransferProvenance;
 use crate::image::metadata::sample_domain::Pedestal;
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::{fits_bytes, fits_refusal, fits_transfer, load_linear, open_fits};
+use crate::io::decode_config::DecodeConfig;
 use crate::io::decoder::Peek;
 use crate::io::error::ScientificRefusal;
 use crate::io::fits::cfa;
 use crate::io::fits::decode::fits_file::FitsFile;
 use crate::io::fits::decode::plan;
+use crate::io::fits::decode::plan::HduRule;
 use crate::io::fits::decode::plan::internals::HduSpec;
 use crate::io::fits::decode::selected_fits::SelectedFits;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::{
-    FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadConfig,
+    FitsChecksumPolicy, FitsCubeInterpretation, FitsDataMax, FitsFloatScale, FitsHduSelector,
+    FitsLoadConfig,
 };
 use crate::io::load_ctx::LoadCtx;
 use common::USize2;
 
 fn load_ctx() -> LoadCtx {
-    LoadCtx::new(CancelToken::never())
+    LoadCtx::new(DecodeConfig::default(), CancelToken::never())
 }
 
 /// A cube read as RGB. Its float samples run to 400 with no `DATAMAX`, so they are said to be
 /// normalized: these tests are about plane layout, not scale.
 fn rgb_load_ctx() -> LoadCtx {
-    LoadCtx {
-        fits: FitsLoadConfig {
-            cube: FitsCubeInterpretation::Rgb,
-            float_scale: FitsFloatScale::Normalized,
-            ..Default::default()
+    LoadCtx::new(
+        DecodeConfig {
+            fits: FitsLoadConfig {
+                cube: FitsCubeInterpretation::Rgb,
+                float_scale: FitsFloatScale::Normalized,
+                ..Default::default()
+            },
+            ..DecodeConfig::default()
         },
-        ..load_ctx()
+        CancelToken::never(),
+    )
+}
+
+/// The default load's rule for an HDU read as `cube`.
+const fn rule(cube: FitsCubeInterpretation) -> HduRule {
+    HduRule {
+        cube,
+        float_scale: FitsFloatScale::Auto,
+        data_max: FitsDataMax::DataMaximum,
     }
 }
 
@@ -153,12 +168,7 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
             source_bytes: 0,
         }
         .description()
-        .plan(
-            FitsCubeInterpretation::Reject,
-            FitsFloatScale::Auto,
-            None,
-            |_| Ok(0),
-        )
+        .plan(rule(FitsCubeInterpretation::Reject), None, |_| Ok(0))
         .unwrap_err(),
     );
     assert_eq!(reason, FitsRefusal::PlaneCount { planes: 4 });
@@ -176,17 +186,12 @@ fn preflight_sizes_the_source_the_output_and_the_peak() {
         source_bytes: 241_920,
     }
     .description()
-    .plan(
-        FitsCubeInterpretation::Rgb,
-        FitsFloatScale::Auto,
-        None,
-        |regions| {
-            // A row of the three planes is 1 200 B of f32, so the 4 MiB chunk holds every row:
-            // one chunk of all 100 rows, across all three planes.
-            assert_eq!(regions, [ArrayVec::from([0..100, 0..100, 0..3])]);
-            Ok(1_700)
-        },
-    )
+    .plan(rule(FitsCubeInterpretation::Rgb), None, |regions| {
+        // A row of the three planes is 1 200 B of f32, so the 4 MiB chunk holds every row:
+        // one chunk of all 100 rows, across all three planes.
+        assert_eq!(regions, [ArrayVec::from([0..100, 0..100, 0..3])]);
+        Ok(1_700)
+    })
     .unwrap();
     assert_eq!(plan.source_bytes, 241_920);
     assert_eq!(plan.decoded_bytes, 120_000);
@@ -210,9 +215,10 @@ fn preflight_sizes_the_source_the_output_and_the_peak() {
         );
     }
 
-    // An integer image with no BLANK holds no null, so it has no flag plane until a DATAMAX gives
+    // An integer image with no BLANK holds no null, so it has no flag plane until a SATURATE gives
     // the decode a level to flag against: 40 000 decoded bytes of f32 and a chunk of the 100 rows
-    // at 2 bytes a sample, 20 000, then 10 000 more.
+    // at 2 bytes a sample, 20 000, then 10 000 more. A DATAMAX is the array's maximum and gives
+    // none.
     let mono_shape = [100, 100];
     let mut mono = image_header(16, &mono_shape);
     let plan_of = |header: &Header| {
@@ -223,17 +229,14 @@ fn preflight_sizes_the_source_the_output_and_the_peak() {
             source_bytes: 20_160,
         }
         .description()
-        .plan(
-            FitsCubeInterpretation::Reject,
-            FitsFloatScale::Auto,
-            None,
-            |_| Ok(0),
-        )
+        .plan(rule(FitsCubeInterpretation::Reject), None, |_| Ok(0))
         .unwrap()
     };
     let without = plan_of(&mono);
     assert_eq!(without.peak_bytes, 60_000);
     mono.set("DATAMAX", 30_000.0).unwrap();
+    assert_eq!(plan_of(&mono).peak_bytes, 60_000);
+    mono.set("SATURATE", 30_000.0).unwrap();
     assert_eq!(plan_of(&mono).peak_bytes, 70_000);
 }
 
@@ -429,16 +432,19 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
     let reason = fits_refusal(load_linear(&multi, &load_ctx()).unwrap_err());
     assert_eq!(reason, FitsRefusal::SeveralImageHdus { images: 2 });
 
-    let ambiguous_name = LoadCtx {
-        fits: FitsLoadConfig {
-            hdu: FitsHduSelector::Name {
-                extname: "sci".to_string(),
-                extver: None,
+    let ambiguous_name = LoadCtx::new(
+        DecodeConfig {
+            fits: FitsLoadConfig {
+                hdu: FitsHduSelector::Name {
+                    extname: "sci".to_string(),
+                    extver: None,
+                },
+                ..Default::default()
             },
-            ..Default::default()
+            ..DecodeConfig::default()
         },
-        ..load_ctx()
-    };
+        CancelToken::never(),
+    );
     let reason = fits_refusal(load_linear(&multi, &ambiguous_name).unwrap_err());
     assert_eq!(
         reason,
@@ -453,13 +459,16 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
         "2 HDUs match EXTNAME=\"sci\"; specify EXTVER"
     );
 
-    let first = LoadCtx {
-        fits: FitsLoadConfig {
-            hdu: FitsHduSelector::Idx(1),
-            ..Default::default()
+    let first = LoadCtx::new(
+        DecodeConfig {
+            fits: FitsLoadConfig {
+                hdu: FitsHduSelector::Idx(1),
+                ..Default::default()
+            },
+            ..DecodeConfig::default()
         },
-        ..load_ctx()
-    };
+        CancelToken::never(),
+    );
     let first = load_linear(&multi, &first).unwrap();
     assert_eq!(first.channel(0).pixels(), &[1.0, 2.0]);
     let FitsTransferProvenance { hdu, checksum, .. } = fits_transfer(&first);
@@ -469,34 +478,41 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
     assert_eq!(checksum.datasum, FitsChecksumState::Absent);
     assert_eq!(checksum.checksum, FitsChecksumState::Absent);
 
-    let rejected_cube = LoadCtx {
-        fits: FitsLoadConfig {
-            hdu: FitsHduSelector::Name {
-                extname: "SCI".to_string(),
-                extver: Some(2),
+    let rejected_cube = LoadCtx::new(
+        DecodeConfig {
+            fits: FitsLoadConfig {
+                hdu: FitsHduSelector::Name {
+                    extname: "SCI".to_string(),
+                    extver: Some(2),
+                },
+                ..Default::default()
             },
-            ..Default::default()
+            ..DecodeConfig::default()
         },
-        ..load_ctx()
-    };
+        CancelToken::never(),
+    );
     let reason = fits_refusal(load_linear(&multi, &rejected_cube).unwrap_err());
     assert_eq!(reason, FitsRefusal::CubeNeedsRgb);
 
-    let rgb = LoadCtx {
-        fits: FitsLoadConfig {
-            hdu: FitsHduSelector::Name {
-                extname: "SCI".to_string(),
-                extver: Some(2),
+    let rgb = LoadCtx::new(
+        DecodeConfig {
+            fits: FitsLoadConfig {
+                hdu: FitsHduSelector::Name {
+                    extname: "SCI".to_string(),
+                    extver: Some(2),
+                },
+                cube: FitsCubeInterpretation::Rgb,
+                checksum: FitsChecksumPolicy::VerifyIfPresent,
+                // Samples of 10 to 40 with no DATAMAX: said to be normalized, or `Auto` refuses them.
+                float_scale: FitsFloatScale::Normalized,
+                data_max: FitsDataMax::DataMaximum,
+                unstated_bayer_pattern: None,
+                pedestal: Pedestal::Unknown,
             },
-            cube: FitsCubeInterpretation::Rgb,
-            checksum: FitsChecksumPolicy::VerifyIfPresent,
-            // Samples of 10 to 40 with no DATAMAX: said to be normalized, or `Auto` refuses them.
-            float_scale: FitsFloatScale::Normalized,
-            unstated_bayer_pattern: None,
-            pedestal: Pedestal::Unknown,
+            ..DecodeConfig::default()
         },
-        ..load_ctx()
-    };
+        CancelToken::never(),
+    );
     let rgb = load_linear(&multi, &rgb).unwrap();
     assert_eq!(rgb.channel(0).pixels(), &[10.0, 20.0]);
     assert_eq!(rgb.channel(1).pixels(), &[30.0, 40.0]);
@@ -513,13 +529,16 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
     assert_eq!(checksum.datasum, FitsChecksumState::Absent);
     assert_eq!(checksum.checksum, FitsChecksumState::Absent);
 
-    let require = LoadCtx {
-        fits: FitsLoadConfig {
-            checksum: FitsChecksumPolicy::RequireValid,
-            ..Default::default()
+    let require = LoadCtx::new(
+        DecodeConfig {
+            fits: FitsLoadConfig {
+                checksum: FitsChecksumPolicy::RequireValid,
+                ..Default::default()
+            },
+            ..DecodeConfig::default()
         },
-        ..load_ctx()
-    };
+        CancelToken::never(),
+    );
     let reason = fits_refusal(load_linear(&absent, &require).unwrap_err());
     assert_eq!(
         reason,
@@ -553,13 +572,16 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
         }
     );
 
-    let ignore = LoadCtx {
-        fits: FitsLoadConfig {
-            checksum: FitsChecksumPolicy::Ignore,
-            ..Default::default()
+    let ignore = LoadCtx::new(
+        DecodeConfig {
+            fits: FitsLoadConfig {
+                checksum: FitsChecksumPolicy::Ignore,
+                ..Default::default()
+            },
+            ..DecodeConfig::default()
         },
-        ..load_ctx()
-    };
+        CancelToken::never(),
+    );
     let ignored = load_linear(&corrupt, &ignore).unwrap();
     let FitsTransferProvenance { checksum, .. } = fits_transfer(&ignored);
     assert_eq!(checksum.datasum, FitsChecksumState::NotChecked);
@@ -576,79 +598,117 @@ fn cancellation_prevents_fits_selection() {
     );
     let cancel = CancelToken::new();
     cancel.cancel();
-    let ctx = LoadCtx::new(cancel);
+    let ctx = LoadCtx::new(DecodeConfig::default(), cancel);
     assert!(matches!(
         load_linear(&bytes, &ctx),
         Err(FitsLoadError::Cancelled)
     ));
 }
 
-/// `DATAMAX` is read once, for the scale and for the saturation level, and follows the samples
-/// into the normalized domain while leaving them as they decode: an integer frame divides both by
-/// its span, 65535 for `BITPIX = 16`. The level is 0.95 of it: DATAMAX 4000 flags 3800 and 4000
-/// but not 3799, DATAMAX 100 flags 300 and not 41, DATAMAX 65535 flags nothing. A level of 0, a
-/// "not computed" placeholder, is no level, as with no `DATAMAX` at all: a float frame is taken as
-/// normalized, and nothing is flagged.
+/// A saturation level follows the samples into the normalized domain and flags them, leaving the
+/// samples as they decode: an integer frame divides both by its span, 65535 for `BITPIX = 16`.
+///
+/// `SATURATE` is the level itself: 3800 flags 3800 and 4000, not 3799. `DATAMAX` is the array's
+/// maximum by default and flags nothing, even where it equals the frame's brightest sample, as
+/// INDI writes it. Read as a saturation level, it flags at 0.95 of itself: 4000 flags 3800 and
+/// 4000 but not 3799, 100 flags 300 and not 41, 65535 flags nothing; `SATURATE` still wins there.
+/// A level of 0, a "not computed" placeholder, is no level: a float frame is taken as normalized,
+/// and nothing is flagged.
 #[test]
-fn datamax_follows_the_samples_and_flags_saturation() {
+fn a_stated_saturation_level_flags_the_samples_and_datamax_does_not() {
+    use FitsDataMax::{DataMaximum, SaturationLevel};
+
     struct Row<'a> {
         image: &'a Image,
-        datamax: Option<f64>,
+        keywords: &'a [(&'a str, f64)],
+        data_max: FitsDataMax,
         pixels: Vec<f32>,
-        data_max: Option<f64>,
         saturated: Option<[bool; 4]>,
     }
     let u16s = Image::from_u16(vec![4, 1], &[100, 3799, 3800, 4000]).unwrap();
     let i16s = Image::new(vec![4, 1], vec![-7i16, 0, 41, 300], Scaling::IDENTITY).unwrap();
     let f32s = Image::new(vec![2, 1], vec![0.25f32, 0.75], Scaling::IDENTITY).unwrap();
     let span = 65_535.0;
-    let divided = |samples: &[f32]| samples.iter().map(|sample| sample / span as f32).collect();
+    let divided = |samples: &[f32]| -> Vec<f32> {
+        samples.iter().map(|sample| sample / span as f32).collect()
+    };
+    let u16_pixels = divided(&[100.0, 3799.0, 3800.0, 4000.0]);
+    let i16_pixels = divided(&[-7.0, 0.0, 41.0, 300.0]);
     let rows = [
         Row {
             image: &u16s,
-            datamax: Some(4000.0),
-            pixels: divided(&[100.0, 3799.0, 3800.0, 4000.0]),
-            data_max: Some(4000.0 / span),
+            keywords: &[("DATAMAX", 4000.0)],
+            data_max: DataMaximum,
+            pixels: u16_pixels.clone(),
+            saturated: None,
+        },
+        Row {
+            image: &u16s,
+            keywords: &[("SATURATE", 3800.0)],
+            data_max: DataMaximum,
+            pixels: u16_pixels.clone(),
             saturated: Some([false, false, true, true]),
         },
         Row {
             image: &u16s,
-            datamax: None,
-            pixels: divided(&[100.0, 3799.0, 3800.0, 4000.0]),
-            data_max: None,
+            keywords: &[("DATAMAX", 4000.0)],
+            data_max: SaturationLevel,
+            pixels: u16_pixels.clone(),
+            saturated: Some([false, false, true, true]),
+        },
+        Row {
+            image: &u16s,
+            keywords: &[("DATAMAX", 4000.0), ("SATURATE", 4000.0)],
+            data_max: SaturationLevel,
+            pixels: u16_pixels.clone(),
+            saturated: Some([false, false, false, true]),
+        },
+        Row {
+            image: &u16s,
+            keywords: &[],
+            data_max: SaturationLevel,
+            pixels: u16_pixels,
             saturated: None,
         },
         Row {
             image: &i16s,
-            datamax: Some(100.0),
-            pixels: divided(&[-7.0, 0.0, 41.0, 300.0]),
-            data_max: Some(100.0 / span),
+            keywords: &[("DATAMAX", 100.0)],
+            data_max: SaturationLevel,
+            pixels: i16_pixels.clone(),
             saturated: Some([false, false, false, true]),
         },
         Row {
             image: &i16s,
-            datamax: Some(span),
-            pixels: divided(&[-7.0, 0.0, 41.0, 300.0]),
-            data_max: Some(1.0),
+            keywords: &[("DATAMAX", span)],
+            data_max: SaturationLevel,
+            pixels: i16_pixels,
             saturated: Some([false; 4]),
         },
         Row {
             image: &f32s,
-            datamax: Some(0.0),
+            keywords: &[("DATAMAX", 0.0), ("SATURATE", 0.0)],
+            data_max: SaturationLevel,
             pixels: vec![0.25, 0.75],
-            data_max: None,
             saturated: None,
         },
     ];
     for (idx, row) in rows.iter().enumerate() {
         let mut header = Header::new();
-        if let Some(datamax) = row.datamax {
-            header.set("DATAMAX", datamax).unwrap();
+        for &(keyword, value) in row.keywords {
+            header.set(keyword, value).unwrap();
         }
-        let loaded =
-            load_linear(&fits_bytes(row.image.view(), Some(&header)), &load_ctx()).unwrap();
+        let ctx = LoadCtx::new(
+            DecodeConfig {
+                fits: FitsLoadConfig {
+                    data_max: row.data_max,
+                    ..FitsLoadConfig::default()
+                },
+                ..DecodeConfig::default()
+            },
+            CancelToken::never(),
+        );
+        let loaded = load_linear(&fits_bytes(row.image.view(), Some(&header)), &ctx).unwrap();
         assert_eq!(loaded.channel(0).pixels(), row.pixels, "row {idx}");
-        assert_eq!(loaded.metadata.header.data_max, row.data_max, "row {idx}");
         assert_eq!(
             loaded.metadata.derived.saturation_flagged(),
             row.saturated.is_some(),

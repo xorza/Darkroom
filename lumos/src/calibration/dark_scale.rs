@@ -6,15 +6,22 @@ use common::{PerWorker, par};
 use rayon::prelude::*;
 
 use crate::calibration::calibration_pass::Subtracted;
+use crate::calibration::dark_match::DarkMatch;
 use crate::calibration::defect_map::HotPixels;
 use crate::calibration::defect_map::ring_reference::{RingFrame, RingReference};
+use crate::frame::capture_condition::{DARK_CURRENT_PER_DEGREE, TEMPERATURE_TOLERANCE};
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::math::statistics::median_mad::MedianMad;
 
-/// The fewest hot pixels the fit keeps for its factor to stand; with fewer the exposure ratio does.
-const MIN_FIT_PIXELS: usize = 100;
+/// The fewest hot pixels the fit keeps for its standard error to be read at all: the MAD's σ of
+/// `n` residuals is itself off by about `1.17/√n` (its asymptotic efficiency, 37%), a quarter at
+/// 20. The gate on the fit is its precision; this keeps the precision a measurement.
+const MIN_FIT_PIXELS: usize = 20;
+/// The exposure ratio's relative error where no temperature was compared: a dark of an unknown
+/// temperature can be off by any factor, and a fit known to a third beats a guess.
+const UNCOMPARED_RATIO_ERROR: f64 = 1.0 / 3.0;
 /// The clip, in σ of the residuals' MAD about their median: a star, a cosmic ray or a pixel whose
 /// dark current is unstable sits far past it.
 const FIT_CLIP_SIGMAS: f64 = 3.0;
@@ -32,13 +39,43 @@ pub struct DarkScale {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DarkScaleSource {
     /// The light's exposure over the dark's, 1 when they agree or either is not stated: the fit
-    /// kept `fit_pixels` hot pixels, fewer than it needs, or there was none to fit.
+    /// kept `fit_pixels` hot pixels and was less precise than the ratio, or there was none to fit.
     Exposure { fit_pixels: usize },
     /// The slope of the light's excess at the hot pixels on the dark's, through the origin,
     /// corrected for the dark's noise, after a 3σ clip: from `pixels` of them, with
     /// `standard_error`. It corrects a dark of another exposure or temperature alike, since it
     /// measures the dark current itself.
     Fitted { pixels: usize, standard_error: f64 },
+}
+
+/// The exposure ratio a fit competes with: the factor, and the relative error it may carry, which
+/// the dark current's change with the temperature difference sets.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ExposureRatio {
+    pub(crate) factor: f64,
+    pub(crate) relative_error: f64,
+}
+
+impl ExposureRatio {
+    /// The ratio `matched` gives the dark: its factor, and an error of
+    /// `12% · max(|ΔT|, 1 °C)` where a temperature was compared, the dark current's change over
+    /// the difference or over the tolerance that counted the two as one, and of a third where none
+    /// was.
+    pub(crate) fn of(matched: DarkMatch) -> Self {
+        let comparison = matched.comparison;
+        let relative_error = match (comparison.temperature, comparison.temperature_difference) {
+            (None, _) => UNCOMPARED_RATIO_ERROR,
+            (Some(_), difference) => {
+                let degrees =
+                    difference.map_or(0.0, |difference| (difference.frame - difference.dark).abs());
+                DARK_CURRENT_PER_DEGREE * degrees.max(TEMPERATURE_TOLERANCE)
+            }
+        };
+        Self {
+            factor: matched.factor(),
+            relative_error,
+        }
+    }
 }
 
 /// What a fit reads of one light: its raw samples, its bias, how its pixels are flagged before
@@ -62,9 +99,10 @@ struct Pair {
 }
 
 impl DarkScale {
-    /// The scale of a bias-removed dark for `light`, fitted on the `hot` pixels, else
-    /// `exposure_ratio`: when fewer than 100 pairs are kept, or the slope is not a positive
-    /// number, which no dark current gives.
+    /// The scale of a bias-removed dark for `light`, fitted on the `hot` pixels, where the fit is
+    /// more precise than `ratio`: a positive slope, which every dark current gives, whose relative
+    /// standard error is below the ratio's relative error, from at least 20 pairs; else `ratio`'s
+    /// factor.
     ///
     /// A hot pixel takes part unless the light has no measurement there or saturated it, or a
     /// master did — a dark that saturated a hot pixel cut its excess short — and is chosen on the
@@ -80,22 +118,32 @@ impl DarkScale {
     /// Error Models*, 1987, ch. 1): `k = Σd·l / (Σd² − Σσ²)` through the origin, refitted on the
     /// pairs within 3σ of the residuals' median until they settle; its standard error is that σ
     /// over `√(Σd² − Σσ²)`.
-    pub(crate) fn fit(hot: &HotPixels, light: FitLight<'_>, exposure_ratio: f64) -> Self {
-        let pairs = light.pairs(hot);
-        match fit_through_origin(&pairs) {
+    pub(crate) fn fit(hot: &HotPixels, light: FitLight<'_>, ratio: ExposureRatio) -> Self {
+        Self::chosen(fit_through_origin(&light.pairs(hot)), ratio)
+    }
+
+    /// `fit` where it is precise enough to beat `ratio`, else `ratio`.
+    fn chosen(fit: Option<Fit>, ratio: ExposureRatio) -> Self {
+        match fit {
             Some(Fit {
                 slope,
                 standard_error,
                 pixels,
-            }) if pixels >= MIN_FIT_PIXELS && slope.is_finite() && slope > 0.0 => Self {
-                factor: slope,
-                source: DarkScaleSource::Fitted {
-                    pixels,
-                    standard_error,
-                },
-            },
+            }) if pixels >= MIN_FIT_PIXELS
+                && slope.is_finite()
+                && slope > 0.0
+                && standard_error < ratio.relative_error * slope =>
+            {
+                Self {
+                    factor: slope,
+                    source: DarkScaleSource::Fitted {
+                        pixels,
+                        standard_error,
+                    },
+                }
+            }
             fit => Self {
-                factor: exposure_ratio,
+                factor: ratio.factor,
                 source: DarkScaleSource::Exposure {
                     fit_pixels: fit.map_or(0, |fit| fit.pixels),
                 },
@@ -110,8 +158,7 @@ impl FitLight<'_> {
         let image = self.light;
         let size = image.size();
         let samples = image.data().pixels();
-        let saturation = (!image.metadata.derived.saturation_flagged())
-            .then(|| image.metadata.header.saturation_level());
+        let saturation = image.metadata.derived.unflagged_saturation();
         let excluded = QualityFlags::SATURATED.union(QualityFlags::NO_DATA);
         let unmeasured = |idx: usize| {
             image
@@ -214,8 +261,87 @@ fn fit_through_origin(pairs: &[Pair]) -> Option<Fit> {
 
 #[cfg(test)]
 mod tests {
-    use crate::calibration::dark_scale::{Pair, fit_through_origin};
+    use crate::calibration::dark_match::DarkMatch;
+    use crate::calibration::dark_scale::{
+        DarkScale, DarkScaleSource, ExposureRatio, Fit, Pair, fit_through_origin,
+    };
+    use crate::image::metadata::dark_comparison::DarkComparison;
+    use crate::image::metadata::temperature_difference::TemperatureDifference;
+    use crate::image::metadata::temperature_source::TemperatureSource;
     use crate::math::statistics;
+
+    /// The ratio's error is the dark current's change over the temperature difference, at least
+    /// the 1 °C tolerance: 12% for a match within it, 36% for 3 °C apart; a third with no
+    /// temperature compared.
+    #[test]
+    fn the_ratio_s_error_follows_the_temperature_difference() {
+        let matched = |temperature, temperature_difference| DarkMatch {
+            scale: Some(2.5),
+            comparison: DarkComparison {
+                exposure_compared: true,
+                temperature,
+                temperature_difference,
+            },
+        };
+        let sensor = Some(TemperatureSource::Sensor);
+        let apart = Some(TemperatureDifference {
+            reading: TemperatureSource::Sensor,
+            frame: -7.0,
+            dark: -10.0,
+        });
+        for (matched, relative_error) in [
+            (matched(sensor, None), 0.12),
+            (matched(sensor, apart), 0.12 * 3.0),
+            (matched(None, None), 1.0 / 3.0),
+        ] {
+            assert_eq!(
+                ExposureRatio::of(matched),
+                ExposureRatio {
+                    factor: 2.5,
+                    relative_error,
+                }
+            );
+        }
+    }
+
+    /// A fit stands where its relative standard error is below the ratio's error: of 100 pairs, a
+    /// slope of 1 known to 0.1 beats a ratio good to 12% and loses to one good to 12% when known to
+    /// 0.2, a hundred weak pairs; a third, a ratio of no temperature, it beats.
+    #[test]
+    fn a_fit_is_taken_where_it_beats_the_ratio() {
+        let fit = |standard_error| {
+            Some(Fit {
+                slope: 1.0,
+                standard_error,
+                pixels: 100,
+            })
+        };
+        let ratio = |relative_error| ExposureRatio {
+            factor: 2.5,
+            relative_error,
+        };
+        let fitted = |standard_error| DarkScale {
+            factor: 1.0,
+            source: DarkScaleSource::Fitted {
+                pixels: 100,
+                standard_error,
+            },
+        };
+        let exposure = DarkScale {
+            factor: 2.5,
+            source: DarkScaleSource::Exposure { fit_pixels: 100 },
+        };
+        assert_eq!(DarkScale::chosen(fit(0.1), ratio(0.12)), fitted(0.1));
+        assert_eq!(DarkScale::chosen(fit(0.2), ratio(0.12)), exposure);
+        assert_eq!(DarkScale::chosen(fit(0.2), ratio(1.0 / 3.0)), fitted(0.2));
+        assert_eq!(
+            DarkScale::chosen(None, ratio(0.12)),
+            DarkScale {
+                factor: 2.5,
+                source: DarkScaleSource::Exposure { fit_pixels: 0 },
+            }
+        );
+    }
 
     fn pair(dark: f64, dark_variance: f64, light: f64) -> Pair {
         Pair {

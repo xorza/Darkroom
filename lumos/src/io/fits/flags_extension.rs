@@ -146,7 +146,7 @@ mod tests {
     /// The stored flags join those the decode found, bit by bit. Stored, row-major over 3×2:
     /// nothing, `NO_DATA`, `SATURATED | DEFECT` (6), nothing, `COSMIC_RAY | REPAIRED` (24),
     /// `FLAT_FLOOR` (32). Decoded: `NO_DATA` at 1 from the NaN, `SATURATED` (2) at 3 from
-    /// `DATAMAX`. Joined: 0, 1, 6, 2, 24, 32. With no decoded flags, a plane of zeros is no flags
+    /// `SATURATE`. Joined: 0, 1, 6, 2, 24, 32. With no decoded flags, a plane of zeros is no flags
     /// at all, and a byte past the known bits — 0x80 here — is refused.
     #[test]
     fn stored_flags_join_the_decoded_ones() {

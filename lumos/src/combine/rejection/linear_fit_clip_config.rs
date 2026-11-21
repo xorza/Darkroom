@@ -44,13 +44,6 @@ impl LinearFitClipConfig {
 
     /// Clipping to `sigma` about the fitted line, for at most `max_iterations` passes, the first
     /// clip about the median among them.
-    pub const fn new(sigma: SigmaBounds, max_iterations: u32) -> Self {
-        Self {
-            sigma,
-            max_iterations,
-        }
-    }
-
     /// Validate the clip thresholds and pass count: a single pass is the median clip alone, and
     /// never fits a line.
     pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {

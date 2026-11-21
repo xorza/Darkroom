@@ -11,7 +11,7 @@ pub struct DrizzleFrame<T> {
     /// each reach the channel of their color alone.
     pub source: T,
     /// The registration's warp, from the common reference grid to this input — what
-    /// [`RegistrationResult::warp_transform`](crate::RegistrationResult::warp_transform) returns.
+    /// [`RegistrationResult::warp`](crate::RegistrationResult::warp) returns.
     /// Drizzle maps input pixels through its inverse, SIP included.
     pub warp: WarpTransform,
     /// Optional non-negative per-pixel quality weights with the same dimensions as the image.

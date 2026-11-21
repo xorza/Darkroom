@@ -5,7 +5,7 @@ use imaginarium::ChannelLayout;
 use crate::combine::normalization::planned_normalization::SetCoverage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::stackable_image::StackableImage;
+use crate::image::frame::{Frame, Samples};
 
 /// How a frame's samples reach the output channels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,8 +21,8 @@ pub(crate) enum Deposit {
 
 impl Deposit {
     /// How `image`'s samples reach the output: by color for a mosaic, by channel otherwise.
-    pub(crate) fn of(image: &impl StackableImage) -> Self {
-        match image.cfa_type().and_then(CfaType::mosaic) {
+    pub(crate) fn of(image: &Frame<impl Samples>) -> Self {
+        match image.sensor_pattern().and_then(CfaType::mosaic) {
             Some(mosaic) => Self::Mosaic(mosaic),
             None => Self::Channels(image.desc().layout()),
         }

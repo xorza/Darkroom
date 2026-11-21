@@ -31,35 +31,37 @@ use crate::drizzle::accumulator::{DrizzledPlanes, Drizzler, MAX_CHANNELS};
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::drizzle_config::DrizzleConfig;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
-use crate::drizzle::drizzle_shape::{DrizzleShape, DrizzleSource};
+use crate::drizzle::drizzle_shape::DrizzleShape;
 use crate::drizzle::error::DrizzleError;
 use crate::drizzle::output_grid::OutputGrid;
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
-use crate::frame_store::file_set::FileSet;
+use crate::frame_store::file_set::{FileSet, FilesPeek};
 use crate::frame_store::frame_buffers::NewFrame;
+use crate::frame_store::run_shape::PlannedTier;
 use crate::frame_store::run_storage::RunStorage;
 use crate::frame_store::stored_frame::SetKind;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::frame_gain::FrameGain;
+use crate::image::frame::{Frame, Samples};
 use crate::image::frame_desc;
 use crate::image::linear_image::LinearImage;
 use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::metadata::image_provenance::DemosaicProvenance;
-use crate::image::stackable_image::StackableImage;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::decoder::Decoder;
 use crate::io::load_ctx::LoadCtx;
 use crate::progress::stacking_progress::StackingStage;
 use crate::stack_product::StackProduct;
+use crate::stack_product::run_report::DrizzleReport;
 
 /// One drizzle under way: what it was asked to do, and the memory reading, decode policy, cancel
 /// token and progress it took at its entry.
 #[derive(Debug)]
 pub(super) struct DrizzleRun<'a> {
     pub(super) config: &'a DrizzleConfig,
-    pub(super) ingest: IngestRun,
+    pub(super) ingest: IngestRun<'a>,
 }
 
 /// A frame as it reaches the drizzle, and what a decode cache measured of its source, which its
@@ -76,7 +78,7 @@ fn load_drizzle_frame<D: Decoder, P: AsRef<Path>>(
     idx: usize,
     files: &FileSet<'_, PathBuf, D>,
     ctx: &LoadCtx,
-) -> Result<Arrival<D::Image>, DrizzleError> {
+) -> Result<Arrival<Frame<D::Samples>>, DrizzleError> {
     let DrizzleFrame {
         warp,
         pixel_weight_map,
@@ -107,25 +109,20 @@ impl DrizzleRun<'_> {
             .iter()
             .map(|frame| frame.source.as_ref().to_path_buf())
             .collect();
-        let files = FileSet::<_, D>::new(&sources, &run.storage, &run.ctx)?;
+        let files = FileSet::<_, D>::new(&sources, run)?;
         let peek = files.peek(&ctx)?;
-        let origin = DrizzleSource::Files {
-            uncached: files.uncached(),
-            gains: peek.gains,
-            decoder: peek.info.decoder,
-        };
         // Lazy, so only the frame currently being drizzled is resident.
         let loaded = frames
             .into_iter()
             .enumerate()
             .map(|(idx, frame)| load_drizzle_frame(frame, idx, &files, &ctx));
-        self.accumulate(loaded, origin, files.storage())
+        self.accumulate(loaded, Some(peek), files.storage())
     }
 
     /// The body of the in-memory entries of [`DrizzleConfig`].
-    pub(super) fn drizzle_held<I: StackableImage>(
+    pub(super) fn drizzle_held<S: Samples>(
         &self,
-        frames: Vec<DrizzleFrame<I>>,
+        frames: Vec<DrizzleFrame<Frame<S>>>,
     ) -> Result<StackProduct, DrizzleError> {
         self.validate(frames.len())?;
         self.accumulate(
@@ -135,8 +132,8 @@ impl DrizzleRun<'_> {
                     measured: None,
                 })
             }),
-            DrizzleSource::Memory,
-            RunStorage::holding(&self.ingest.storage),
+            None,
+            RunStorage::holding(self.ingest.config),
         )
     }
 
@@ -147,10 +144,7 @@ impl DrizzleRun<'_> {
             return Err(StackError::NoFrames.into());
         }
         self.config.validate()?;
-        self.config
-            .stack
-            .validate(frame_count)
-            .map_err(StackError::from)?;
+        self.config.stack.validate().map_err(StackError::from)?;
         Ok(())
     }
 
@@ -158,11 +152,12 @@ impl DrizzleRun<'_> {
     /// the body every entry point shares, once [`Self::validate`] passed.
     ///
     /// Frames arrive as a lazy fallible iterator so the path entries keep one input image resident:
-    /// an item is produced, drizzled, stored, and dropped before the next is loaded.
-    fn accumulate<I: StackableImage>(
+    /// an item is produced, drizzled, stored, and dropped before the next is loaded. `files` is
+    /// what the plan read off the files they are decoded from, `None` for frames handed over.
+    fn accumulate<S: Samples>(
         &self,
-        mut frames: impl ExactSizeIterator<Item = Result<Arrival<I>, DrizzleError>>,
-        origin: DrizzleSource,
+        mut frames: impl ExactSizeIterator<Item = Result<Arrival<Frame<S>>, DrizzleError>>,
+        files: Option<FilesPeek>,
         storage: RunStorage<'_>,
     ) -> Result<StackProduct, DrizzleError> {
         let frame_count = frames.len();
@@ -178,32 +173,28 @@ impl DrizzleRun<'_> {
         let input_desc = first.frame.source.desc();
         let deposit = Deposit::of(&first.frame.source);
         tracing::info!(
-            ?origin,
+            from_files = files.is_some(),
             frame_count,
             input_width = input_desc.width(),
             input_height = input_desc.height(),
             channels = input_desc.channel_count(),
             mosaic = ?deposit.mosaic(),
-            output_scale = drizzle.scale,
-            pixfrac = drizzle.pixfrac,
-            kernel = ?drizzle.kernel,
+            sampling = ?drizzle.sampling,
             "Starting drizzle stacking"
         );
-        let grid = OutputGrid::new(drizzle.scale, input_desc.size());
+        let grid = OutputGrid::new(drizzle.sampling.scale(), input_desc.size());
         let output = frame_desc::checked(grid.size(), deposit.output_layout())?;
-        let mut drizzler = Drizzler::new(
-            &first.frame.source,
-            KernelPlan::new(drizzle.kernel, drizzle.pixfrac, drizzle.scale),
-            grid,
-        );
-        let tier = DrizzleShape {
+        let mut drizzler =
+            Drizzler::new(&first.frame.source, KernelPlan::new(drizzle.sampling), grid);
+        let PlannedTier { tier, .. } = DrizzleShape {
             input: input_desc,
             output,
             deposit,
             frame_count,
-            origin,
+            files,
         }
-        .tier(stack, run, storage)?;
+        .run_shape(stack, run.budget.workers())
+        .tier(run.budget, storage)?;
         // Measured on each frame as it arrives, before its drops are spread: the drizzled pixels
         // average several, and would understate it. A mosaic's are measured per color, which its
         // drizzle makes the channels, with the spread its per-frame normalization scales by.
@@ -246,7 +237,7 @@ impl DrizzleRun<'_> {
             } = drizzler.drizzle(&frame, idx)?;
             unconverged_points += unplaced;
             // Each output pixel sums the drops of several source pixels.
-            let mut frame_metadata = frame.source.metadata().clone();
+            let mut frame_metadata = frame.source.metadata.clone();
             frame_metadata.derived.after_resample();
             let flat_gain = frame.source.flat_gain().map(|gain| {
                 FrameGain::Own(Box::new(gain.warped(
@@ -311,8 +302,9 @@ impl DrizzleRun<'_> {
             },
             drizzle.fill_value,
         );
-        product.report.unconverged_points =
-            u64::try_from(unconverged_points).expect("a pixel count fits u64");
+        product.report.drizzle = Some(DrizzleReport {
+            unconverged_points: u64::try_from(unconverged_points).expect("a pixel count fits u64"),
+        });
         Ok(product)
     }
 }

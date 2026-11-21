@@ -1,6 +1,6 @@
 //! [`KernelPlan`]: what a drizzle kernel needs beyond the frame, resolved once for a run.
 
-use crate::drizzle::drizzle_kernel::DrizzleKernel;
+use crate::drizzle::drizzle_sampling::{DrizzleSampling, DropShape};
 use crate::math::fwhm::FWHM_PER_SIGMA;
 use crate::math::lanczos::lanczos_lut::LanczosOrder;
 
@@ -41,22 +41,34 @@ pub(crate) enum KernelPlan {
 }
 
 impl KernelPlan {
-    /// The plan of `kernel` at `pixfrac`, onto a grid `scale` times finer.
-    pub(crate) fn new(kernel: DrizzleKernel, pixfrac: f32, scale: f32) -> Self {
+    /// The plan of `sampling`.
+    pub(crate) fn new(sampling: DrizzleSampling) -> Self {
+        let (shape, scale, pixfrac) = match sampling {
+            DrizzleSampling::Drops {
+                shape,
+                scale,
+                pixfrac,
+            } => (shape, scale.get(), pixfrac.get()),
+            DrizzleSampling::Point { .. } => return Self::Point,
+            DrizzleSampling::Lanczos => {
+                return Self::Lanczos {
+                    radius: LANCZOS_ORDER.a() as isize,
+                };
+            }
+        };
         // Drop size in output pixels: pixfrac is the fraction of input pixel size, and each input
         // pixel maps to `scale` output pixels, so drop = pixfrac · scale. (STScI: pfo =
         // pixel_fraction / pscale_ratio / 2, where pscale_ratio = 1/scale.)
-        let drop_size = f64::from(pixfrac) * f64::from(scale);
-        match kernel {
-            DrizzleKernel::Square => Self::Square {
-                half_drop: 0.5 * f64::from(pixfrac),
+        let drop_size = pixfrac * scale;
+        match shape {
+            DropShape::Square => Self::Square {
+                half_drop: 0.5 * pixfrac,
             },
-            DrizzleKernel::Turbo => Self::Turbo {
+            DropShape::Turbo => Self::Turbo {
                 half_drop: 0.5 * drop_size,
                 inv_area: 1.0 / (drop_size * drop_size),
             },
-            DrizzleKernel::Point => Self::Point,
-            DrizzleKernel::Gaussian => {
+            DropShape::Gaussian => {
                 // Per `STScI` the Gaussian's FWHM is the drop size.
                 let sigma = drop_size / FWHM_PER_SIGMA;
                 Self::Gaussian {
@@ -64,9 +76,6 @@ impl KernelPlan {
                     inv_2sigma_sq: (1.0 / (2.0 * sigma * sigma)) as f32,
                 }
             }
-            DrizzleKernel::Lanczos => Self::Lanczos {
-                radius: LANCZOS_ORDER.a() as isize,
-            },
         }
     }
 

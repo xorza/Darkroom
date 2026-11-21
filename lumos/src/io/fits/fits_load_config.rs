@@ -44,16 +44,34 @@ pub enum FitsCubeInterpretation {
 /// which is what [`crate::AdmissionError::SampleDomainMismatch`] exists to reject.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum FitsFloatScale {
-    /// Decide from `DATAMAX`: a declared saturation level well above unity means the samples are
-    /// ADU and they are divided by the 16-bit full scale; anything else — a `DATAMAX` of about 1,
-    /// or none at all — is taken as already normalized.
+    /// Decide from `DATAMAX`: a maximum well above unity means the samples are ADU and they are
+    /// divided by the 16-bit full scale; anything else — a `DATAMAX` of about 1, or none at all —
+    /// is taken as already normalized.
     Auto,
-    /// Take the samples as already normalized, whatever `DATAMAX` says. For a file whose declared
-    /// saturation level describes the sensor rather than the samples.
+    /// Take the samples as already normalized, whatever `DATAMAX` says. For a file whose
+    /// `DATAMAX` describes the sensor rather than the samples.
     Normalized,
     /// Divide by an explicit full scale: what one normalized unit is worth in the file's own units.
     /// The answer for an ADU frame carrying no `DATAMAX`, which no header rule can identify.
-    FullScale(f32),
+    FullScale(f64),
+}
+
+/// What a FITS `DATAMAX` states.
+///
+/// The FITS standard (4.0, §4.4.2.5) defines it as "the maximum valid physical value represented
+/// by the array", which is what INDI writes. MaxIm DL and SBIG's extension read it as a saturation
+/// level instead: "pixel values above this level are considered saturated"
+/// ([header definitions](https://cdn.diffractionlimited.com/help/maximdl/FITS_File_Header_Definitions.htm)).
+/// Either way it decides a floating-point HDU's scale under [`FitsFloatScale::Auto`]; a saturation
+/// level is stated unambiguously by `SATURATE`, SExtractor's `SATUR_KEY`, which every load reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+pub enum FitsDataMax {
+    /// The array's own maximum, the standard's meaning: it flags nothing.
+    #[default]
+    DataMaximum,
+    /// A saturation level, MaxIm DL's and SBIG's meaning: every sample at or above 0.95 of it is
+    /// flagged saturated, where no `SATURATE` states the level itself.
+    SaturationLevel,
 }
 
 /// Controls checksum validation for the selected FITS HDU.
@@ -118,7 +136,7 @@ fn checksum_provenance(report: ChecksumReport) -> FitsChecksumProvenance {
 
 /// FITS-specific selection and validation policy.
 ///
-/// Not `Eq`: [`FitsFloatScale::FullScale`] carries an `f32`.
+/// Not `Eq`: [`FitsFloatScale::FullScale`] carries an `f64`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FitsLoadConfig {
     /// Image HDU selection policy.
@@ -129,6 +147,8 @@ pub struct FitsLoadConfig {
     pub checksum: FitsChecksumPolicy,
     /// How a floating-point HDU's sample scale is decided.
     pub float_scale: FitsFloatScale,
+    /// What `DATAMAX` states: the array's maximum by default.
+    pub data_max: FitsDataMax,
     /// The Bayer phase of a frame whose `BAYERPAT` says only `'TRUE'` — mosaiced, phase unstated —
     /// given as `BAYERPAT` would give it. `None` refuses such a frame rather than guess one of
     /// four.
@@ -147,6 +167,7 @@ impl Default for FitsLoadConfig {
             cube: FitsCubeInterpretation::Reject,
             checksum: FitsChecksumPolicy::VerifyIfPresent,
             float_scale: FitsFloatScale::Auto,
+            data_max: FitsDataMax::DataMaximum,
             unstated_bayer_pattern: None,
             pedestal: Pedestal::Unknown,
         }

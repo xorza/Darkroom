@@ -91,7 +91,7 @@ impl Session {
         );
         WarpConfig::default().warp(
             &image,
-            &WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5))),
+            &WarpTransform::from(Transform::translation(DVec2::new(0.5, 0.5))),
         );
         Self {
             scratch: TempDir::new(tag),
@@ -107,7 +107,7 @@ impl Session {
     pub(crate) fn ingest(&self, budget: Budget) -> IngestConfig {
         let mut ingest = IngestConfig::with_cache_dir(self.scratch.join("cache"));
         ingest.memory_override = Some(budget.memory_override());
-        ingest.fits.float_scale = FitsFloatScale::Normalized;
+        ingest.decode.fits.float_scale = FitsFloatScale::Normalized;
         ingest
     }
 

@@ -189,7 +189,9 @@ fn local_annulus_removes_a_sky_the_map_left() {
         "{}",
         annulus.pos
     );
-    let npix = ((2 * radius + 1) * (2 * radius + 1)) as f64;
+    // The aperture, 1.75 FWHM = 6.18 px, lies wholly in the stamp: its area is π·a².
+    let aperture = MeasureGrid::new(fwhm).aperture;
+    let npix = std::f64::consts::PI * aperture * aperture;
     let flux = f64::from(exact.flux);
     let rounding = npix * f64::from(f32::EPSILON) * f64::from(AMPLITUDE + PEDESTAL) * 2.0;
     let added = f64::from(global.flux) - flux;

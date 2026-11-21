@@ -46,14 +46,14 @@ pub(super) struct SipMap {
 impl InputMap {
     /// `grid ∘ warp⁻¹`, the map from input pixels to output pixels.
     pub(super) fn new(warp: &WarpTransform, grid: Transform) -> Self {
-        if warp.has_sip() {
+        if warp.sip().is_some() {
             return Self::Sip(Box::new(SipMap {
                 warp: warp.clone(),
                 inverse: warp.inverse(),
                 grid,
             }));
         }
-        let to_output = grid.compose(&warp.transform.inverse());
+        let to_output = grid.compose(&warp.linear().inverse());
         Self::Transform {
             to_output,
             to_input: to_output.inverse(),

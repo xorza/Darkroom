@@ -148,7 +148,7 @@ fn sip_corrects_in_the_reference_frame_under_any_linear_part() {
 /// before a translation, a 10° rotation, a similarity and a sheared affine map, `t = T(r + d(r))`,
 /// comes back exactly — `T` and `d` to rounding — at uneven weights, which move nothing on exact
 /// pairs. Fitting the affine map first leaves part of the field in it, 1 px and more off the truth.
-/// The rotation's angle is the secant iteration's, to the rounding of the angle.
+/// The rotation's angle is the closed form's, `atan2(S, C)` of the vectors the correction leaves.
 #[test]
 fn each_linear_part_and_its_correction_fit_together() {
     let cases = [

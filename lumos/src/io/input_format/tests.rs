@@ -2,7 +2,7 @@ use std::path::Path;
 
 use imaginarium::RasterFormat;
 
-use crate::io::error::ImageError;
+use crate::io::error::{ImageError, LoadError};
 use crate::io::input_format::{InputFormat, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 
 #[test]
@@ -27,7 +27,7 @@ fn the_extension_names_the_decoder_in_any_case() {
         assert!(
             matches!(
                 InputFormat::of(Path::new(path)),
-                Err(ImageError::UnsupportedFormat { path: refused }) if refused == Path::new(path)
+                Err(ImageError { path: refused, kind: LoadError::UnsupportedFormat }) if refused == Path::new(path)
             ),
             "{path}"
         );

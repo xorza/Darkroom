@@ -21,9 +21,11 @@ pub(crate) fn atomic(c: &mut Criterion) {
         ("homography", TransformType::Homography),
     ] {
         group.bench_function(BenchmarkId::new(name, count), |b| {
-            let prepared = pair.get_or_init(Pair::typical).prepared(&config);
-            let search = prepared.search(&prepared.matches());
-            b.iter(|| search.hypothesis(transform).expect("the pair registers"));
+            pair.get_or_init(Pair::typical)
+                .with_prepared(config.clone(), |prepared| {
+                    let search = prepared.search(&prepared.matches());
+                    b.iter(|| search.hypothesis(transform).expect("the pair registers"));
+                });
         });
     }
 }

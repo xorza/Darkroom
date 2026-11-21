@@ -27,8 +27,11 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let model = pair.model(TransformType::Similarity, correction);
             let catalogs = FitCatalogs::new(&pair.reference, &pair.target);
             let hypothesis = pair.hypothesis(TransformType::Similarity);
-            let radius =
-                tuning::recovery_radius(pair.prepared(&RegistrationConfig::default()).max_sigma());
+            let radius = tuning::recovery_radius(
+                pair.with_prepared(RegistrationConfig::default(), |prepared| {
+                    prepared.max_sigma()
+                }),
+            );
             b.iter(|| {
                 catalogs
                     .fit(hypothesis, model, radius)

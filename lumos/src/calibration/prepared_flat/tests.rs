@@ -1,6 +1,7 @@
 use common::WorkerPool;
 
-use crate::calibration::calibration_masters::CalibrationMasters;
+use crate::calibration::calibration_masters::additive::Additive;
+use crate::calibration::calibration_masters::{CalibrationMasters, MasterParts};
 use crate::calibration::error::CalibrationError;
 use crate::calibration::prepared_flat::{MIN_NORMALIZED_FLAT, PreparedFlat};
 use crate::calibration::subtraction::internals::subtract_bias;
@@ -26,12 +27,14 @@ fn prepare(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> PreparedFlat {
 /// Calibrate `light` by `prepared` alone, its saturation taken as flagged.
 fn divide(prepared: PreparedFlat, light: &mut CfaImage) {
     light.metadata.derived.set_saturation_flagged(true);
-    CalibrationMasters::builder()
-        .flat(prepared)
-        .build()
-        .unwrap()
-        .calibrate(light)
-        .unwrap();
+    CalibrationMasters::assemble(MasterParts {
+        additive: Additive::None,
+        flat: Some(prepared),
+        defect_map: None,
+    })
+    .unwrap()
+    .calibrate(light)
+    .unwrap();
 }
 
 fn standard_xtrans() -> CfaType {

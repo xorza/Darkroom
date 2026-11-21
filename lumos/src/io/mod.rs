@@ -1,6 +1,7 @@
 //! The file formats: FITS, camera RAW and the formats imaginarium reads, decoded into the
 //! [`image`](crate::image) types and written back from them.
 
+pub(crate) mod decode_config;
 pub(crate) mod decoder;
 pub(crate) mod error;
 pub(crate) mod fits;

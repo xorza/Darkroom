@@ -1,7 +1,11 @@
 //! [`Weighting`]: how each frame weighs in the mean.
 
 /// Frame weighting strategy.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// No manual weights: a weight is per-frame data, which a configuration shared by every frame of
+/// a role does not hold. IRAF `imcombine`, ccdproc and PixInsight state one per frame where they
+/// take one; a caller with such weights would give them on the frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Weighting {
     /// Equal weights for all frames.
     Equal,
@@ -10,6 +14,4 @@ pub enum Weighting {
     /// `gain` its normalization. Not normalized, so the weight plane is an inverse variance. A
     /// frame with no measured noise is an error.
     Noise,
-    /// Explicit per-frame weights provided by the user.
-    Manual(Vec<f32>),
 }

@@ -68,7 +68,7 @@ impl CacheCore {
             };
         };
         let beside = Stage {
-            held: stage.held + combine.beside_bytes,
+            held_bytes: stage.held_bytes + combine.beside_bytes,
             ..stage
         };
         let width = beside.width(combine.budget, 1, Placement::Spilled);

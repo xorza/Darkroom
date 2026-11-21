@@ -9,7 +9,7 @@
 //! with. The flags are the carried flags of the source pixels the sample gave weight; see
 //! `FlaggedSources`.
 //!
-//! The two agree on where there is data: both are zero exactly where the sample is the border. The
+//! The two agree on where there is data: both are zero exactly where the sample is outside the source footprint. The
 //! combine gates on coverage alone and divides the noise by confidence, so a covered pixel at zero
 //! confidence would enter its statistics with no finite noise; see `PixelCoverage`, and
 //! `FrameCheck::quality_pair`, which holds caller-supplied planes to the same pairing.
@@ -88,7 +88,6 @@ pub(crate) struct FrameSampler<'a> {
     method: SampleMethod,
     sources: ArrayVec<SourcePlane<'a>, 3>,
     flagged: Option<&'a FlaggedSources<'a>>,
-    border: f32,
     size: USize2,
 }
 
@@ -128,7 +127,6 @@ impl<'a> FrameSampler<'a> {
             method: rule.method,
             sources: image.planes.clone(),
             flagged,
-            border: rule.border,
             size: image.size(),
         }
     }
@@ -165,7 +163,7 @@ impl<'a> FrameSampler<'a> {
             .and_then(FlaggedSources::validity)
             .is_some_and(|validity| !validity.holds(idx))
         {
-            return self.no_data(out);
+            return Self::no_data(out);
         }
         for (row, source) in out.channels.iter_mut().zip(&self.sources) {
             row[out.x] = source.pixels[idx];
@@ -179,20 +177,20 @@ impl<'a> FrameSampler<'a> {
         }
     }
 
-    /// The border in every channel, with no quality.
-    fn no_data(&self, out: &mut PixelOut<'_, '_>) -> PixelQuality {
+    /// 0 in every channel, with no quality: a pixel outside the source footprint measures
+    /// nothing, which its quality says.
+    fn no_data(out: &mut PixelOut<'_, '_>) -> PixelQuality {
         for row in out.channels.iter_mut() {
-            row[out.x] = self.border;
+            row[out.x] = 0.0;
         }
         PixelQuality::default()
     }
 }
 
-/// How a frame is sampled: its method, and the value of a pixel outside the source footprint.
+/// How a frame is sampled.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SampleRule {
     pub(crate) method: SampleMethod,
-    pub(crate) border: f32,
 }
 
 /// Where one output pixel lands: column `x` of each channel's row.
@@ -276,7 +274,7 @@ impl<S: Isa> RowSampler<'_, '_, S> {
         kernel.axis(isa, pos.x(), &mut self.axes.x);
         kernel.axis(isa, pos.y(), &mut self.axes.y);
         let Some(window) = TapWindow::new(&self.axes.x, &self.axes.y, sampler.size) else {
-            return sampler.no_data(out);
+            return FrameSampler::no_data(out);
         };
         let validity = sampler
             .flagged
@@ -320,7 +318,7 @@ impl<S: Isa> RowSampler<'_, '_, S> {
         fallback.axis(isa, pos.x(), &mut self.axes.x);
         fallback.axis(isa, pos.y(), &mut self.axes.y);
         let Some(window) = TapWindow::new(&self.axes.x, &self.axes.y, sampler.size) else {
-            return sampler.no_data(out);
+            return FrameSampler::no_data(out);
         };
         let weights = match validity {
             Some(validity) => window.masked_weights(isa, validity),
@@ -329,7 +327,7 @@ impl<S: Isa> RowSampler<'_, '_, S> {
         // Bilinear's taps with weight sit within the kernel's, where it is positive too, so data
         // under them means coverage; the test keeps the pairing should rounding say otherwise.
         if weights.total() <= 0.0 || coverage <= 0.0 {
-            return sampler.no_data(out);
+            return FrameSampler::no_data(out);
         }
         let sum = WindowSum {
             window: &window,
@@ -400,7 +398,7 @@ impl Kernel for SampleRow<'_, '_, '_, '_> {
             };
             let quality = match *pos {
                 Some(pos) => row.pixel(pos, out),
-                None => row.sampler.no_data(out),
+                None => FrameSampler::no_data(out),
             };
             coverage[x] = quality.coverage;
             confidence[x] = quality.confidence;

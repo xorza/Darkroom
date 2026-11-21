@@ -4,11 +4,11 @@
 //! own header declares — see [`plan::FitsDecodePlan::sample_scale`]. That is what puts a FITS
 //! frame in the same numeric domain as a RAW one, which every stage after `load` assumes without
 //! being able to check. A floating-point HDU declares no span, so its `DATAMAX` decides: a
-//! saturation level well above unity means ADU and is divided by the 16-bit full scale, and
-//! anything else is taken as already normalized — which is what round-trips a Lumos-written master.
+//! maximum well above unity means ADU and is divided by the 16-bit full scale, and anything else
+//! is taken as already normalized — which is what round-trips a Lumos-written master.
 //!
-//! Everything expressed in the file's sample units follows the samples through that division:
-//! `DATAMAX`, and the ADC step read off the stored integers. The divisor is recorded in the image's
+//! Everything expressed in the file's sample units follows the samples through that division: the
+//! saturation level `SATURATE` states, and the ADC step read off the stored integers. The divisor is recorded in the image's
 //! [`crate::SampleDomain`] so the physical value stays recoverable.
 //!
 //! The division does not make two frames mean the same thing — `BUNIT` is what says *what* they

@@ -1,6 +1,7 @@
 use super::*;
 use crate::internals::test_rng::TestRng;
 use crate::math::statistics::CHI2_99_2DOF;
+use std::num::NonZeroUsize;
 
 /// One estimation of `known`'s model: exact points under `known`, the listed indices moved far
 /// away, at `confidences`.
@@ -39,7 +40,7 @@ impl Case {
         }
         let mut config = RansacConfig::default();
         if self.unconstrained {
-            config.max_rotation = None;
+            config.max_rotation_rad = None;
             config.scale_range = None;
         }
         let confidences = if self.confidences.is_empty() {
@@ -298,7 +299,7 @@ fn final_refit_does_not_degrade_robust_score() {
         1.0,
         RansacConfig {
             max_iterations: 1,
-            local_max_iterations: 0,
+            local_optimization: None,
             ..Default::default()
         },
     );
@@ -343,12 +344,13 @@ fn local_optimization_grows_the_consensus() {
         .map(|(k, &p)| p + DVec2::new(0.3 * k as f64, 0.0))
         .collect();
     let max_sigma = 1.0 / CHI2_99_2DOF.sqrt();
-    for (local_max_iterations, inliers, shift) in [(0, 5, 0.45), (10, 6, 0.75)] {
+    for (local_optimization, inliers, shift) in [(None, 5, 0.45), (NonZeroUsize::new(10), 6, 0.75)]
+    {
         let estimator = estimator(
             max_sigma,
             RansacConfig {
                 max_iterations: 1,
-                local_max_iterations,
+                local_optimization,
                 ..Default::default()
             },
         );
@@ -365,12 +367,12 @@ fn local_optimization_grows_the_consensus() {
         assert_eq!(
             result.inliers,
             (0..inliers).collect::<Vec<_>>(),
-            "LO {local_max_iterations}"
+            "LO {local_optimization:?}"
         );
         let found = result.transform.translation_components();
         assert!(
             (found.x - shift).abs() <= 4.0 * f64::EPSILON * 900.0 && found.y == 0.0,
-            "LO {local_max_iterations}: {found:?}"
+            "LO {local_optimization:?}: {found:?}"
         );
     }
 }

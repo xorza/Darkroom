@@ -67,6 +67,9 @@ pub struct ColorDefects {
     pub defective: usize,
     /// The sensor's photosites of this color.
     pub photosites: usize,
+    /// Whether the hot pixels reached the cap of 1% of the color's photosites: the detection
+    /// found at least that many above its cut, and kept the brightest.
+    pub at_hot_cap: bool,
 }
 
 impl ColorDefects {

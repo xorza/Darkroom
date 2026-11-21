@@ -31,11 +31,11 @@ fn a_magnified_frame_weighs_less_per_output_pixel() {
     let s: f64 = (-2..=2).map(|d| gaussian(f64::from(d))).sum();
     let bound = (2.0 * 34.0 + 1.0) * f64::from(f32::EPSILON) * 10.0;
     let magnified = Transform::scale(DVec2::splat(2.0));
-    for kernel in DrizzleKernel::ALL {
+    for kernel in Kernel::ALL {
         let share = match kernel {
-            DrizzleKernel::Square => 0.25,
-            DrizzleKernel::Gaussian => ((1.0 + 2.0 * gaussian(2.0)) / s).libm_powi(2),
-            DrizzleKernel::Turbo | DrizzleKernel::Point | DrizzleKernel::Lanczos => 1.0,
+            Kernel::Square => 0.25,
+            Kernel::Gaussian => ((1.0 + 2.0 * gaussian(2.0)) / s).libm_powi(2),
+            Kernel::Turbo | Kernel::Point | Kernel::Lanczos => 1.0,
         };
         for (transform, period_mean) in [(magnified, 0.25), (Transform::identity(), 1.0)] {
             let mut alone = accumulator(
@@ -106,14 +106,9 @@ fn a_linear_ramp_reads_back_at_each_preimage() {
 
     let shifted = Transform::translation(DVec2::new(0.25, 0.15));
     let halved = Transform::affine([0.5, 0.0, 0.25, 0.0, 0.5, 0.25]);
-    let cases: [(&str, Transform, &[DrizzleKernel], RangeInclusive<usize>); 2] = [
-        (
-            "shifted",
-            shifted,
-            &[DrizzleKernel::Turbo, DrizzleKernel::Square],
-            2..=20,
-        ),
-        ("halved", halved, &DrizzleKernel::ALL, 4..=7),
+    let cases: [(&str, Transform, &[Kernel], RangeInclusive<usize>); 2] = [
+        ("shifted", shifted, &[Kernel::Turbo, Kernel::Square], 2..=20),
+        ("halved", halved, &Kernel::ALL, 4..=7),
     ];
     for (name, transform, kernels, interior) in cases {
         let preimage = transform.inverse();

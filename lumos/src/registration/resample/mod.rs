@@ -6,6 +6,8 @@ use imaginarium::{PlanarDesc, PlanarImage};
 use rayon::iter::Either;
 use rayon::prelude::*;
 
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame_store::frame_buffers::{FrameBuffers, NewFrame};
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::linear_image::LinearImage;
@@ -134,13 +136,6 @@ impl WarpResult {
             transform: warp_transform,
             params: config,
         } = warp;
-        // Release assert: a non-finite border is caller error, and it reaches every pixel outside
-        // the source footprint, seeding NaN into the combine.
-        assert!(
-            config.border_value.is_finite(),
-            "warp border_value must be finite, got {}",
-            config.border_value
-        );
         let desc = image.desc;
         assert_eq!(
             self.image.desc(),
@@ -167,10 +162,7 @@ impl WarpResult {
             let flagged = image
                 .flags
                 .map(|flags| flag_scratch.prepare(flags, method.window_reach()));
-            let rule = SampleRule {
-                method,
-                border: config.border_value,
-            };
+            let rule = SampleRule { method };
             let sampler = FrameSampler::new(rule, image, flagged.as_ref());
             let warp_row = |scratch: &mut RowScratch,
                             y: usize,
@@ -241,6 +233,38 @@ impl WarpResult {
             }));
         }
         warped.set_flags(flag_plane.and_then(|plane| flag_scratch.finish(plane)));
+    }
+}
+
+/// A warped frame on its way to its tier: the resident tier keeps the set as the frame, and the
+/// spilled one hands it back for the next frame's warp.
+impl FrameBuffers for WarpResult {
+    type Samples = PlanarImage;
+
+    fn image(&self) -> &LinearImage {
+        &self.image
+    }
+
+    fn quality(&self) -> FrameQuality<&Buffer2<f32>> {
+        FrameQuality::Planes {
+            coverage: &self.coverage,
+            confidence: &self.confidence,
+        }
+    }
+
+    fn into_new(self) -> NewFrame<LinearImage> {
+        let Self {
+            image,
+            coverage,
+            confidence,
+        } = self;
+        NewFrame {
+            image,
+            quality: FrameQuality::Planes {
+                coverage,
+                confidence,
+            },
+        }
     }
 }
 

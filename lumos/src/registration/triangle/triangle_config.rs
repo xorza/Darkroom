@@ -25,8 +25,8 @@ impl TriangleConfig {
     /// The points of `reference` and `target` matched by triangle pattern, with each match's
     /// confidence. Only triangles at least `noise_scale` high over their longest side take part.
     ///
-    /// Takes the trees rather than the points so the caller's target tree, which match recovery
-    /// queries again afterwards, is built once.
+    /// Takes the trees of each catalog's brightest stars, which the caller builds once a pair;
+    /// match recovery queries a tree of its own, of every unsaturated target.
     pub(crate) fn match_trees(
         &self,
         reference: &KdTree,

@@ -4,7 +4,8 @@
 //! the brightest dominate and turn rejection into a vote about exposure rather than about
 //! outliers. Each frame gets an affine `gain`/`offset` per slot — a channel, or a color of a
 //! mosaic, whose colors drift apart over a session of twilight flats — measured against a
-//! reference, the least noisy of the set, and the combine applies it as it gathers.
+//! reference, the least noisy of the set as recorded, then re-expressed on the frame least noisy
+//! once normalized, whose scale the stack states; the combine applies it as it gathers.
 //!
 //! `Normalization::Global` fits every frame's gain against the reference by
 //! [`photometric_gain`]'s errors-in-variables fit over paired pixels, and its offset from the two
@@ -139,9 +140,10 @@ impl FrameNorm {
             reference: select_reference_frame(planes.frames, &to_domain),
         };
         let mut norms = fit.frame_norms()?;
+        let reference = rebase_on_least_noisy(&mut norms, planes.frames, fit.reference);
         // A fitted norm lands each frame on the reference frame's raw values; the reference's own
         // map then carries those into the shared domain: `map(gain·x + offset)`.
-        let map = to_domain[fit.reference];
+        let map = to_domain[reference];
         if map != DomainMap::IDENTITY {
             for slot in norms.iter_mut().flat_map(|norm| norm.slots.iter_mut()) {
                 slot.gain = (map.gain * f64::from(slot.gain)) as f32;
@@ -160,10 +162,12 @@ impl FrameNorm {
 ///
 /// [`SetFacts`]: crate::ingest::set_facts::SetFacts
 fn domain_maps(frames: &[StoredFrame]) -> Vec<DomainMap> {
-    let reference = frames.iter().find_map(|frame| frame.facts.domain.as_ref());
+    let reference = frames
+        .iter()
+        .find_map(|frame| frame.admitted.facts.domain.as_ref());
     frames
         .iter()
-        .map(|frame| match (&frame.facts.domain, reference) {
+        .map(|frame| match (&frame.admitted.facts.domain, reference) {
             (Some(domain), Some(reference)) => domain
                 .conversion_to(reference)
                 .expect("the frame set's sample domains were validated as convertible"),
@@ -172,27 +176,78 @@ fn domain_maps(frames: &[StoredFrame]) -> Vec<DomainMap> {
         .collect()
 }
 
+/// Re-express `norms`, fitted against frame `fitted`, on the frame least noisy once normalized —
+/// the lowest mean of `(gain·σ)²` over its slots, the first on a tie — and return it.
+///
+/// The fit's reference is the least noisy frame as recorded, before the frames share a scale, so a
+/// frame thin cloud dimmed qualifies: its sky's noise fell with its signal, and its norm then
+/// multiplies both back. The stack takes its photometric scale from the reference, so it takes it
+/// from the frame whose scale holds its signal best. Frame `k`'s norm `y = g_k·x + o_k` is inverted
+/// on each: `g_i' = g_i/g_k` and `o_i' = (o_i − o_k)/g_k`, in f64 and rounded once, and frame `k`
+/// becomes the identity. The rejection and the weights see every frame scaled alike, so only the
+/// level the stack states moves.
+fn rebase_on_least_noisy(norms: &mut [FrameNorm], frames: &[StoredFrame], fitted: usize) -> usize {
+    let normalized_variance = |(norm, frame): (&FrameNorm, &StoredFrame)| {
+        norm.slots
+            .iter()
+            .enumerate()
+            .map(|(slot, slot_norm)| {
+                (f64::from(slot_norm.gain) * f64::from(frame.admitted.stats.slot_noise(slot)))
+                    .libm_powi(2)
+            })
+            .sum::<f64>()
+    };
+    let scores = norms.iter().zip(frames).map(normalized_variance);
+    let reference = least(scores).expect("normalization requires frames");
+    if reference == fitted {
+        return reference;
+    }
+    let base = norms[reference].slots.clone();
+    debug_assert!(base.iter().all(|slot| slot.gain.is_finite()));
+    debug_assert!(
+        base.iter().all(|slot| slot.gain > 0.0),
+        "every fit's gain is positive"
+    );
+    for norm in norms.iter_mut() {
+        for (slot, base) in norm.slots.iter_mut().zip(&base) {
+            let base_gain = f64::from(base.gain);
+            let gain = f64::from(slot.gain) / base_gain;
+            let offset = (f64::from(slot.offset) - f64::from(base.offset)) / base_gain;
+            *slot = SlotNorm {
+                gain: gain as f32,
+                offset: offset as f32,
+            };
+        }
+    }
+    reference
+}
+
+/// The index of the least of `scores`, the first on a tie; `None` for none.
+fn least(scores: impl IntoIterator<Item = f64>) -> Option<usize> {
+    let mut scores = scores.into_iter().enumerate();
+    let (_, mut best_score) = scores.next()?;
+    let mut best = 0;
+    for (idx, score) in scores {
+        if score < best_score {
+            best_score = score;
+            best = idx;
+        }
+    }
+    Some(best)
+}
+
 /// The least noisy frame: the lowest mean noise variance over its slots, each σ carried into the
 /// shared domain by `to_domain`, so frames decoded at different scales compare in one unit. The
 /// first wins a tie.
 fn select_reference_frame(frames: &[StoredFrame], to_domain: &[DomainMap]) -> usize {
     let mean_variance = |(frame, map): (&StoredFrame, &DomainMap)| {
-        let stats = &frame.source_stats;
+        let stats = &frame.admitted.stats;
         (0..stats.medians.len())
             .map(|slot| (map.gain * f64::from(stats.slot_noise(slot))).libm_powi(2))
             .sum::<f64>()
             / stats.medians.len() as f64
     };
-    let mut scores = frames.iter().zip(to_domain).map(mean_variance).enumerate();
-    let (_, mut best_score) = scores.next().expect("normalization requires frames");
-    let mut best_frame = 0;
-    for (frame, score) in scores {
-        if score < best_score {
-            best_score = score;
-            best_frame = frame;
-        }
-    }
-    best_frame
+    least(frames.iter().zip(to_domain).map(mean_variance)).expect("normalization requires frames")
 }
 
 #[cfg(feature = "internals")]

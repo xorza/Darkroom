@@ -12,22 +12,15 @@ use common::USize2;
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Intensity<'a> {
     size: USize2,
-    channels: Channels<'a>,
+    channels: IntensityBand<'a>,
     /// The flags of the image the channels are, which name the pixels that hold a fill.
     flags: Option<&'a PixelFlags>,
 }
 
-/// A band of the channels an [`Intensity`] is read from: the channel itself, or the three whose
-/// [`Rgb::intensity`] it is.
+/// The channels an [`Intensity`] is read from, whole or a band of them: the channel itself, or
+/// the three whose [`Rgb::intensity`] it is.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum IntensityBand<'a> {
-    Mono(&'a [f32]),
-    Rgb([&'a [f32]; 3]),
-}
-
-/// The channels an [`Intensity`] is read from.
-#[derive(Debug, Clone, Copy)]
-enum Channels<'a> {
     Mono(&'a [f32]),
     Rgb([&'a [f32]; 3]),
 }
@@ -38,7 +31,7 @@ impl<'a> Intensity<'a> {
         debug_assert_eq!(pixels.len(), size.pixel_count());
         Self {
             size,
-            channels: Channels::Mono(pixels),
+            channels: IntensityBand::Mono(pixels),
             flags: None,
         }
     }
@@ -52,7 +45,7 @@ impl<'a> Intensity<'a> {
         );
         Self {
             size,
-            channels: Channels::Rgb([r, g, b]),
+            channels: IntensityBand::Rgb([r, g, b]),
             flags: None,
         }
     }
@@ -71,8 +64,8 @@ impl<'a> Intensity<'a> {
     #[inline]
     pub(crate) const fn at(&self, idx: usize) -> f32 {
         match self.channels {
-            Channels::Mono(pixels) => pixels[idx],
-            Channels::Rgb([r, g, b]) => Rgb {
+            IntensityBand::Mono(pixels) => pixels[idx],
+            IntensityBand::Rgb([r, g, b]) => Rgb {
                 r: r[idx],
                 g: g[idx],
                 b: b[idx],
@@ -86,8 +79,8 @@ impl<'a> Intensity<'a> {
     pub(crate) fn band(&self, start: usize, len: usize) -> IntensityBand<'a> {
         let range = start..start + len;
         match self.channels {
-            Channels::Mono(pixels) => IntensityBand::Mono(&pixels[range]),
-            Channels::Rgb([r, g, b]) => {
+            IntensityBand::Mono(pixels) => IntensityBand::Mono(&pixels[range]),
+            IntensityBand::Rgb([r, g, b]) => {
                 IntensityBand::Rgb([&r[range.clone()], &g[range.clone()], &b[range]])
             }
         }

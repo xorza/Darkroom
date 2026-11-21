@@ -29,7 +29,7 @@ impl LightSource<'_> {
 
     /// The run's shape, from the first held frame or the first file's header: no light is decoded
     /// before the tier is chosen.
-    pub(super) fn shape(&self, run: &IngestRun) -> Result<LightShape, AlignStackError> {
+    pub(super) fn shape(&self, run: &IngestRun<'_>) -> Result<LightShape, AlignStackError> {
         match self {
             // They were in memory before the run read the machine: the plan charges them as held.
             Self::Held(frames) => Ok(LightShape::held(

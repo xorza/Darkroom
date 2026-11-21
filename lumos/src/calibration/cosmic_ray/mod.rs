@@ -27,26 +27,20 @@
 
 mod bayer;
 pub(crate) mod cosmic_ray_config;
+pub(crate) mod cosmic_ray_detector;
 pub(crate) mod error;
 pub(crate) mod kept_out;
 pub(crate) mod masks;
 pub(crate) mod mono;
 pub(crate) mod noise_model;
 
-use crate::bg_mesh::color_mesh::ColorMesh;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray::bayer::BayerDetector;
-use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::error::CosmicRayError;
-use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::mono::MonoDetector;
-use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBgs};
 use crate::image::cfa::bayer_pattern::BayerPattern;
-use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::flags::quality_flags::QualityFlags;
-use crate::image::masked_plane::MaskedPlane;
 use common::USize2;
 
 /// The tile side of the mesh the local background comes from: as the dark-current model's, small
@@ -58,10 +52,11 @@ const BG_TILE_SIZE: usize = 64;
 /// is ~0 so a CR (F→0) doesn't divide by zero.
 const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 
-/// Frame-sized masks a pass holds beside its detector's: [`KeptOut`]'s two.
+/// Frame-sized masks a pass holds beside its detector's: [`KeptOut`](kept_out::KeptOut)'s two.
 const PASS_MASKS: usize = 2;
 
-/// Frame-sized masks building [`KeptOut`] holds at once, before the detector allocates anything.
+/// Frame-sized masks building [`KeptOut`](kept_out::KeptOut) holds at once, before the detector
+/// allocates anything.
 const KEPT_OUT_BUILD_MASKS: usize = 3;
 
 /// The detector a CFA type gets: one dense plane, or four Bayer phases. X-Trans gets none.
@@ -79,63 +74,6 @@ impl Layout {
             CfaType::Mosaic(Mosaic::XTrans(_)) => Err(CosmicRayError::XTransUnsupported),
         }
     }
-}
-
-/// Detect and in-paint cosmic rays in a single calibrated frame, in place, dispatching on its CFA
-/// type (mono / Bayer), and flag every in-painted pixel [`QualityFlags::COSMIC_RAY`] and
-/// [`QualityFlags::REPAIRED`]. Saturated star cores and pixels with no measurement are kept out of
-/// detection, the background and every in-paint's sources, as [`KeptOut`] says. Returns the number
-/// of CR pixels corrected, or an error, with the frame untouched, for an X-Trans mosaic or when the
-/// parametric noise model needs an ADC step the frame does not record.
-pub(crate) fn reject(
-    image: &mut CfaImage,
-    config: &CosmicRayConfig,
-) -> Result<usize, CosmicRayError> {
-    let layout = Layout::of(&image.cfa_type())?;
-    let noise = NoiseModel::resolve(&config.noise, &image.metadata)?;
-    let size = image.data().size();
-    let kept_out = KeptOut::of(image.data(), image.flags());
-    // Measured once, before any repair: a hit spoils a tile's statistics no more than a star does,
-    // and the mesh's clip and median filter are what keep both out.
-    let mesh = ColorMesh::measure(
-        MaskedPlane {
-            pixels: image.data(),
-            mask: kept_out.as_ref().map(|kept_out| &kept_out.never_flagged),
-        },
-        &image.cfa_type(),
-        BG_TILE_SIZE,
-    );
-    // Shared, as the pixels below are borrowed apart from it.
-    let flat_gain = image.flat_gain().cloned();
-    let bgs = PixelBgs {
-        mesh: &mesh,
-        flat_gain: flat_gain.as_deref(),
-    };
-    // Bayer is 2×2-periodic → four dense same-color planes; reuse the mono detector per plane.
-    let mut bayer;
-    let mut mono;
-    let found = match layout {
-        Layout::Bayer(pattern) => {
-            bayer = BayerDetector::new(config, noise, pattern);
-            bayer.reject(image.data_mut(), &bgs, kept_out.as_ref())
-        }
-        Layout::Mono => {
-            mono = MonoDetector::new(config, noise);
-            mono.reject(
-                image.data_mut(),
-                &|idx| bgs.at(0, size.point_of(idx)),
-                kept_out.as_ref(),
-            )
-        }
-    };
-    let count = found.count_ones();
-    if count > 0 {
-        image.add_flags_where(
-            QualityFlags::COSMIC_RAY.union(QualityFlags::REPAIRED),
-            |idx| found.get(idx),
-        );
-    }
-    Ok(count)
 }
 
 /// The bytes a cosmic-ray pass over a `size` mosaic of `cfa_type` allocates beside the mosaic, at

@@ -183,7 +183,8 @@ fn defect_map_detects_the_cameras_hot_and_dead_pixels() {
 
 /// The σ threshold decides which tiers are hot. On a dark of 0.1 with σ 0.01 noise, three pixels
 /// at 5σ and three at 10σ: at 8σ exactly the three 10σ pixels pass, and at 3σ all six do — plus
-/// any noise pixel past 3σ, of which a 4096-pixel Gaussian field has about five.
+/// any noise pixel past 3σ, of which a 4096-pixel Gaussian field has about five. A set of masters
+/// built from the dark detects at the σ it is given: three at 8σ.
 #[test]
 fn hot_detection_sigma_threshold_picks_its_tier() {
     let size = USize2::new(64, 64);
@@ -211,6 +212,16 @@ fn hot_detection_sigma_threshold_picks_its_tier() {
     for i in moderate.iter().chain(&extreme) {
         assert!(lenient.contains(i), "σ 3 keeps {i}: {lenient:?}");
     }
+    let masters = CalibrationMasters::from_images(
+        CalibrationSet {
+            dark: Some(dark),
+            ..Default::default()
+        },
+        SigmaThreshold::new(8.0).unwrap(),
+        &CancelToken::never(),
+    )
+    .unwrap();
+    assert_eq!(masters.defect_summary().unwrap().hot_pixels, 3);
 }
 
 /// Hot pixels are measured on the dark without its bias. The bias is 0.02 with σ 0.005 noise and

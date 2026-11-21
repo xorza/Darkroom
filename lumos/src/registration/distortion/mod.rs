@@ -14,8 +14,8 @@
 //!
 //! Used in the registration pipeline after RANSAC to refine transformation accuracy. It maps the
 //! reference frame onto a target frame, not pixels onto the sky, and holds its coefficients in
-//! coordinates normalized about the matched stars' centroid, with no inverse (`AP`/`BP`): it is no
-//! FITS WCS SIP header, and none is written.
+//! coordinates normalized about its reference point, with no inverse (`AP`/`BP`): it is no FITS WCS
+//! SIP header, and none is written.
 //!
 //! ## Thin-Plate Spline (Non-Parametric)
 //!

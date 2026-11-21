@@ -4,10 +4,7 @@ use std::path::PathBuf;
 
 use common::{UserCache, env};
 
-use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::io::decoder::decode_params::DecodeParams;
-use crate::io::fits::fits_load_config::FitsLoadConfig;
-use crate::io::null_policy::NullPolicy;
+use crate::io::decode_config::DecodeConfig;
 
 /// How a run reads its frames and where it parks them: the decode policy, the memory it plans
 /// against, and the frame cache every combine reads its frames through.
@@ -34,12 +31,8 @@ pub struct IngestConfig {
     /// reports: what stays in memory and what spills to disk. Like the system reading, it refuses
     /// no work.
     pub memory_override: Option<u64>,
-    /// How FITS frames are read; ignored for every other format.
-    pub fits: FitsLoadConfig,
-    /// What a null sample does to a linear decode.
-    pub nulls: NullPolicy,
-    /// How many passes an X-Trans demosaic makes; ignored for every other mosaic.
-    pub xtrans_passes: MarkesteijnPasses,
+    /// How every frame decodes.
+    pub decode: DecodeConfig,
 }
 
 impl Default for IngestConfig {
@@ -48,23 +41,12 @@ impl Default for IngestConfig {
             cache_dir: UserCache::root(&|name| env::var_os(name), "lumos"),
             keep_cache: false,
             memory_override: None,
-            fits: FitsLoadConfig::default(),
-            nulls: NullPolicy::default(),
-            xtrans_passes: MarkesteijnPasses::default(),
+            decode: DecodeConfig::default(),
         }
     }
 }
 
 impl IngestConfig {
-    /// The options this configuration decodes every frame under.
-    pub(crate) const fn decode_params(&self) -> DecodeParams<'_> {
-        DecodeParams {
-            fits: &self.fits,
-            nulls: self.nulls,
-            xtrans_passes: self.xtrans_passes,
-        }
-    }
-
     /// The default configuration with `cache_dir` set.
     pub fn with_cache_dir(cache_dir: PathBuf) -> Self {
         Self {

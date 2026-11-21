@@ -8,18 +8,18 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::flags::pixel_flags::DilationScratch;
+use crate::image::frame::{Frame, Samples};
 use crate::image::frame_desc;
-use crate::image::stackable_image::StackableImage;
 use crate::memory::footprint::Footprint;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
-/// What a frame is, read from its header: its shape, its sensor's pattern — [`CfaType::Mono`] for
-/// a frame of no filter, or of one already demosaiced — what its decoder holds, and the bytes of
-/// the flat gain its file stores, none for a file with none.
+/// What a frame is, read from its header: its shape, its sensor's pattern — `None` for a frame of
+/// planes, no sensor frame — what its decoder holds, and the bytes of the flat gain its file
+/// stores, none for a file with none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FrameInfo {
     pub(crate) desc: PlanarDesc,
-    pub(crate) cfa_type: CfaType,
+    pub(crate) cfa_type: Option<CfaType>,
     pub(crate) decoder: DecoderBytes,
     pub(crate) gain_bytes: usize,
 }
@@ -50,10 +50,10 @@ impl DecoderBytes {
 
 impl FrameInfo {
     /// What `image`, decoded already, settles, its decoder having held `decoder` beside it.
-    pub(crate) fn of_decoded(image: &impl StackableImage, decoder: DecoderBytes) -> Self {
+    pub(crate) fn of_decoded(image: &Frame<impl Samples>, decoder: DecoderBytes) -> Self {
         Self {
             desc: image.desc(),
-            cfa_type: image.cfa_type().unwrap_or(CfaType::Mono),
+            cfa_type: image.sensor_pattern(),
             decoder,
             gain_bytes: image.flat_gain().map_or(0, |gain| gain.ram_bytes()),
         }
@@ -74,7 +74,7 @@ impl FrameInfo {
     pub(crate) fn footprint(self, workers: usize) -> Footprint {
         self.decoded().beside(FrameStats::heap_bytes(
             self.desc,
-            self.cfa_type.mosaic(),
+            self.cfa_type.and_then(CfaType::mosaic),
             workers,
         ))
     }
@@ -89,17 +89,18 @@ impl FrameInfo {
         passes: MarkesteijnPasses,
         workers: usize,
     ) -> Footprint {
-        let size = self.desc.size();
-        let noise = self
+        let cfa_type = self
             .cfa_type
+            .expect("a frame that demosaics is a sensor frame");
+        let size = self.desc.size();
+        let noise = cfa_type
             .mosaic()
             .map_or(0, |mosaic| MosaicNoiseMeasure::heap_bytes(size, mosaic));
-        let dilation = self
-            .cfa_type
+        let dilation = cfa_type
             .mosaic()
             .map_or(0, |_| DilationScratch::heap_bytes(size, workers));
         let flags = frame_desc::flag_plane_byte_len(self.desc);
-        let demosaic = Demosaic::of(self.cfa_type, passes).footprint(self.desc, workers);
+        let demosaic = Demosaic::of(cfa_type, passes).footprint(self.desc, workers);
         way.beside(noise).beside(dilation).then(Footprint {
             kept: demosaic.kept + flags,
             peak: demosaic.peak + flags,

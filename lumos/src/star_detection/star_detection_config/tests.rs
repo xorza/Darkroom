@@ -104,7 +104,7 @@ fn inclusive_bounds_accept_their_edges() {
             };
         }),
         ("background refinement mask_dilation 50", |c| {
-            c.bg.refinement = BgRefinement::Iterative(IterativeRefinement {
+            c.bg.refinement = Some(IterativeRefinement {
                 iterations: NonZeroUsize::new(10).unwrap(),
                 mask_dilation: 50,
                 mask_sigma: 2.0,
@@ -144,7 +144,7 @@ fn config_invalid_parameters_return_exact_errors() {
         ),
         (
             configured(|config| {
-                config.bg.refinement = BgRefinement::Iterative(IterativeRefinement {
+                config.bg.refinement = Some(IterativeRefinement {
                     iterations: NonZeroUsize::new(11).unwrap(),
                     mask_dilation: 3,
                     mask_sigma: 2.0,
@@ -155,7 +155,7 @@ fn config_invalid_parameters_return_exact_errors() {
         ),
         (
             configured(|config| {
-                config.bg.refinement = BgRefinement::Iterative(IterativeRefinement {
+                config.bg.refinement = Some(IterativeRefinement {
                     iterations: NonZeroUsize::MIN,
                     mask_dilation: 51,
                     mask_sigma: 2.0,
@@ -166,7 +166,7 @@ fn config_invalid_parameters_return_exact_errors() {
         ),
         (
             configured(|config| {
-                config.bg.refinement = BgRefinement::Iterative(IterativeRefinement {
+                config.bg.refinement = Some(IterativeRefinement {
                     iterations: NonZeroUsize::MIN,
                     mask_dilation: 3,
                     mask_sigma: 0.0,
@@ -281,7 +281,7 @@ fn config_invalid_parameters_return_exact_errors() {
         (
             configured(|config| {
                 config.extraction.min_area = 100;
-                config.extraction.max_area = 50;
+                config.extraction.max_area = Some(50);
             }),
             "max_area",
             50.0,
@@ -345,7 +345,7 @@ fn config_invalid_parameters_return_exact_errors() {
 fn a_bound_that_is_another_config_value_is_reported_with_it() {
     let invalid = configured(|config| {
         config.extraction.min_area = 100;
-        config.extraction.max_area = 50;
+        config.extraction.max_area = Some(50);
     })
     .validate()
     .unwrap_err();

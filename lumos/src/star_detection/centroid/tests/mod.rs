@@ -186,9 +186,10 @@ impl Measured {
 }
 
 /// The star `measure_star` makes where no fit measured it: [`StampMetrics`] over `stamp` against
-/// `bg` and a PSF of `psf_sigma`, its shape from the windowed moments, and no position σ.
+/// `bg` and a PSF of `psf_sigma`, its flux over the stamp's inscribed circle, its shape from the
+/// windowed moments, and no position σ.
 fn moment_star(stamp: StampAt<'_>, psf_sigma: f64, bg: StarBg) -> Option<Star> {
-    let metrics = StampMetrics::measure(stamp, psf_sigma, bg)?;
+    let metrics = StampMetrics::measure(stamp, psf_sigma, stamp.radius as f64, bg)?;
     let shape = metrics.moment_shape();
     Some(Star {
         pos: stamp.pos,

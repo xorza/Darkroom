@@ -10,10 +10,11 @@ use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::synthetic::transforms::{StarScatter, poss_to_stars};
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::distortion::sip::sip_order::SipOrder;
+use crate::registration::registrar::Registrar;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers;
 use crate::registration::transform::{Transform, TransformType};
-use crate::registration::transform_model::TransformModel;
+use crate::registration::transform_model::{ModelChoice, TransformModel};
 
 /// A shift with a cubic barrel field before it, `d·1e-8·|d|²` about (512, 512) — 3 to 4 px at the
 /// corners — on 120 stars. With SIP of order 3 about the field's centre the warp is the field: GRIC
@@ -38,29 +39,28 @@ fn register_with_sip_recovers_barrel_distortion() {
     let target_stars = poss_to_stars(&target_pos, 3.0);
 
     let base_config = RegistrationConfig {
-        matching: helpers::matching_config(20, 10),
-        max_rms_error: 10.0,
+        matching: helpers::matching_config(10),
+        max_rms_error_px: 10.0,
         ..RegistrationConfig::default()
     };
-    let with_sip = (RegistrationConfig {
-        model: TransformModel::Auto {
-            sip: Some(SipConfig {
+    let with_sip = Registrar::new(RegistrationConfig {
+        model: TransformModel::WithSip(
+            ModelChoice::Auto,
+            SipConfig {
                 order: SipOrder::Three,
                 reference_point: Some(field.centre),
-            }),
-        },
+            },
+        ),
         ..base_config.clone()
     })
-    .registrar()
-    .unwrap()
     .register(&ref_stars, &target_stars)
     .expect("SIP registration should succeed");
     assert_eq!(
-        with_sip.transform().transform_type(),
+        with_sip.warp().linear().transform_type(),
         TransformType::Euclidean
     );
-    assert_eq!(with_sip.inlier_count(), 120);
-    let warp = with_sip.warp_transform();
+    assert_eq!(with_sip.matches().len(), 120);
+    let warp = with_sip.warp();
     for y in (0..=1024).step_by(128) {
         for x in (0..=1024).step_by(128) {
             let p = DVec2::new(f64::from(x), f64::from(y));
@@ -69,14 +69,12 @@ fn register_with_sip_recovers_barrel_distortion() {
         }
     }
 
-    let no_sip = (RegistrationConfig {
-        model: TransformModel::Auto { sip: None },
+    let no_sip = Registrar::new(RegistrationConfig {
+        model: TransformModel::Plain(ModelChoice::Auto),
         ..base_config
     })
-    .registrar()
-    .unwrap()
     .register(&ref_stars, &target_stars)
     .expect("linear registration should succeed");
-    assert!(no_sip.inlier_count() < 120, "{}", no_sip.inlier_count());
-    assert!(no_sip.rms_error() > 0.1, "{}", no_sip.rms_error());
+    assert!(no_sip.matches().len() < 120, "{}", no_sip.matches().len());
+    assert!(no_sip.rms_error_px() > 0.1, "{}", no_sip.rms_error_px());
 }

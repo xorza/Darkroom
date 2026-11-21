@@ -49,9 +49,10 @@ impl Budget {
     /// undercounts what it prices; a spilled combine plans its chunks again from the frames it
     /// reads, against the budget alone.
     pub(crate) fn assert_held(self, label: &str, peak_bytes: usize, report: &RunReport) {
-        self.assert_within(label, peak_bytes, report.overcommit_bytes);
-        if report.spilled_frames == 0 {
+        self.assert_within(label, peak_bytes, report.memory.overcommit_bytes);
+        if report.memory.spilled_frames == 0 {
             let planned = report
+                .memory
                 .planned_peak_bytes
                 .expect("every entry the budget test runs plans its memory");
             assert!(

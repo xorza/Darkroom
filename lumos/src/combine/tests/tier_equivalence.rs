@@ -58,7 +58,7 @@ fn disk_and_memory_tiers_produce_identical_masters() {
 
     let master = |memory_override: u64, tag: &str| {
         let config = StackConfig {
-            combine: Combine::mean(),
+            combine: Combine::Mean,
             weighting: Weighting::Equal,
             normalization: Normalization::None,
             ..StackConfig::light()

@@ -114,7 +114,7 @@ impl StorageTier {
     }
 
     /// This tier, its combine leaving room for `bytes` the run holds beside it for its whole pass.
-    pub(crate) const fn holding_beside(mut self, bytes: usize) -> Self {
+    pub(super) const fn holding_beside(mut self, bytes: usize) -> Self {
         if let Self::Spilled { combine, .. } = &mut self {
             combine.beside_bytes = bytes;
         }

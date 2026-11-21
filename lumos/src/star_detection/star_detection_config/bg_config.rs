@@ -9,21 +9,8 @@ use crate::error::InvalidConfigField;
 /// The smallest tile a mesh may take, in px: the finest mesh, and the most tiles it holds.
 pub(crate) const MIN_TILE_SIZE: usize = 16;
 
-/// Strategy for refining background estimation.
-#[derive(Debug, Clone, Copy, Default)]
-pub enum BgRefinement {
-    /// No refinement - use single-pass background estimation.
-    /// Fastest option, suitable for sparse fields with uniform background.
-    #[default]
-    None,
-
-    /// Iterative refinement with source masking.
-    /// Detects sources above threshold, masks them, and re-estimates background.
-    /// Best for crowded fields.
-    Iterative(IterativeRefinement),
-}
-
-/// The parameters of [`BgRefinement::Iterative`].
+/// A background refined by masking the sources and estimating again: what a crowded field needs,
+/// whose sources lift the single pass's sky.
 #[derive(Debug, Clone, Copy)]
 pub struct IterativeRefinement {
     /// Number of refinement iterations, at most 10. Usually 1-2 is sufficient.
@@ -41,26 +28,20 @@ impl IterativeRefinement {
     pub(crate) const MAX_MASK_DILATION: usize = 50;
 }
 
-impl BgRefinement {
+impl IterativeRefinement {
     /// Validate the configuration.
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
-        match self {
-            Self::None => Ok(()),
-            Self::Iterative(IterativeRefinement {
-                iterations,
-                mask_dilation,
-                mask_sigma,
-            }) => {
-                ConfigField::count("background refinement iterations", iterations.get())
-                    .must_be("at most 10", iterations.get() <= 10)?;
-                ConfigField::count("background refinement mask_dilation", *mask_dilation).must_be(
-                    "at most 50",
-                    *mask_dilation <= IterativeRefinement::MAX_MASK_DILATION,
-                )?;
-                ConfigField::new("background refinement mask_sigma", *mask_sigma)
-                    .finite_and("finite and positive", |value| value > 0.0)
-            }
-        }
+        let Self {
+            iterations,
+            mask_dilation,
+            mask_sigma,
+        } = *self;
+        ConfigField::count("background refinement iterations", iterations.get())
+            .must_be("at most 10", iterations.get() <= 10)?;
+        ConfigField::count("background refinement mask_dilation", mask_dilation)
+            .must_be("at most 50", mask_dilation <= Self::MAX_MASK_DILATION)?;
+        ConfigField::new("background refinement mask_sigma", mask_sigma)
+            .finite_and("finite and positive", |value| value > 0.0)
     }
 }
 
@@ -71,8 +52,9 @@ pub struct BgConfig {
     pub tile_size: usize,
     /// Maximum sigma-clipping iterations per tile.
     pub sigma_clip_max_iterations: usize,
-    /// Optional source-masking refinement strategy.
-    pub refinement: BgRefinement,
+    /// The source-masking refinement; `None` estimates once, the fastest, for a sparse field of
+    /// uniform sky.
+    pub refinement: Option<IterativeRefinement>,
 }
 
 impl Default for BgConfig {
@@ -80,7 +62,7 @@ impl Default for BgConfig {
         Self {
             tile_size: 64,
             sigma_clip_max_iterations: DEFAULT_SIGMA_CLIP_MAX_ITERATIONS,
-            refinement: BgRefinement::None,
+            refinement: None,
         }
     }
 }
@@ -103,6 +85,8 @@ impl BgConfig {
         )?;
         ConfigField::count("sigma_clip_max_iterations", self.sigma_clip_max_iterations)
             .must_be("at most 10", self.sigma_clip_max_iterations <= 10)?;
-        self.refinement.validate()
+        self.refinement
+            .as_ref()
+            .map_or(Ok(()), IterativeRefinement::validate)
     }
 }

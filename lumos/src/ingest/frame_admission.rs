@@ -9,7 +9,7 @@ use crate::frame::admitted::Admitted;
 use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_stats::{FrameStats, Spreads};
 use crate::image::error::FrameDimensionMismatch;
-use crate::image::stackable_image::StackableImage;
+use crate::image::frame::{Frame, Samples};
 use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::set_facts::SetFacts;
@@ -19,7 +19,7 @@ use crate::ingest::set_facts::SetFacts;
 /// statistics measured on it before the warp, with a demosaiced frame's noise taken from its
 /// mosaic.
 ///
-/// Frames decode beside each other, so frame 0 publishes its facts when it is admitted, and a
+/// Frames decode beside each other, so frame 0 publishes its facts when they are checked, and a
 /// later frame is compared with them only when they are already known: a mismatched set stops
 /// before the rest of it decodes. A frame admitted before they were known passes unchecked, so
 /// when a parallel run fails at a frame, the intake asks [`Self::first_mismatch`] below it, and
@@ -31,8 +31,8 @@ use crate::ingest::set_facts::SetFacts;
 pub(crate) struct FrameAdmission<'a> {
     desc: PlanarDesc,
     cancel: &'a CancelToken,
-    first_facts: OnceLock<SetFacts>,
-    /// Each frame's facts once they passed, by frame index: one writer each.
+    /// Each frame's facts once they passed, by frame index: one writer each. Frame 0's are the
+    /// set's, every later frame's checked against them.
     facts: Box<[OnceLock<FrameFacts>]>,
     /// Whether each frame's spread is measured too: see [`FrameStats::measure_as`].
     spreads: Spreads,
@@ -44,7 +44,6 @@ impl<'a> FrameAdmission<'a> {
         Self {
             desc,
             cancel,
-            first_facts: OnceLock::new(),
             facts: (0..frame_count).map(|_| OnceLock::new()).collect(),
             spreads: Spreads::Skipped,
         }
@@ -64,7 +63,7 @@ impl<'a> FrameAdmission<'a> {
     pub(crate) fn admit(
         &self,
         idx: usize,
-        image: &impl StackableImage,
+        image: &Frame<impl Samples>,
     ) -> Result<Admitted, AdmissionError> {
         self.admit_measured(idx, image, None)
     }
@@ -74,7 +73,7 @@ impl<'a> FrameAdmission<'a> {
     pub(crate) fn admit_measured(
         &self,
         idx: usize,
-        image: &impl StackableImage,
+        image: &Frame<impl Samples>,
         measured: Option<Admitted>,
     ) -> Result<Admitted, AdmissionError> {
         FrameDimensionMismatch::check(idx, self.desc, image.desc())?;
@@ -94,19 +93,17 @@ impl<'a> FrameAdmission<'a> {
             }
             _ => FrameStats::measure_as(image, self.spreads),
         };
-        if idx == 0 {
-            self.first_facts
-                .set(SetFacts::of_first(&facts))
-                .expect("frame 0 is admitted once");
-        }
         Ok(Admitted { stats, facts })
     }
 
-    /// Check the facts of frame `idx` against frame 0's, once they are known: for a frame read
-    /// back from a kept cache, whose samples were checked when it was written.
+    /// Check the facts of frame `idx` against frame 0's, once they are known, and publish them:
+    /// for a decoded frame before its samples are checked, and for a frame read back from a kept
+    /// cache, whose samples were checked when it was written.
     pub(crate) fn check_facts(&self, idx: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {
-        if let Some(first) = self.first_facts.get() {
-            first.check(idx, facts)?;
+        if idx != 0
+            && let Some(first) = self.facts[0].get()
+        {
+            SetFacts::of_first(first).check(idx, facts)?;
         }
         self.facts[idx]
             .set(facts.clone())
@@ -129,6 +126,7 @@ mod tests {
     use imaginarium::{ChannelLayout, PlanarDesc, RasterFormat};
 
     use crate::frame::admitted::Admitted;
+    use crate::frame::frame_facts::FrameFacts;
     use crate::image::linear_image::LinearImage;
     use crate::image::metadata::image_provenance::{
         ColorProvenance, DemosaicProvenance, ImageProvenance, RasterTransfer, RowOrder,
@@ -187,6 +185,20 @@ mod tests {
         assert_eq!(mismatched(&failed), 3);
         assert_eq!(mismatched(&admission.first_mismatch(3).unwrap()), 1);
         assert!(admission.first_mismatch(1).is_none());
+    }
+
+    /// A frame 0 read back from a kept cache, whose facts alone are checked, publishes them as a
+    /// decoded one does: frame 2, decoded bottom-up, fails at once against its top-down order.
+    #[test]
+    fn a_reused_frame_0_states_the_sets_facts() {
+        let cancel = CancelToken::new();
+        let admission =
+            FrameAdmission::new(PlanarDesc::new((2, 2), ChannelLayout::Mono), 3, &cancel);
+        admission
+            .check_facts(0, &FrameFacts::of(&frame(RowOrder::TopDown)))
+            .unwrap();
+        let failed = admission.admit(2, &frame(RowOrder::BottomUp)).unwrap_err();
+        assert_eq!(mismatched(&failed), 2);
     }
 
     /// An admission takes what a decode cache measured of the image: a median the cache recorded

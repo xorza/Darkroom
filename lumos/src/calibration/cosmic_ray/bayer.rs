@@ -10,8 +10,8 @@ use common::Buffer2;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
-use crate::calibration::cosmic_ray::mono::MonoDetector;
-use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBgs};
+use crate::calibration::cosmic_ray::mono::{Detection, MonoDetector};
+use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBgSource, PixelBgs};
 use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::bayer_phase::BayerPhase;
 use common::USize2;
@@ -20,15 +20,24 @@ use common::USize2;
 /// sampled to the phase, two.
 const PHASE_MASKS: usize = 2;
 
+/// What a detection reads beside the mosaic: its configuration, the frame's noise model, the
+/// background of each photosite and the photosites kept out of it.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct BayerDetection<'a> {
+    pub(super) config: &'a CosmicRayConfig,
+    pub(super) noise: NoiseModel,
+    pub(super) bgs: PixelBgs<'a>,
+    pub(super) kept_out: Option<&'a KeptOut>,
+}
+
 /// The Bayer detector: a mono detector, the buffers each phase is deinterleaved and kept out in,
 /// and the mask of the photosites the four repaired.
 ///
 /// The detector and the buffers are reused across all four phases. `(0, 0)` is the largest phase
 /// and runs first, so no later one grows any allocation.
 #[derive(Debug)]
-pub(super) struct BayerDetector<'a> {
-    mono: MonoDetector<'a>,
-    pattern: BayerPattern,
+pub(super) struct BayerDetector {
+    mono: MonoDetector,
     plane: Buffer2<f32>,
     /// The frame's [`KeptOut`] sampled to the phase at hand.
     plane_kept_out: KeptOut,
@@ -36,15 +45,10 @@ pub(super) struct BayerDetector<'a> {
     found: BitBuffer2,
 }
 
-impl<'a> BayerDetector<'a> {
-    pub(super) fn new(
-        config: &'a CosmicRayConfig,
-        noise: NoiseModel,
-        pattern: BayerPattern,
-    ) -> Self {
+impl BayerDetector {
+    pub(super) fn new() -> Self {
         Self {
-            mono: MonoDetector::new(config, noise),
-            pattern,
+            mono: MonoDetector::new(),
             plane: Buffer2::default(),
             plane_kept_out: KeptOut::empty(),
             found: BitBuffer2::empty(),
@@ -67,18 +71,28 @@ impl<'a> BayerDetector<'a> {
         BitBuffer2::heap_bytes(size) + scanned
     }
 
+    /// The mono detector the phases run through, for a frame of no pattern.
+    pub(super) const fn mono(&mut self) -> &mut MonoDetector {
+        &mut self.mono
+    }
+
     /// Clean every phase of `data` in place; the mask of every photosite it in-painted, the
     /// mosaic's size, which the detector holds until its next detection.
     pub(super) fn reject(
         &mut self,
         data: &mut Buffer2<f32>,
-        bgs: &PixelBgs<'_>,
-        kept_out: Option<&KeptOut>,
+        pattern: BayerPattern,
+        detection: BayerDetection<'_>,
     ) -> &BitBuffer2 {
         let size = data.size();
+        let BayerDetection {
+            config,
+            noise,
+            bgs,
+            kept_out,
+        } = detection;
         let Self {
             mono,
-            pattern,
             plane,
             plane_kept_out,
             found,
@@ -91,12 +105,22 @@ impl<'a> BayerDetector<'a> {
             }
             phase.deinterleave(data, plane);
             let color = pattern.color_at(phase.origin()).idx();
-            let local = |idx: usize| bgs.at(color, phase.to_mosaic(plane_size.point_of(idx)));
             let phase_kept_out = kept_out.map(|kept_out| {
                 kept_out.sample_into(plane_kept_out, phase);
                 &*plane_kept_out
             });
-            mono.reject(plane, &local, phase_kept_out)
+            let detection = Detection {
+                config,
+                noise,
+                local: PixelBgSource::Phase {
+                    bgs,
+                    color,
+                    phase,
+                    size: plane_size,
+                },
+                kept_out: phase_kept_out,
+            };
+            mono.reject(plane, detection)
                 .for_each_set(|pos| found.set_at(phase.to_mosaic(pos), true));
             phase.interleave(plane, data);
         }

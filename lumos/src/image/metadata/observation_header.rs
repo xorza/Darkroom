@@ -3,7 +3,6 @@
 use fits_well::image::SampleType;
 use serde::{Deserialize, Serialize};
 
-use crate::image::flags::quality_flags::SATURATION_FRACTION;
 use crate::image::metadata::sample_type_record::SampleTypeRecord;
 
 /// What a source stated about the observation and the camera: facts of the exposure, which no step
@@ -73,15 +72,4 @@ pub struct ObservationHeader {
     pub pixel_size_x: Option<f64>,
     /// Pixel size in microns (Y axis).
     pub pixel_size_y: Option<f64>,
-    /// Maximum valid pixel value (saturation level).
-    pub data_max: Option<f64>,
-}
-
-impl ObservationHeader {
-    /// The level a sample saturates at when the decoder flagged nothing: [`SATURATION_FRACTION`] of
-    /// its declared ceiling, `DATAMAX` in the normalized domain, or of that domain's 1 when it
-    /// declares none. It describes the samples as decoded, before any calibration moves them.
-    pub(crate) fn saturation_level(&self) -> f32 {
-        SATURATION_FRACTION * self.data_max.map_or(1.0, |max| max as f32)
-    }
 }

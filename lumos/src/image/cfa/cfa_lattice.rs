@@ -115,14 +115,14 @@ impl CfaLattice {
     /// mask does not name, so a defect is never repaired from another: 8 with their ties for mono
     /// and Bayer, which on a Bayer sensor are the four at 2 and the four at 2√2 of its own phase,
     /// and 24 with their ties for X-Trans; fewer where the frame's edge cuts the window, or where
-    /// more than the [`MASKED_HEADROOM`] allows is masked. The pixel's own value when none is
-    /// valid.
+    /// more than the [`MASKED_HEADROOM`] allows is masked. `None` when none is valid: the pixel
+    /// has nothing to be repaired from.
     pub(crate) fn median(
         &self,
         plane: MaskedPlane<'_>,
         pos: USizeVec2,
         scratch: &mut Gathered,
-    ) -> f32 {
+    ) -> Option<f32> {
         let MaskedPlane { pixels, mask } = plane;
         let size = pixels.size();
         let count = self.count;
@@ -148,10 +148,7 @@ impl CfaLattice {
                 last_distance = Some(tap.distance2);
             }
         }
-        if scratch.values.is_empty() {
-            return pixels[size.idx_of(pos)];
-        }
-        statistics::median_mut(&mut scratch.values)
+        (!scratch.values.is_empty()).then(|| statistics::median_mut(&mut scratch.values))
     }
 }
 
@@ -278,7 +275,7 @@ mod tests {
                     let pos = USizeVec2::new(x, y);
                     assert_eq!(
                         lattice.median(MaskedPlane::from(&pixels), pos, &mut scratch),
-                        level(pos),
+                        Some(level(pos)),
                         "{cfa:?} at ({x}, {y})"
                     );
                 }
@@ -288,7 +285,7 @@ mod tests {
 
     /// A defect is never repaired from another. A 3 × 3 mono frame with the centre defective, four
     /// neighbours at 10 and four at 1000: unmasked the median is (10 + 1000)/2 = 505; with the
-    /// four high ones masked, 10; with all eight masked, the centre's own 999.
+    /// four high ones masked, 10; with all eight masked, none: nothing to repair from.
     #[test]
     fn the_median_skips_masked_neighbours() {
         let lattice = CfaLattice::new(&CfaType::Mono);
@@ -303,7 +300,7 @@ mod tests {
         let mut scratch = Gathered::default();
         assert_eq!(
             lattice.median(MaskedPlane::from(&pixels), centre, &mut scratch),
-            505.0
+            Some(505.0)
         );
         let mut mask = BitBuffer2::new_default(size);
         for idx in [5, 6, 7, 8] {
@@ -318,7 +315,7 @@ mod tests {
                 centre,
                 &mut scratch
             ),
-            10.0
+            Some(10.0)
         );
         for idx in [0, 1, 2, 3] {
             mask.set(idx, true);
@@ -332,7 +329,7 @@ mod tests {
                 centre,
                 &mut scratch
             ),
-            999.0
+            None
         );
     }
 
@@ -360,7 +357,7 @@ mod tests {
                 USizeVec2::new(0, 0),
                 &mut scratch
             ),
-            60.0
+            Some(60.0)
         );
         assert_eq!(
             lattice.median(
@@ -368,7 +365,7 @@ mod tests {
                 USizeVec2::new(1, 0),
                 &mut scratch
             ),
-            30.0
+            Some(30.0)
         );
     }
 }

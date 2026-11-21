@@ -8,10 +8,11 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
+use crate::registration::registrar::Registrar;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers::{self, max_deviation};
 use crate::registration::transform::{Transform, TransformType};
-use crate::registration::transform_model::TransformModel;
+use crate::registration::transform_model::{ModelChoice, TransformModel};
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
 use common::USize2;
@@ -76,26 +77,24 @@ impl Rendered {
         let target_stars = detector.detect(&target.image).stars;
 
         let config = RegistrationConfig {
-            model: TransformModel::Fixed(self.model),
-            matching: helpers::matching_config(6, self.min_matches),
+            model: TransformModel::Plain(ModelChoice::Fixed(self.model)),
+            matching: helpers::matching_config(self.min_matches),
             ..Default::default()
         };
-        let result = config
-            .registrar()
-            .unwrap()
+        let result = Registrar::new(config)
             .register(&reference_stars, &target_stars)
             .unwrap_or_else(|error| panic!("{}: {error}", self.name));
 
         let sigma =
             metrics::centroid_sigma(&[(&reference, &reference_stars), (&target, &target_stars)]);
-        let n = result.inlier_count() as f64;
+        let n = result.matches().len() as f64;
         let pair_sigma = sigma * 2f64.sqrt();
         let bound = 5.0 * pair_sigma * (2.0 * 7.0 / n).sqrt();
         let deviation = max_deviation(
-            &result.transform(),
+            &result.warp().linear(),
             &self.truth,
             result
-                .matched_stars()
+                .matches()
                 .iter()
                 .map(|m| reference_stars[m.idxs.reference].pos),
         );
@@ -104,7 +103,7 @@ impl Rendered {
             "{}: the fit strays {deviation} px from the truth over {n} pairs, bound {bound} (σ {sigma})",
             self.name
         );
-        for m in result.matched_stars() {
+        for m in result.matches() {
             let r = reference_stars[m.idxs.reference].pos;
             let t = target_stars[m.idxs.target].pos;
             assert!(

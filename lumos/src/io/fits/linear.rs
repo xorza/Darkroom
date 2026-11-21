@@ -6,15 +6,13 @@ use std::path::Path;
 
 use arrayvec::ArrayVec;
 use common::fs;
-use fits_well::FitsWriter;
 use fits_well::header::Header;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::linear_image::LinearImage;
 use crate::io::error::WriteError;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
-use crate::io::fits::flags_extension;
-use crate::io::fits::gain_extension;
+use crate::io::fits::frame_file;
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD, domain_keywords};
 use crate::io::fits::plane_hdu::{FloatPlanes, PlaneHdu};
@@ -41,7 +39,7 @@ pub(crate) fn hdu(
     )?;
     metadata::write_row_order(&mut header, &linear.metadata)?;
     if let Some(cfa_type) = cfa_type {
-        metadata::write_cfa(&mut header, &linear.metadata, cfa_type)?;
+        metadata::write_cfa(&mut header, &linear.metadata, cfa_type, linear.height())?;
     }
     let mut shape: ArrayVec<usize, 3> = [linear.width(), linear.height()].into_iter().collect();
     if linear.is_rgb() {
@@ -71,17 +69,7 @@ pub(crate) fn save(path: &Path, image: &LinearImage) -> Result<(), WriteError> {
 /// flags and its flat gain when it has them.
 pub(crate) fn write(image: &LinearImage, out: impl Write + Seek) -> Result<(), WriteError> {
     let primary = hdu(image, None)?;
-    let flags = flags_extension::encode(image.flags(), None, 1)?;
-    let gain = gain_extension::encode(image.flat_gain().map(|gain| &**gain), None)?;
-    let mut writer = FitsWriter::new(out).with_checksums();
-    primary.write(&mut writer)?;
-    if let Some(flags) = &flags {
-        flags.write(&mut writer)?;
-    }
-    if let Some(gain) = &gain {
-        gain.write(&mut writer)?;
-    }
-    Ok(())
+    frame_file::write(&primary, image, out)
 }
 
 /// Whether `image` is a Lumos linear image's header, refused when it is one of another version.

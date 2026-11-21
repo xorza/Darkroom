@@ -8,7 +8,6 @@ use common::Buffer2;
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
 use crate::image::linear_image::LinearImage;
-use crate::image::stackable_image::StackableImage;
 use crate::registration::resample::WarpResult;
 
 /// One input frame for

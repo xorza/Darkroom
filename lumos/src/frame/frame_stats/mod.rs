@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flags::quality_flags::QualityFlags;
+use crate::image::frame::{Frame, Samples};
 use crate::image::metadata::bg_split::BgSplit;
-use crate::image::stackable_image::StackableImage;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::noise::ccd_noise::CcdNoise;
@@ -56,7 +56,7 @@ impl FrameStats {
     /// Other whole-plane stages need no such exclusion: the fill sits at the background, so it
     /// yields no star peak and no defect outlier, and normalization re-measures over the shared
     /// pixels once any frame is partially covering.
-    pub(crate) fn measure(image: &impl StackableImage) -> Self {
+    pub(crate) fn measure(image: &Frame<impl Samples>) -> Self {
         Self::measure_as(image, Spreads::Skipped)
     }
 
@@ -75,12 +75,12 @@ impl FrameStats {
 
     /// [`Self::measure`], and with [`Spreads::Measured`] each slot's [`spread`](Self::spread) from
     /// the samples its median already took.
-    pub(crate) fn measure_as(image: &impl StackableImage, spreads: Spreads) -> Self {
+    pub(crate) fn measure_as(image: &Frame<impl Samples>, spreads: Spreads) -> Self {
         let desc = image.desc();
-        let metadata = image.metadata();
+        let metadata = &image.metadata;
         let flags = image.flags();
         let excluded = |idx: usize| flags.is_some_and(|flags| flags.is_flagged(idx));
-        let mosaic = image.cfa_type().and_then(CfaType::mosaic);
+        let mosaic = image.sensor_pattern().and_then(CfaType::mosaic);
         let mosaic_noise = match mosaic {
             Some(mosaic) => Some(
                 MosaicNoiseMeasure {

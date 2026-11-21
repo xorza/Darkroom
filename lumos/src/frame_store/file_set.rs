@@ -11,14 +11,13 @@ use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::decode_cache::cached_source::CachedSource;
 use crate::frame_store::decode_cache::frame_spill::{Committed, KeptGain};
 use crate::frame_store::decode_cache::kept_frame::{KeptFrame, KeptImage};
-use crate::frame_store::error::{FrameStoreError, LoadError};
+use crate::frame_store::error::{FrameLoadError, FrameStoreError};
 use crate::frame_store::run_storage::RunStorage;
-use crate::frame_store::storage_params::StorageParams;
 use crate::frame_store::stored_image::StoredImage;
-use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::shared_gains::SharedGains;
+use crate::image::frame::Frame;
 use crate::image::frame_desc;
-use crate::image::stackable_image::StackableImage;
+use crate::ingest::ingest_run::IngestRun;
 use crate::io::decoder::{Decoder, Peek};
 use crate::io::load_ctx::LoadCtx;
 
@@ -88,11 +87,15 @@ struct First<D: Decoder> {
 
 /// What reading a frame for the plan left for its decode.
 #[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one per run, for the frame the plan read first; the decoded variant moves into the run whole"
+)]
 enum Early<D: Decoder> {
     /// What its header read read: a camera RAW's file, or a FITS file's reader.
     Read(D::Read),
     /// The frame decoded, for a format with no header that answers.
-    Decoded(D::Image),
+    Decoded(Frame<D::Samples>),
 }
 
 impl<D: Decoder> Early<D> {
@@ -103,7 +106,7 @@ impl<D: Decoder> Early<D> {
         path: &Path,
         ctx: &LoadCtx,
         gains: &SharedGains,
-    ) -> Result<D::Image, LoadError> {
+    ) -> Result<Frame<D::Samples>, FrameLoadError> {
         Ok(match self {
             Self::Read(read) => D::load_read(read, path, ctx, gains)?,
             Self::Decoded(image) => image,
@@ -119,17 +122,29 @@ impl<D: Decoder> Early<D> {
     }
 }
 
-/// What a plan reads off a frame set: the frame that stands for every frame, at its index, the
-/// bytes the set holds for that frame's decode until the decode takes them, and the bytes of the
-/// source gains its frames share, which it holds from their decode to the end of the run: each
-/// distinct gain the decode cache holds, and one for each frame it does not, as many as there can
-/// be before those frames decode.
+/// What a plan reads off a frame set of files: the frame that stands for every frame, at its
+/// index; how many frames the decode cache holds none of, which the run writes there; the bytes
+/// the set holds for that frame's decode until the decode takes them; and the bytes of the source
+/// gains its frames share, which it holds from their decode to the end of the run: each distinct
+/// gain the decode cache holds, and one for each frame it does not, as many as there can be before
+/// those frames decode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SetPeek {
+pub(crate) struct FilesPeek {
     pub(crate) idx: usize,
     pub(crate) info: FrameInfo,
-    pub(crate) held: usize,
-    pub(crate) gains: usize,
+    pub(crate) uncached_count: usize,
+    pub(crate) held_bytes: usize,
+    pub(crate) gains_bytes: usize,
+}
+
+impl FilesPeek {
+    /// The bytes the set writes to the decode cache: each frame it holds none of, decoded with its
+    /// flag plane, and the gain its file stores, which the cache keeps beside it. The one statement
+    /// of it every planner reads.
+    pub(crate) const fn kept_write_bytes(&self) -> u64 {
+        let frame_bytes = frame_desc::decoded_byte_len(self.info.desc) + self.info.gain_bytes;
+        (self.uncached_count as u64).saturating_mul(frame_bytes as u64)
+    }
 }
 
 /// A frame of a set in RAM, and its planes where the decode cache keeps them, for a run that keeps
@@ -158,11 +173,9 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
     /// # Errors
     ///
     /// The decode cache cannot be opened.
-    pub(crate) fn new(
-        paths: &'a [P],
-        storage: &StorageParams,
-        ctx: &LoadCtx,
-    ) -> Result<Self, FrameStoreError> {
+    pub(crate) fn new(paths: &'a [P], run: &IngestRun<'_>) -> Result<Self, FrameStoreError> {
+        let storage = run.config;
+        let ctx = &run.ctx;
         let kept = storage
             .keep_cache
             .then(|| -> Result<KeptSet, FrameStoreError> {
@@ -207,7 +220,7 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
 
     /// How many frames the run writes to the decode cache: those it holds no frame of. None
     /// without a cache.
-    pub(crate) fn uncached(&self) -> usize {
+    fn uncached(&self) -> usize {
         self.kept.as_ref().map_or(0, |kept| kept.uncached.len())
     }
 
@@ -218,18 +231,19 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
     /// # Errors
     ///
     /// The frame's decode, for a format with no header that answers.
-    pub(crate) fn peek(&self, ctx: &LoadCtx) -> Result<SetPeek, LoadError> {
+    pub(crate) fn peek(&self, ctx: &LoadCtx) -> Result<FilesPeek, FrameLoadError> {
         let idx = match &self.kept {
             Some(kept) => {
                 if let Some(&idx) = kept.uncached.first() {
                     idx
                 } else {
                     let info = committed_info(&kept.probes[0]);
-                    return Ok(SetPeek {
+                    return Ok(FilesPeek {
                         idx: 0,
                         info,
-                        held: 0,
-                        gains: self.gain_bytes(info.gain_bytes),
+                        uncached_count: 0,
+                        held_bytes: 0,
+                        gains_bytes: self.gain_bytes(info.gain_bytes),
                     });
                 }
             }
@@ -247,20 +261,21 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
         let mut first = self.first.lock_unpoisoned();
         debug_assert!(first.is_none(), "a plan peeks its set once");
         *first = Some(Box::new(First { idx, early }));
-        Ok(SetPeek {
+        Ok(FilesPeek {
             idx,
             info,
-            held,
-            gains: self.gain_bytes(info.gain_bytes),
+            uncached_count: self.uncached(),
+            held_bytes: held,
+            gains_bytes: self.gain_bytes(info.gain_bytes),
         })
     }
 
     /// The bytes of the source gains the frames share, at the most: each distinct gain of the
-    /// frames the decode cache holds, as their commits state it, and `uncached` for each of the
-    /// others, whose gains are known only once they decode.
-    fn gain_bytes(&self, uncached: usize) -> usize {
+    /// frames the decode cache holds, as their commits state it, and `gain_bytes_each` for each of
+    /// the others, whose gains are known only once they decode.
+    fn gain_bytes(&self, gain_bytes_each: usize) -> usize {
         let Some(kept) = &self.kept else {
-            return self.len().saturating_mul(uncached);
+            return self.len().saturating_mul(gain_bytes_each);
         };
         let mut gains: Vec<KeptGain> = Vec::new();
         let mut bytes = 0;
@@ -278,7 +293,7 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
         }
         kept.uncached
             .len()
-            .saturating_mul(uncached)
+            .saturating_mul(gain_bytes_each)
             .saturating_add(bytes)
     }
 
@@ -289,7 +304,11 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
     /// # Errors
     ///
     /// The decode, or the cache.
-    pub(crate) fn decode(&self, idx: usize, ctx: &LoadCtx) -> Result<Loaded<D::Image>, LoadError> {
+    pub(crate) fn decode(
+        &self,
+        idx: usize,
+        ctx: &LoadCtx,
+    ) -> Result<Loaded<Frame<D::Samples>>, FrameLoadError> {
         let early = self.take_early(idx);
         let Some(kept) = &self.kept else {
             return Ok(Loaded {
@@ -329,7 +348,11 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
     /// # Errors
     ///
     /// The decode, or the cache.
-    pub(crate) fn take(&self, idx: usize, ctx: &LoadCtx) -> Result<Taken<D::Image>, LoadError> {
+    pub(crate) fn take(
+        &self,
+        idx: usize,
+        ctx: &LoadCtx,
+    ) -> Result<Taken<Frame<D::Samples>>, FrameLoadError> {
         let kept = self
             .kept
             .as_ref()
@@ -355,7 +378,7 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
         early: Option<Early<D>>,
         idx: usize,
         ctx: &LoadCtx,
-    ) -> Result<D::Image, LoadError> {
+    ) -> Result<Frame<D::Samples>, FrameLoadError> {
         let path = self.path(idx);
         match early {
             Some(early) => early.into_image(path, ctx, &self.gains),
@@ -384,7 +407,7 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
         idx: usize,
         early: Option<&Early<D>>,
         ctx: &LoadCtx,
-    ) -> Result<Probe, LoadError> {
+    ) -> Result<Probe, FrameLoadError> {
         let read = early.is_some();
         match mem::replace(&mut *kept.probes[idx].lock_unpoisoned(), Probed::Taken) {
             Probed::Found(probe) if read || probe.source.is_current() => return Ok(*probe),
@@ -423,7 +446,7 @@ fn committed_info(probed: &Mutex<Probed>) -> FrameInfo {
     let desc = committed.decoded.desc;
     FrameInfo {
         desc,
-        cfa_type: committed.admitted.facts.cfa_type.unwrap_or(CfaType::Mono),
+        cfa_type: committed.admitted.facts.cfa_type,
         decoder: DecoderBytes::default(),
         gain_bytes: committed
             .decoded
@@ -441,7 +464,7 @@ mod tests {
     use imaginarium::{ChannelLayout, PlanarDesc};
 
     use crate::frame::frame_info::{DecoderBytes, FrameInfo};
-    use crate::frame_store::file_set::{FileSet, Loaded, SetPeek};
+    use crate::frame_store::file_set::{FileSet, FilesPeek, Loaded};
     use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::mosaic::Mosaic;
@@ -463,13 +486,12 @@ mod tests {
         path
     }
 
-    /// A run over `cache_dir`, which keeps a decode cache when `keep_cache`.
-    fn run(cache_dir: &Path, keep_cache: bool) -> IngestRun {
-        let ingest = IngestConfig {
+    /// A run's config over `cache_dir`, which keeps a decode cache when `keep_cache`.
+    fn ingest(cache_dir: &Path, keep_cache: bool) -> IngestConfig {
+        IngestConfig {
             keep_cache,
             ..IngestConfig::with_cache_dir(cache_dir.to_path_buf())
-        };
-        IngestRun::planned(1 << 30, &ingest)
+        }
     }
 
     /// The level of channel 0's first sample.
@@ -500,29 +522,31 @@ mod tests {
             tiff(dir.path(), "a.tiff", 3, 0.25),
             tiff(dir.path(), "b.tiff", 3, 0.5),
         ];
-        let ctx = run(dir.path(), false).ctx;
+        let ctx = IngestRun::planned(1 << 30, &ingest(dir.path(), false)).ctx;
         let files = {
-            let run = run(dir.path(), false);
-            FileSet::<_, LinearDecoder>::new(&paths, &run.storage, &run.ctx)
+            let config = ingest(dir.path(), false);
+            let run = IngestRun::planned(1 << 30, &config);
+            FileSet::<_, LinearDecoder>::new(&paths, &run)
         }
         .unwrap();
         assert_eq!(files.uncached(), 0);
         let peek = files.peek(&ctx).unwrap();
         assert_eq!(
             peek,
-            SetPeek {
+            FilesPeek {
                 idx: 0,
                 info: FrameInfo {
                     desc: PlanarDesc::new((3, 2), ChannelLayout::Rgb),
-                    cfa_type: CfaType::Mono,
+                    cfa_type: None,
                     decoder: DecoderBytes {
                         source: 0,
                         beside: 72,
                     },
                     gain_bytes: 0,
                 },
-                held: 78,
-                gains: 0,
+                uncached_count: 0,
+                held_bytes: 78,
+                gains_bytes: 0,
             }
         );
         fs::remove_file(&paths[0]).unwrap();
@@ -550,11 +574,12 @@ mod tests {
             .enumerate()
             .map(|(idx, &level)| tiff(dir.path(), &format!("{idx}.tiff"), 3, level))
             .collect::<Vec<_>>();
-        let ctx = run(dir.path(), false).ctx;
+        let ctx = IngestRun::planned(1 << 30, &ingest(dir.path(), false)).ctx;
         let set = || {
             {
-                let run = run(dir.path(), true);
-                FileSet::<_, LinearDecoder>::new(&paths, &run.storage, &run.ctx)
+                let config = ingest(dir.path(), true);
+                let run = IngestRun::planned(1 << 30, &config);
+                FileSet::<_, LinearDecoder>::new(&paths, &run)
             }
             .unwrap()
         };
@@ -571,16 +596,17 @@ mod tests {
         assert_eq!(held.uncached(), 0);
         assert_eq!(
             held.peek(&ctx).unwrap(),
-            SetPeek {
+            FilesPeek {
                 idx: 0,
                 info: FrameInfo {
                     desc: PlanarDesc::new((3, 2), ChannelLayout::Rgb),
-                    cfa_type: CfaType::Mono,
+                    cfa_type: None,
                     decoder: DecoderBytes::default(),
                     gain_bytes: 0,
                 },
-                held: 0,
-                gains: 0,
+                uncached_count: 0,
+                held_bytes: 0,
+                gains_bytes: 0,
             }
         );
 
@@ -588,7 +614,11 @@ mod tests {
         let changed = set();
         assert_eq!(changed.uncached(), 1);
         let peek = changed.peek(&ctx).unwrap();
-        assert_eq!((peek.idx, peek.held), (1, 4 * 2 * 13));
+        assert_eq!((peek.idx, peek.held_bytes), (1, 4 * 2 * 13));
+        // The one frame the cache lacks is written whole: 4 × 2 RGB of 4 B and a flag byte a
+        // pixel, 104 B, with no gain.
+        assert_eq!(peek.uncached_count, 1);
+        assert_eq!(peek.kept_write_bytes(), 104);
         assert_eq!(peek.info.desc, PlanarDesc::new((4, 2), ChannelLayout::Rgb));
         tiff(dir.path(), "2.tiff", 3, 0.0625);
         for (idx, expected) in [(0, 0.25), (1, 0.125), (2, 0.0625)] {
@@ -625,7 +655,7 @@ mod tests {
             image.write_fits(&path).unwrap();
             path
         });
-        let ctx = run(dir.path(), false).ctx;
+        let ctx = IngestRun::planned(1 << 30, &ingest(dir.path(), false)).ctx;
         let shared = |files: &FileSet<'_, PathBuf, LinearDecoder>| {
             let gains: Vec<Arc<FlatGain>> = (0..3)
                 .map(
@@ -640,26 +670,28 @@ mod tests {
         };
         for keep_cache in [false, true] {
             let files = {
-                let run = run(dir.path(), keep_cache);
-                FileSet::<_, LinearDecoder>::new(&paths, &run.storage, &run.ctx)
+                let config = ingest(dir.path(), keep_cache);
+                let run = IngestRun::planned(1 << 30, &config);
+                FileSet::<_, LinearDecoder>::new(&paths, &run)
             }
             .unwrap();
             let peek = files.peek(&ctx).unwrap();
             assert_eq!(
-                (peek.info.gain_bytes, peek.gains),
+                (peek.info.gain_bytes, peek.gains_bytes),
                 (48, 144),
                 "{keep_cache}"
             );
             shared(&files);
         }
         let kept = {
-            let run = run(dir.path(), true);
-            FileSet::<_, LinearDecoder>::new(&paths, &run.storage, &run.ctx)
+            let config = ingest(dir.path(), true);
+            let run = IngestRun::planned(1 << 30, &config);
+            FileSet::<_, LinearDecoder>::new(&paths, &run)
         }
         .unwrap();
         assert_eq!(kept.uncached(), 0);
         let peek = kept.peek(&ctx).unwrap();
-        assert_eq!((peek.info.gain_bytes, peek.gains), (48, 48));
+        assert_eq!((peek.info.gain_bytes, peek.gains_bytes), (48, 48));
         shared(&kept);
     }
 }

@@ -62,8 +62,11 @@ pub struct ExtractionConfig {
     pub deblend_min_separation: usize,
     /// Minimum candidate-region area in pixels.
     pub min_area: usize,
-    /// Maximum candidate-region area in pixels.
-    pub max_area: usize,
+    /// Maximum candidate-region area in pixels; `None` bounds none, as SExtractor's
+    /// `DETECT_MAXAREA 0`. A bright star's footprint above the threshold grows with its peak — a
+    /// Moffat β 2.5 star of FWHM 6 passes 500 pixels near a peak SNR of 455 — so a bound drops the
+    /// brightest stars whole, where deblending already splits a crowded group.
+    pub max_area: Option<usize>,
     /// Rejected border width in pixels.
     pub edge_margin: usize,
 }
@@ -78,7 +81,7 @@ impl Default for ExtractionConfig {
             },
             deblend_min_separation: 3,
             min_area: 5,
-            max_area: 500,
+            max_area: None,
             edge_margin: 10,
         }
     }
@@ -112,11 +115,13 @@ impl ExtractionConfig {
             }
         }
         ConfigField::count("min_area", self.min_area).must_be("at least 1", self.min_area >= 1)?;
-        ConfigField::count("max_area", self.max_area).must_be_against_count(
-            "at least min_area",
-            self.min_area,
-            self.max_area >= self.min_area,
-        )?;
+        if let Some(max_area) = self.max_area {
+            ConfigField::count("max_area", max_area).must_be_against_count(
+                "at least min_area",
+                self.min_area,
+                max_area >= self.min_area,
+            )?;
+        }
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
 use crate::calibration::calibration_pass::Saturation;
-use crate::calibration::error::{DarkMismatch, SubtractionFault};
+use crate::calibration::error::{MasterMismatch, SubtractionFault};
 use crate::calibration::master_role::MasterRole;
 use crate::calibration::subtraction::{self, Subtraction};
 use crate::calibration::subtractor::Subtractor;
@@ -90,7 +90,7 @@ fn each_master_maps_into_the_frame_as_it_stands_when_it_applies() {
 }
 
 /// A frame as decoded is flagged where it saturated, at 0.95 of a span of 1, before its samples
-/// move, and its `data_max` dropped; a master keeps both as they were. Either way the bias's pixel
+/// move, and records that it is; a master keeps its flags as they were. Either way the bias's pixel
 /// of no measurement leaves the frame flagged `NO_DATA` there.
 #[test]
 fn a_frame_flags_its_saturation_and_a_master_keeps_its_own() {
@@ -107,12 +107,11 @@ fn a_frame_flags_its_saturation_and_a_master_keeps_its_own() {
         master: &bias,
     }];
     let imposed = subtraction::unmeasured(&subtractors);
-    for (saturation, saturated, data_max) in [
-        (Saturation::Detect, QualityFlags::SATURATED, None),
-        (Saturation::Kept, QualityFlags::default(), Some(1.0)),
+    for (saturation, saturated, flagged) in [
+        (Saturation::Detect, QualityFlags::SATURATED, true),
+        (Saturation::Kept, QualityFlags::default(), false),
     ] {
         let mut taken = frame([0.5, 0.5, 0.96, 0.5], 1.0);
-        taken.metadata.header.data_max = Some(1.0);
         Subtraction::resolve(&taken, subtractors).unwrap().apply(
             &mut taken,
             imposed.as_ref(),
@@ -122,7 +121,11 @@ fn a_frame_flags_its_saturation_and_a_master_keeps_its_own() {
         assert_eq!(flags.at(1), QualityFlags::NO_DATA, "{saturation:?}");
         assert_eq!(flags.at(2), saturated, "{saturation:?}");
         assert_eq!(flags.at(0), QualityFlags::default(), "{saturation:?}");
-        assert_eq!(taken.metadata.header.data_max, data_max, "{saturation:?}");
+        assert_eq!(
+            taken.metadata.derived.saturation_flagged(),
+            flagged,
+            "{saturation:?}"
+        );
         assert_eq!(taken.data().pixels(), &[0.375, 0.375, 0.835, 0.375]);
     }
 }
@@ -146,7 +149,7 @@ fn a_master_that_does_not_fit_the_frame_is_refused_with_its_role() {
             error,
             SubtractionFault::Conditions {
                 role: MasterRole::Dark,
-                source: DarkMismatch::Exposure {
+                source: MasterMismatch::Exposure {
                     frame: 2.0,
                     dark: 1.0
                 }
