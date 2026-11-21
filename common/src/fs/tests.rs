@@ -5,10 +5,9 @@ use std::io::{Seek as _, SeekFrom, Write as _};
 use std::sync::Barrier;
 use std::thread;
 
-use tokio::io::AsyncWriteExt as _;
-
 use crate::fs::{
-    AtomicFile, PublicationMode, SyncAtomicFile, publish, publish_bytes, symlink, symlink_dir,
+    AtomicFile, PublicationMode, publish, publish_bytes, symlink, symlink_dir,
+    temporary_destination,
 };
 use crate::{FileSystem, TempDir};
 use crate::{internals, platform};
@@ -71,7 +70,7 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
     );
 
     let seek_target = dir.join("seek.bin");
-    let mut file = SyncAtomicFile::new(&seek_target, PublicationMode::Cache).unwrap();
+    let mut file = AtomicFile::new(&seek_target, PublicationMode::Cache).unwrap();
     file.write_all(b"header____body").unwrap();
     assert_eq!(file.seek(SeekFrom::Start(6)).unwrap(), 6);
     file.write_all(b"data").unwrap();
@@ -79,27 +78,44 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
     assert_eq!(fs::read(seek_target).unwrap(), b"headerdatabody");
 }
 
-#[tokio::test]
-async fn two_phase_publication_commits_or_cleans_up() {
+#[test]
+fn two_phase_publication_commits_or_cleans_up() {
     let dir = TempDir::new("common-publication");
     let path = dir.join("two-phase.bin");
     fs::write(&path, b"previous").unwrap();
 
-    let mut file = AtomicFile::new(&path, PublicationMode::Cache)
-        .await
-        .unwrap();
-    file.write_all(b"complete").await.unwrap();
-    file.commit().await.unwrap();
+    let mut file = AtomicFile::new(&path, PublicationMode::Cache).unwrap();
+    file.write_all(b"complete").unwrap();
+    file.commit().unwrap();
     assert_eq!(fs::read(&path).unwrap(), b"complete");
     assert!(internals::publication_temp_files(&path).is_empty());
 
-    let mut file = AtomicFile::new(&path, PublicationMode::Cache)
-        .await
-        .unwrap();
-    file.write_all(b"incomplete").await.unwrap();
+    let mut file = AtomicFile::new(&path, PublicationMode::Cache).unwrap();
+    file.write_all(b"incomplete").unwrap();
+    let temporaries = internals::publication_temp_files(&path);
+    assert_eq!(temporaries.len(), 1);
+    let temporary = temporaries[0].file_name().unwrap().to_str().unwrap();
+    assert_eq!(temporary_destination(temporary), Some("two-phase.bin"));
     drop(file);
     assert_eq!(fs::read(&path).unwrap(), b"complete");
     assert!(internals::publication_temp_files(&path).is_empty());
+}
+
+/// A temporary's name gives its destination back; a name of any other shape gives none.
+#[test]
+fn a_temporary_names_its_destination() {
+    assert_eq!(temporary_destination("blob.12.0.tmp"), Some("blob"));
+    assert_eq!(temporary_destination("a.b.12.0.tmp"), Some("a.b"));
+    for name in [
+        "blob",
+        "blob.tmp",
+        "blob.12.tmp",
+        "blob.x.0.tmp",
+        "blob.12.0.bak",
+        ".12.0.tmp",
+    ] {
+        assert_eq!(temporary_destination(name), None, "{name}");
+    }
 }
 
 #[test]

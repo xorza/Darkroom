@@ -174,6 +174,11 @@ impl WorkerTask {
         if let Some(cache) = self.intent.disk_store.take() {
             self.engine.set_disk_store(cache);
         }
+        let failures = self.engine.prune_store().await;
+        if !failures.is_empty() {
+            self.reports
+                .publish(WorkerReport::Error(WorkerError::CachePrune { failures }));
+        }
         if let Some(bytes) = self.intent.ram_headroom.take() {
             self.engine.set_ram_headroom(bytes);
         }

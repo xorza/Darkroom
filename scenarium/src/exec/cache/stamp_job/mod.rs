@@ -7,7 +7,8 @@
 pub(crate) mod error;
 
 use std::mem;
-use std::path::{Path, PathBuf};
+use std::ops::Range;
+use std::path::{MAIN_SEPARATOR_STR, Path, PathBuf};
 
 use common::{CancelToken, FileIdentity, fs};
 use hashbrown::HashSet;
@@ -53,13 +54,22 @@ pub(super) struct StampJob {
     /// What the pass identified, drained into the cache's memo when the
     /// job comes home.
     stamped: Vec<(String, FsPathId)>,
-    /// Files anywhere beneath the directory being walked, relative to it, kept as **raw bytes**:
+    /// The relative paths of the directory being walked, back to back, as **raw bytes**:
     /// `to_string_lossy` would map every non-UTF-8 name onto the same replacement text, so a
     /// rename between two such names would leave the directory's identity — and a pure node's
     /// cache key — unchanged.
-    files: Vec<PathBuf>,
+    names: Vec<u8>,
+    /// Files anywhere beneath the directory being walked.
+    files: Vec<WalkedFile>,
     /// Directories seen but not yet listed, relative to the root.
     pending: Vec<PathBuf>,
+}
+
+/// One file a directory walk met: its relative path in [`StampJob::names`], and its identity.
+#[derive(Debug, Clone)]
+struct WalkedFile {
+    name: Range<usize>,
+    identity: FileIdentity,
 }
 
 impl StampJob {
@@ -145,45 +155,44 @@ impl StampJob {
         }
     }
 
-    /// List the subtree, then fold it — two passes, so the buffer is a plain list of paths.
-    ///
-    /// A file that vanishes between the passes fails the stamp: a subtree
-    /// seen in part must not hash like one seen whole.
+    /// Walk the subtree, then fold it in an order the filesystem does not choose.
     ///
     /// **Only files are folded.** A directory has no content of its own, and everything it holds
     /// surfaces as a file appearing, vanishing, or changing its relative path. The empty
     /// directory does not move the identity; nothing a node reads is a function of it.
     fn stamp_dir(&mut self, root: &Path, cancel: &CancelToken) -> Result<FsPathId, StampError> {
         self.collect_files(root, cancel)?;
-        // `read_dir` order is not a property of the directory, so the fold takes the files in an
-        // order the filesystem does not choose. Unstable: relative paths are unique.
-        self.files.sort_unstable();
+        // `read_dir` order is not a property of the directory. Unstable: relative paths are
+        // unique.
+        let names = &self.names;
+        let name = |file: &WalkedFile| &names[file.name.clone()];
+        self.files
+            .sort_unstable_by(|left, right| name(left).cmp(name(right)));
 
         let mut hasher = DigestHasher::new();
         hasher.write_pod(self.files.len() as u64);
-        for rel in &self.files {
-            // `symlink_metadata`, so the second pass reads a link as the first classified it.
-            let path = root.join(rel);
-            let metadata = fs::symlink_metadata(&path).map_err(StampError::io(&path))?;
-            let file = FileIdentity::from_metadata(&metadata).map_err(StampError::io(&path))?;
+        for file in &self.files {
             hasher
-                .write_len_prefixed(rel.as_os_str().as_encoded_bytes())
-                .write_file_identity(&file);
+                .write_len_prefixed(name(file))
+                .write_file_identity(&file.identity);
         }
         Ok(FsPathId::Dir(hasher.finish()))
     }
 
-    /// Walk **the whole subtree** under `root`, listing every file beneath it: a pure function
-    /// handed a directory consumes it recursively, so `root/sub/file` changing has to move
-    /// `root`'s fingerprint.
+    /// Walk **the whole subtree** under `root`, identifying every file beneath it from the
+    /// listing: a pure function handed a directory consumes it recursively, so `root/sub/file`
+    /// changing has to move `root`'s fingerprint. One pass, so a file is identified as it was
+    /// listed, and no file can vanish between a listing and its identity.
     ///
-    /// **Symlinks are listed, never followed.** `DirEntry::file_type` does not traverse them, so a
-    /// link to a directory is a leaf: the walk terminates (a link pointing back up the tree would
-    /// otherwise never stop) and repointing the link still moves the identity. The type usually
-    /// arrives with the directory entry, leaving one `stat` per file and none per directory.
+    /// **Symlinks are listed, never followed.** `DirEntry::file_type` and its metadata do not
+    /// traverse them, so a link to a directory is a leaf: the walk terminates (a link pointing
+    /// back up the tree would otherwise never stop) and repointing the link still moves the
+    /// identity. The type usually arrives with the directory entry, leaving one `stat` per file
+    /// and none per directory.
     ///
     /// Iterative, because a user-chosen directory's depth must not decide the stack size.
     fn collect_files(&mut self, root: &Path, cancel: &CancelToken) -> Result<(), StampError> {
+        self.names.clear();
         self.files.clear();
         self.pending.clear();
         self.pending.push(PathBuf::new());
@@ -194,15 +203,29 @@ impl StampJob {
                     return Err(StampError::Cancelled);
                 }
                 let entry = entry.map_err(StampError::io(&dir))?;
-                let rel = rel_dir.join(entry.file_name());
-                let file_type = entry
-                    .file_type()
-                    .map_err(StampError::io(&root.join(&rel)))?;
-                if file_type.is_dir() {
-                    self.pending.push(rel);
-                } else {
-                    self.files.push(rel);
+                // The path is joined for a failure alone, never per file.
+                let failed = |source| StampError::Io {
+                    path: entry.path(),
+                    source,
+                };
+                let file_name = entry.file_name();
+                if entry.file_type().map_err(failed)?.is_dir() {
+                    self.pending.push(rel_dir.join(file_name));
+                    continue;
                 }
+                let metadata = fs::entry_metadata(&entry).map_err(failed)?;
+                let identity = FileIdentity::from_metadata(&metadata).map_err(failed)?;
+                let start = self.names.len();
+                if !rel_dir.as_os_str().is_empty() {
+                    self.names
+                        .extend_from_slice(rel_dir.as_os_str().as_encoded_bytes());
+                    self.names.extend_from_slice(MAIN_SEPARATOR_STR.as_bytes());
+                }
+                self.names.extend_from_slice(file_name.as_encoded_bytes());
+                self.files.push(WalkedFile {
+                    name: start..self.names.len(),
+                    identity,
+                });
             }
         }
         Ok(())

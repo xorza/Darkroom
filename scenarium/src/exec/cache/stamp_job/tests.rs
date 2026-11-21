@@ -1,4 +1,5 @@
 use std::io;
+use std::path::MAIN_SEPARATOR;
 use std::slice;
 
 use common::internals::non_unicode_name;
@@ -212,6 +213,11 @@ fn a_reused_stamper_stamps_like_a_fresh_one() {
     // holds one file, `nested/a.bin`; the `nested` directory itself is not listed.
     fingerprint_with(&mut job, &deep_path);
     assert_eq!(job.files.len(), 1, "the walked files are retained");
+    assert_eq!(
+        job.names,
+        format!("nested{MAIN_SEPARATOR}a.bin").as_bytes(),
+        "a file's relative path, joined as `Path::join` joins it"
+    );
 
     assert_eq!(
         fingerprint_with(&mut job, &shallow_path),

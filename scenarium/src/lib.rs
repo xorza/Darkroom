@@ -25,7 +25,9 @@ pub use data::dynamic_value::{CustomValue, DynamicValue};
 pub use data::path_form::PathForm;
 pub use data::ram_usage::RamUsage;
 pub use exec::cache::disk_store::DiskStore;
-pub use exec::cache::disk_store::error::{CodecFormatError, FrameError, RemovalError, StoreError};
+pub use exec::cache::disk_store::error::{
+    CodecFormatError, FrameError, PruneError, RemovalError, StoreError,
+};
 pub use exec::cache::runtime_cache::error::{
     CacheFlushUnsupported, CacheNodeError, CacheNodeFailure,
 };

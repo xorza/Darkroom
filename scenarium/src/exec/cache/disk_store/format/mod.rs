@@ -1,11 +1,18 @@
-//! Indexed binary format for streamed node-output cache blobs.
+//! Indexed binary format for node-output cache blobs: a fixed prefix, one descriptor per
+//! output, then the outputs' payloads back to back.
+//!
+//! Every payload's length and blake3 hash stand in its descriptor, and a read holds the payload
+//! to both. A blob is published by a rename with no sync, and `rename` promises only that the name
+//! "will be atomically replaced" ([rename(2)](https://man7.org/linux/man-pages/man2/rename.2.html)),
+//! not that the data reached the disk, so a blob with unwritten blocks after a power loss would
+//! otherwise decode as a valid value: a pixel payload has no redundancy of its own. Refused: a sync
+//! before the rename, which still misses a later corruption.
+//!
+//! The header's length is fixed by the output count, so the writer reserves it, streams each
+//! payload once through a counter and a hasher, then seeks back and writes the finished header:
+//! one seek a blob. Refused: the header after the body, a layout change to save that seek.
 
-use std::io::{self, SeekFrom};
-
-use tokio::io::Take;
-use tokio::io::{
-    AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncSeekExt as _, AsyncWrite, AsyncWriteExt as _,
-};
+use std::io::{self, Read, Seek, SeekFrom, Take, Write};
 
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
@@ -17,13 +24,13 @@ use crate::graph::func::lambda::OutputDemand;
 use crate::graph::program_id::ProgramId;
 
 const MAGIC: &[u8; 8] = b"SCENBLOB";
-const FORMAT_VERSION: u32 = 11;
+const FORMAT_VERSION: u32 = 12;
 const PATH_OFFSET: usize = 8 + 4 + 32;
 const COUNT_OFFSET: usize = PATH_OFFSET + ProgramId::BYTES_LEN;
 const FIXED_LEN: usize = COUNT_OFFSET + 4 + 8;
-const DESC_LEN: usize = 1 + 3 + 16 + 4 + 8;
-const BODY_LEN_OFFSET: u64 = (COUNT_OFFSET + 4) as u64;
-const PAYLOAD_LEN_OFFSET: u64 = (1 + 3 + 16 + 4) as u64;
+/// Tag, three reserved bytes, the custom type id and codec version, the payload length, the
+/// payload hash.
+const DESC_LEN: usize = 1 + 3 + 16 + 4 + 8 + 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OutputKind {
@@ -46,6 +53,8 @@ impl OutputKind {
 struct OutputDesc {
     kind: OutputKind,
     payload_len: u64,
+    /// blake3 of the payload's bytes; of no bytes for an unbound output.
+    payload_hash: [u8; 32],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -59,6 +68,96 @@ struct BlobHeader {
     descs: Vec<OutputDesc>,
 }
 
+/// What a codec writes a payload through: counts and hashes it, so its length and hash are
+/// never read back from the stream.
+#[derive(Debug)]
+struct PayloadWriter<'a, W> {
+    writer: &'a mut W,
+    written: u64,
+    hasher: blake3::Hasher,
+}
+
+impl<'a, W: Write> PayloadWriter<'a, W> {
+    fn new(writer: &'a mut W) -> Self {
+        Self {
+            writer,
+            written: 0,
+            hasher: blake3::Hasher::new(),
+        }
+    }
+
+    /// The descriptor of what went through, as `kind`.
+    fn finish(self, kind: OutputKind) -> OutputDesc {
+        OutputDesc {
+            kind,
+            payload_len: self.written,
+            payload_hash: *self.hasher.finalize().as_bytes(),
+        }
+    }
+}
+
+impl<W: Write> Write for PayloadWriter<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let written = self.writer.write(bytes)?;
+        self.hasher.update(&bytes[..written]);
+        self.written += u64::try_from(written).expect("a write's length fits u64");
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+}
+
+/// What a codec reads a payload through: at most the payload's length, hashed as it is read.
+#[derive(Debug)]
+struct PayloadReader<'a, R> {
+    reader: Take<&'a mut R>,
+    hasher: blake3::Hasher,
+}
+
+impl<'a, R: Read> PayloadReader<'a, R> {
+    fn new(reader: &'a mut R, payload_len: u64) -> Self {
+        Self {
+            reader: reader.take(payload_len),
+            hasher: blake3::Hasher::new(),
+        }
+    }
+
+    /// Hold what the decoder made of the payload to the payload's descriptor. What the decoder
+    /// left unread is hashed too, so a payload whose bytes changed is named so, whatever the
+    /// decoder read of it and whether it failed on them; then the decoder's own failure, then a
+    /// decoder that stopped short.
+    fn finish<T>(
+        mut self,
+        decoded: FormatResult<T>,
+        desc: OutputDesc,
+        output_idx: usize,
+    ) -> FormatResult<T> {
+        let unread = self.reader.limit();
+        io::copy(&mut self, &mut io::sink())?;
+        if self.reader.limit() != 0 {
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());
+        }
+        if *self.hasher.finalize().as_bytes() != desc.payload_hash {
+            return Err(FrameError::PayloadHash { output_idx }.into());
+        }
+        let value = decoded?;
+        if unread != 0 {
+            return Err(FrameError::PayloadNotConsumed.into());
+        }
+        Ok(value)
+    }
+}
+
+impl<R: Read> Read for PayloadReader<'_, R> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        let read = self.reader.read(bytes)?;
+        self.hasher.update(&bytes[..read]);
+        Ok(read)
+    }
+}
+
 /// A blob being written: the stream, the program node and the digest it is stored under, and the
 /// codecs its custom values encode with.
 #[derive(Debug)]
@@ -69,11 +168,9 @@ pub(super) struct BlobWriter<'a, W> {
     pub(super) codecs: &'a Codecs,
 }
 
-impl<W> BlobWriter<'_, W>
-where
-    W: AsyncWrite + AsyncSeek + Unpin + Send,
-{
-    pub(super) async fn write(self, outputs: &[DynamicValue]) -> FormatResult<()> {
+impl<W: Write + Seek> BlobWriter<'_, W> {
+    /// Reserve the header, stream every payload, then write the header its descriptors made.
+    pub(super) fn write(self, outputs: &[DynamicValue]) -> FormatResult<()> {
         let Self {
             writer,
             program_id,
@@ -82,59 +179,50 @@ where
         } = self;
         let output_count =
             u32::try_from(outputs.len()).expect("a node output count must fit in the cache format");
-        let mut fixed = [0; FIXED_LEN];
-        fixed[..8].copy_from_slice(MAGIC);
-        fixed[8..12].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
-        fixed[12..PATH_OFFSET].copy_from_slice(&digest.0);
-        fixed[PATH_OFFSET..COUNT_OFFSET].copy_from_slice(&program_id.to_bytes());
-        fixed[COUNT_OFFSET..COUNT_OFFSET + 4].copy_from_slice(&output_count.to_le_bytes());
-        writer.write_all(&fixed).await?;
+        let header_len = header_len(outputs.len());
+        let mut header = vec![0_u8; header_len];
+        writer.write_all(&header)?;
 
-        for value in outputs {
-            write_desc(writer, desc_for(value, codecs)?).await?;
-        }
-
-        let body_start = u64::try_from(header_len(outputs.len()))
-            .expect("a cache header length must fit in the file format");
-        debug_assert_eq!(writer.stream_position().await?, body_start);
-
-        for (idx, value) in outputs.iter().enumerate() {
-            if matches!(value, DynamicValue::Unbound) {
-                continue;
-            }
-            let payload_start = writer.stream_position().await?;
-            match value {
-                DynamicValue::Unbound => unreachable!(),
-                DynamicValue::Static(value) => write_static(writer, value).await?,
+        let mut body_len = 0_u64;
+        let (prefix, desc_slots) = header.split_at_mut(FIXED_LEN);
+        let (desc_slots, _) = desc_slots.as_chunks_mut::<DESC_LEN>();
+        for (value, desc_slot) in outputs.iter().zip(desc_slots) {
+            let mut payload = PayloadWriter::new(&mut *writer);
+            let kind = match value {
+                DynamicValue::Unbound => OutputKind::Unbound,
+                DynamicValue::Static(value) => {
+                    write_static(&mut payload, value)?;
+                    OutputKind::Static
+                }
                 DynamicValue::Custom(value) => {
                     let type_id = value.custom_type_id();
                     let codec = codecs
                         .get(type_id)
-                        .expect("custom output codec was checked while writing descriptors");
+                        .ok_or(CodecFormatError::UnknownType(type_id))?;
                     codec
-                        .encode(value.as_ref(), writer)
-                        .await
+                        .encode(value.as_ref(), &mut payload)
                         .map_err(|source| CodecFormatError::Encode { type_id, source })?;
+                    OutputKind::Custom {
+                        type_id,
+                        version: codec.version(),
+                    }
                 }
-            }
-            let payload_end = writer.stream_position().await?;
-            let payload_len = payload_end
-                .checked_sub(payload_start)
-                .expect("a streaming cache writer cannot move before its payload start");
-            writer
-                .seek(SeekFrom::Start(desc_payload_len_offset(idx)))
-                .await?;
-            writer.write_all(&payload_len.to_le_bytes()).await?;
-            writer.seek(SeekFrom::Start(payload_end)).await?;
+            };
+            let desc = payload.finish(kind);
+            body_len = body_len
+                .checked_add(desc.payload_len)
+                .ok_or(FrameError::PayloadLenOverflow)?;
+            *desc_slot = desc_bytes(desc);
         }
 
-        let body_end = writer.stream_position().await?;
-        let body_len = body_end
-            .checked_sub(body_start)
-            .expect("a streaming cache writer cannot move before its body start");
-        writer.seek(SeekFrom::Start(BODY_LEN_OFFSET)).await?;
-        writer.write_all(&body_len.to_le_bytes()).await?;
-        writer.seek(SeekFrom::Start(body_end)).await?;
+        prefix[..8].copy_from_slice(MAGIC);
+        prefix[8..12].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
+        prefix[12..PATH_OFFSET].copy_from_slice(&digest.0);
+        prefix[PATH_OFFSET..COUNT_OFFSET].copy_from_slice(&program_id.to_bytes());
+        prefix[COUNT_OFFSET..COUNT_OFFSET + 4].copy_from_slice(&output_count.to_le_bytes());
+        prefix[COUNT_OFFSET + 4..].copy_from_slice(&body_len.to_le_bytes());
+        writer.seek(SeekFrom::Start(0))?;
+        writer.write_all(&header)?;
         Ok(())
     }
 }
@@ -150,18 +238,13 @@ pub(super) struct BlobReader<'a, R> {
     pub(super) codecs: &'a Codecs,
 }
 
-impl<R> BlobReader<'_, R>
-where
-    R: AsyncRead + Unpin + Send,
-{
-    pub(super) async fn covers_outputs(&mut self, outputs: &[DynamicValue]) -> FormatResult<bool> {
-        let prefix = self
-            .scan_header(|idx, desc| {
-                outputs
-                    .get(idx)
-                    .is_some_and(|value| desc_covers(desc, value))
-            })
-            .await?;
+impl<R: Read> BlobReader<'_, R> {
+    pub(super) fn covers_outputs(&mut self, outputs: &[DynamicValue]) -> FormatResult<bool> {
+        let prefix = self.scan_header(|idx, desc| {
+            outputs
+                .get(idx)
+                .is_some_and(|value| desc_covers(desc, value))
+        })?;
         Ok(prefix.is_some_and(|prefix| prefix.output_count == outputs.len()))
     }
 
@@ -169,39 +252,36 @@ where
     /// its header check. Reads the fixed prefix plus one descriptor per output, so a reuse verdict
     /// costs one small sequential read instead of decoding the body. Sharing `read_header` keeps a
     /// probe's verdict and the later read's from drifting apart.
-    pub(super) async fn covers_demand(&mut self, demand: &[OutputDemand]) -> FormatResult<bool> {
-        Ok(self.read_header(demand).await?.is_some())
+    pub(super) fn covers_demand(&mut self, demand: &[OutputDemand]) -> FormatResult<bool> {
+        Ok(self.read_header(demand)?.is_some())
     }
 
-    pub(super) async fn read(
+    pub(super) fn read(
         &mut self,
         demand: &[OutputDemand],
     ) -> FormatResult<Option<Vec<DynamicValue>>> {
-        let Some(header) = self.read_header(demand).await? else {
+        let Some(header) = self.read_header(demand)? else {
             return Ok(None);
         };
         let mut values = Vec::with_capacity(header.descs.len());
-        for desc in header.descs {
+        for (output_idx, desc) in header.descs.into_iter().enumerate() {
             let value = match desc.kind {
                 OutputKind::Unbound => DynamicValue::Unbound,
                 OutputKind::Static => {
-                    let mut payload = (&mut *self.reader).take(desc.payload_len);
-                    let value = read_static(&mut payload, desc.payload_len).await?;
-                    require_consumed(&payload)?;
-                    DynamicValue::Static(value)
+                    let mut payload = PayloadReader::new(self.reader, desc.payload_len);
+                    let value = read_static(&mut payload, desc.payload_len);
+                    DynamicValue::Static(payload.finish(value, desc, output_idx)?)
                 }
                 OutputKind::Custom { type_id, .. } => {
                     let codec = self
                         .codecs
                         .get(type_id)
                         .expect("custom codec was validated while reading the header");
-                    let mut payload = (&mut *self.reader).take(desc.payload_len);
+                    let mut payload = PayloadReader::new(self.reader, desc.payload_len);
                     let value = codec
                         .decode(&mut payload, desc.payload_len)
-                        .await
-                        .map_err(|source| CodecFormatError::Decode { type_id, source })?;
-                    require_consumed(&payload)?;
-                    DynamicValue::Custom(value)
+                        .map_err(|source| CodecFormatError::Decode { type_id, source });
+                    DynamicValue::Custom(payload.finish(value, desc, output_idx)?)
                 }
             };
             values.push(value);
@@ -213,35 +293,33 @@ where
     /// different arity, a codec version the library no longer has, or a demanded output the blob
     /// left `Unbound`. Undemanded outputs may be missing, so a narrow snapshot is reusable by a
     /// run that wants less than the one which wrote it.
-    async fn read_header(&mut self, demand: &[OutputDemand]) -> FormatResult<Option<BlobHeader>> {
+    fn read_header(&mut self, demand: &[OutputDemand]) -> FormatResult<Option<BlobHeader>> {
         let mut descs = Vec::new();
-        let prefix = self
-            .scan_header(|idx, desc| {
-                let Some(output_demand) = demand.get(idx) else {
-                    return false;
-                };
-                if !output_demand.is_skip() && matches!(desc.kind, OutputKind::Unbound) {
-                    return false;
-                }
-                descs.push(desc);
-                true
-            })
-            .await?;
+        let prefix = self.scan_header(|idx, desc| {
+            let Some(output_demand) = demand.get(idx) else {
+                return false;
+            };
+            if !output_demand.is_skip() && matches!(desc.kind, OutputKind::Unbound) {
+                return false;
+            }
+            descs.push(desc);
+            true
+        })?;
         Ok(prefix
             .filter(|prefix| prefix.output_count == demand.len())
             .map(|_| BlobHeader { descs }))
     }
 
-    async fn scan_header(
+    fn scan_header(
         &mut self,
         mut accept: impl FnMut(usize, OutputDesc) -> bool,
     ) -> FormatResult<Option<HeaderPrefix>> {
-        let Some(prefix) = self.read_prefix().await? else {
+        let Some(prefix) = self.read_prefix()? else {
             return Ok(None);
         };
         let mut payload_sum = 0u64;
         for idx in 0..prefix.output_count {
-            let desc = read_desc(self.reader).await?;
+            let desc = read_desc(self.reader)?;
             payload_sum = payload_sum
                 .checked_add(desc.payload_len)
                 .ok_or(FrameError::PayloadLenOverflow)?;
@@ -263,9 +341,9 @@ where
         Ok(Some(prefix))
     }
 
-    async fn read_prefix(&mut self) -> FormatResult<Option<HeaderPrefix>> {
+    fn read_prefix(&mut self) -> FormatResult<Option<HeaderPrefix>> {
         let mut bytes = [0; FIXED_LEN];
-        self.reader.read_exact(&mut bytes).await?;
+        self.reader.read_exact(&mut bytes)?;
         if &bytes[..8] != MAGIC {
             return Err(FrameError::WrongMagic.into());
         }
@@ -307,27 +385,6 @@ pub(super) fn unsupported_type(outputs: &[DynamicValue], codecs: &Codecs) -> Opt
     })
 }
 
-fn desc_for(value: &DynamicValue, codecs: &Codecs) -> FormatResult<OutputDesc> {
-    let kind = match value {
-        DynamicValue::Unbound => OutputKind::Unbound,
-        DynamicValue::Static(_) => OutputKind::Static,
-        DynamicValue::Custom(value) => {
-            let type_id = value.custom_type_id();
-            let codec = codecs
-                .get(type_id)
-                .ok_or(CodecFormatError::UnknownType(type_id))?;
-            OutputKind::Custom {
-                type_id,
-                version: codec.version(),
-            }
-        }
-    };
-    Ok(OutputDesc {
-        kind,
-        payload_len: 0,
-    })
-}
-
 fn desc_covers(desc: OutputDesc, value: &DynamicValue) -> bool {
     match value {
         DynamicValue::Unbound => true,
@@ -339,7 +396,7 @@ fn desc_covers(desc: OutputDesc, value: &DynamicValue) -> bool {
     }
 }
 
-async fn write_desc(writer: &mut (impl AsyncWrite + Unpin), desc: OutputDesc) -> io::Result<()> {
+fn desc_bytes(desc: OutputDesc) -> [u8; DESC_LEN] {
     let mut bytes = [0; DESC_LEN];
     bytes[0] = desc.kind.tag();
     if let OutputKind::Custom { type_id, version } = desc.kind {
@@ -347,21 +404,27 @@ async fn write_desc(writer: &mut (impl AsyncWrite + Unpin), desc: OutputDesc) ->
         bytes[20..24].copy_from_slice(&version.to_le_bytes());
     }
     bytes[24..32].copy_from_slice(&desc.payload_len.to_le_bytes());
-    writer.write_all(&bytes).await
+    bytes[32..64].copy_from_slice(&desc.payload_hash);
+    bytes
 }
 
-async fn read_desc(reader: &mut (impl AsyncRead + Unpin)) -> FormatResult<OutputDesc> {
+fn read_desc(reader: &mut impl Read) -> FormatResult<OutputDesc> {
     let mut bytes = [0; DESC_LEN];
-    reader.read_exact(&mut bytes).await?;
+    reader.read_exact(&mut bytes)?;
     if bytes[1..4] != [0; 3] {
         return Err(FrameError::ReservedBytes.into());
     }
     let type_id_bytes: [u8; 16] = bytes[4..20].try_into().unwrap();
     let version = u32::from_le_bytes(bytes[20..24].try_into().unwrap());
     let payload_len = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
+    let payload_hash: [u8; 32] = bytes[32..64].try_into().unwrap();
     let kind = match bytes[0] {
         0 => {
-            if type_id_bytes != [0; 16] || version != 0 || payload_len != 0 {
+            if type_id_bytes != [0; 16]
+                || version != 0
+                || payload_len != 0
+                || payload_hash != *blake3::hash(&[]).as_bytes()
+            {
                 return Err(FrameError::UnboundMetadata.into());
             }
             OutputKind::Unbound
@@ -378,66 +441,50 @@ async fn read_desc(reader: &mut (impl AsyncRead + Unpin)) -> FormatResult<Output
         },
         _ => return Err(FrameError::UnknownValueTag.into()),
     };
-    Ok(OutputDesc { kind, payload_len })
+    Ok(OutputDesc {
+        kind,
+        payload_len,
+        payload_hash,
+    })
 }
 
-async fn write_static(
-    writer: &mut (impl AsyncWrite + Unpin),
-    value: &ConstValue,
-) -> io::Result<()> {
+fn write_static(writer: &mut impl Write, value: &ConstValue) -> io::Result<()> {
     match value {
-        ConstValue::Null => writer.write_all(&[0]).await,
+        ConstValue::Null => writer.write_all(&[0]),
         ConstValue::Float(value) => {
-            writer.write_all(&[1]).await?;
-            writer.write_all(&value.to_bits().to_le_bytes()).await
+            writer.write_all(&[1])?;
+            writer.write_all(&value.to_bits().to_le_bytes())
         }
         ConstValue::Int(value) => {
-            writer.write_all(&[2]).await?;
-            writer.write_all(&value.to_le_bytes()).await
+            writer.write_all(&[2])?;
+            writer.write_all(&value.to_le_bytes())
         }
-        ConstValue::Bool(value) => writer.write_all(&[3, u8::from(*value)]).await,
-        ConstValue::String(value) => write_string(writer, 4, value).await,
-        ConstValue::FsPath(path) => write_string(writer, 5, path).await,
-        ConstValue::FsPaths(paths) => write_strings(writer, 6, paths).await,
-        ConstValue::Enum(value) => write_string(writer, 7, value).await,
+        ConstValue::Bool(value) => writer.write_all(&[3, u8::from(*value)]),
+        ConstValue::String(value) => write_string(writer, 4, value),
+        ConstValue::FsPath(path) => write_string(writer, 5, path),
+        ConstValue::FsPaths(paths) => write_strings(writer, 6, paths),
+        ConstValue::Enum(value) => write_string(writer, 7, value),
     }
 }
 
-async fn write_string(
-    writer: &mut (impl AsyncWrite + Unpin),
-    tag: u8,
-    value: &str,
-) -> io::Result<()> {
-    writer.write_all(&[tag]).await?;
-    writer
-        .write_all(&(value.len() as u64).to_le_bytes())
-        .await?;
-    writer.write_all(value.as_bytes()).await
+fn write_string(writer: &mut impl Write, tag: u8, value: &str) -> io::Result<()> {
+    writer.write_all(&[tag])?;
+    writer.write_all(&(value.len() as u64).to_le_bytes())?;
+    writer.write_all(value.as_bytes())
 }
 
-async fn write_strings(
-    writer: &mut (impl AsyncWrite + Unpin),
-    tag: u8,
-    values: &[String],
-) -> io::Result<()> {
-    writer.write_all(&[tag]).await?;
-    writer
-        .write_all(&(values.len() as u64).to_le_bytes())
-        .await?;
+fn write_strings(writer: &mut impl Write, tag: u8, values: &[String]) -> io::Result<()> {
+    writer.write_all(&[tag])?;
+    writer.write_all(&(values.len() as u64).to_le_bytes())?;
     for value in values {
-        writer
-            .write_all(&(value.len() as u64).to_le_bytes())
-            .await?;
-        writer.write_all(value.as_bytes()).await?;
+        writer.write_all(&(value.len() as u64).to_le_bytes())?;
+        writer.write_all(value.as_bytes())?;
     }
     Ok(())
 }
 
-async fn read_static(
-    reader: &mut (impl AsyncRead + Unpin),
-    payload_len: u64,
-) -> FormatResult<ConstValue> {
-    let tag = read_u8(reader).await?;
+fn read_static(reader: &mut impl Read, payload_len: u64) -> FormatResult<ConstValue> {
+    let tag = read_u8(reader)?;
     match tag {
         0 => {
             require_payload_len(payload_len, 1)?;
@@ -445,37 +492,30 @@ async fn read_static(
         }
         1 => {
             require_payload_len(payload_len, 9)?;
-            Ok(ConstValue::Float(f64::from_bits(read_u64(reader).await?)))
+            Ok(ConstValue::Float(f64::from_bits(read_u64(reader)?)))
         }
         2 => {
             require_payload_len(payload_len, 9)?;
-            Ok(ConstValue::Int(i64::from_le_bytes(
-                read_array(reader).await?,
-            )))
+            Ok(ConstValue::Int(i64::from_le_bytes(read_array(reader)?)))
         }
         3 => {
             require_payload_len(payload_len, 2)?;
-            match read_u8(reader).await? {
+            match read_u8(reader)? {
                 0 => Ok(ConstValue::Bool(false)),
                 1 => Ok(ConstValue::Bool(true)),
                 _ => Err(FrameError::InvalidBool.into()),
             }
         }
-        4 => Ok(ConstValue::String(read_string(reader, payload_len).await?)),
-        5 => Ok(ConstValue::FsPath(read_string(reader, payload_len).await?)),
-        6 => Ok(ConstValue::FsPaths(
-            read_strings(reader, payload_len).await?,
-        )),
-        7 => Ok(ConstValue::Enum(read_string(reader, payload_len).await?)),
+        4 => Ok(ConstValue::String(read_string(reader, payload_len)?)),
+        5 => Ok(ConstValue::FsPath(read_string(reader, payload_len)?)),
+        6 => Ok(ConstValue::FsPaths(read_strings(reader, payload_len)?)),
+        7 => Ok(ConstValue::Enum(read_string(reader, payload_len)?)),
         _ => Err(FrameError::UnknownConstVariant.into()),
     }
 }
 
-async fn read_string(
-    reader: &mut (impl AsyncRead + Unpin),
-    payload_len: u64,
-) -> FormatResult<String> {
-    let byte_len = read_u64(reader).await?;
+fn read_string(reader: &mut impl Read, payload_len: u64) -> FormatResult<String> {
+    let byte_len = read_u64(reader)?;
     let expected_len = 1u64
         .checked_add(8)
         .and_then(|prefix| prefix.checked_add(byte_len))
@@ -483,15 +523,12 @@ async fn read_string(
     require_payload_len(payload_len, expected_len)?;
     let byte_len = usize::try_from(byte_len).map_err(|_| FrameError::StringTooLarge)?;
     let mut bytes = vec![0; byte_len];
-    reader.read_exact(&mut bytes).await?;
+    reader.read_exact(&mut bytes)?;
     Ok(String::from_utf8(bytes).map_err(FrameError::InvalidUtf8)?)
 }
 
-async fn read_strings(
-    reader: &mut (impl AsyncRead + Unpin),
-    payload_len: u64,
-) -> FormatResult<Vec<String>> {
-    let value_count = read_u64(reader).await?;
+fn read_strings(reader: &mut impl Read, payload_len: u64) -> FormatResult<Vec<String>> {
+    let value_count = read_u64(reader)?;
     let minimum_len = 1u64
         .checked_add(8)
         .and_then(|prefix| prefix.checked_add(value_count.checked_mul(8)?))
@@ -503,7 +540,7 @@ async fn read_strings(
     let mut expected_len = minimum_len;
     let mut values = Vec::with_capacity(value_count);
     for _ in 0..value_count {
-        let byte_len = read_u64(reader).await?;
+        let byte_len = read_u64(reader)?;
         expected_len = expected_len
             .checked_add(byte_len)
             .ok_or(FrameError::PathListLenOverflow)?;
@@ -512,33 +549,25 @@ async fn read_strings(
         }
         let byte_len = usize::try_from(byte_len).map_err(|_| FrameError::PathTooLarge)?;
         let mut bytes = vec![0; byte_len];
-        reader.read_exact(&mut bytes).await?;
+        reader.read_exact(&mut bytes)?;
         values.push(String::from_utf8(bytes).map_err(FrameError::InvalidUtf8)?);
     }
     require_payload_len(payload_len, expected_len)?;
     Ok(values)
 }
 
-async fn read_u8(reader: &mut (impl AsyncRead + Unpin)) -> io::Result<u8> {
-    Ok(read_array::<1>(reader).await?[0])
+fn read_u8(reader: &mut impl Read) -> io::Result<u8> {
+    Ok(read_array::<1>(reader)?[0])
 }
 
-async fn read_u64(reader: &mut (impl AsyncRead + Unpin)) -> io::Result<u64> {
-    Ok(u64::from_le_bytes(read_array(reader).await?))
+fn read_u64(reader: &mut impl Read) -> io::Result<u64> {
+    Ok(u64::from_le_bytes(read_array(reader)?))
 }
 
-async fn read_array<const N: usize>(reader: &mut (impl AsyncRead + Unpin)) -> io::Result<[u8; N]> {
+fn read_array<const N: usize>(reader: &mut impl Read) -> io::Result<[u8; N]> {
     let mut bytes = [0; N];
-    reader.read_exact(&mut bytes).await?;
+    reader.read_exact(&mut bytes)?;
     Ok(bytes)
-}
-
-fn require_consumed<R: AsyncRead>(reader: &Take<R>) -> FormatResult<()> {
-    if reader.limit() == 0 {
-        Ok(())
-    } else {
-        Err(FrameError::PayloadNotConsumed.into())
-    }
 }
 
 fn require_payload_len(actual: u64, expected: u64) -> FormatResult<()> {
@@ -555,19 +584,6 @@ pub(super) fn header_len(output_count: usize) -> usize {
 
 fn checked_header_len(output_count: usize) -> Option<usize> {
     FIXED_LEN.checked_add(output_count.checked_mul(DESC_LEN)?)
-}
-
-fn desc_payload_len_offset(idx: usize) -> u64 {
-    u64::try_from(
-        FIXED_LEN
-            .checked_add(
-                idx.checked_mul(DESC_LEN)
-                    .expect("a cache descriptor offset must fit in memory"),
-            )
-            .expect("a cache descriptor offset must fit in memory"),
-    )
-    .expect("a cache descriptor offset must fit in the file format")
-        + PAYLOAD_LEN_OFFSET
 }
 
 #[cfg(test)]

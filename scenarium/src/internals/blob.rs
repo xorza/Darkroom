@@ -2,9 +2,8 @@
 //! with the knobs the cache tests turn.
 
 use std::fmt;
+use std::io::{Read, Write};
 use std::sync::Arc;
-
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::data::codec::error::CodecError;
 use crate::data::codec::{Codecs, CustomValueCodec};
@@ -91,36 +90,31 @@ impl BlobCodec {
     }
 }
 
-#[async_trait::async_trait]
 impl CustomValueCodec for BlobCodec {
     fn version(&self) -> u32 {
         self.version
     }
 
-    async fn encode(
-        &self,
-        value: &dyn CustomValue,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
-    ) -> Result<(), CodecError> {
+    fn encode(&self, value: &dyn CustomValue, writer: &mut dyn Write) -> Result<(), CodecError> {
         let blob = value
             .downcast_ref::<Blob>()
             .expect("BlobCodec is only registered for Blob");
-        writer.write_all(&blob.0).await?;
+        writer.write_all(&blob.0)?;
         if self.fault == BlobFault::EncodeFails {
             return Err("injected encode failure".into());
         }
         Ok(())
     }
 
-    async fn decode(
+    fn decode(
         &self,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut dyn Read,
         byte_len: u64,
     ) -> Result<Arc<dyn CustomValue>, CodecError> {
         self.decodes.bump();
         let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
         if self.fault != BlobFault::DecodeUnderReads {
-            reader.read_to_end(&mut bytes).await?;
+            reader.read_to_end(&mut bytes)?;
         }
         Ok(Arc::new(Blob(bytes)))
     }

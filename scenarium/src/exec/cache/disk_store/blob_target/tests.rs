@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use common::internals::publication_temp_files;
 use common::{ErrorChain, TempDir, TempFile, fs};
@@ -26,17 +27,17 @@ fn target(path: &Path, digest: Digest) -> BlobTarget {
     }
 }
 
-async fn read_snapshot(
+fn read_snapshot(
     codecs: &Codecs,
     target: &BlobTarget,
     output_count: usize,
 ) -> Option<OutputSnapshot> {
     let demand = vec![OutputDemand::Skip; output_count];
-    target.read(codecs, &demand).await
+    target.read_blocking(codecs, &demand)
 }
 
-#[tokio::test]
-async fn store_read_header_check_and_digest_replacement_round_trip() {
+#[test]
+fn store_read_header_check_and_digest_replacement_round_trip() {
     let file = TempFile::new("roundtrip");
     let codecs = Codecs::default();
     let first_digest = Digest([7; 32]);
@@ -51,14 +52,13 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
 
     assert_eq!(
         first_target
-            .store(&codecs, &first, StorePolicy::KnownMiss)
-            .await
+            .store_blocking(&codecs, first.values(), StorePolicy::KnownMiss)
             .unwrap(),
         StoreOutcome::Published
     );
-    assert!(first_target.covers(first.values(), &codecs).await);
-    assert!(!second_target.covers(first.values(), &codecs).await);
-    let restored = read_snapshot(&codecs, &first_target, 3).await.unwrap();
+    assert!(first_target.covers(first.values(), &codecs));
+    assert!(!second_target.covers(first.values(), &codecs));
+    let restored = read_snapshot(&codecs, &first_target, 3).unwrap();
     assert!(matches!(restored.values()[0], DynamicValue::Unbound));
     assert_eq!(restored.values()[1].as_i64(), Some(7));
     assert_eq!(restored.values()[2].as_string(), Some("x"));
@@ -68,24 +68,19 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
     // fails and the publication goes ahead.
     assert_eq!(
         second_target
-            .store(&codecs, &second, StorePolicy::PreserveCovering)
-            .await
+            .store_blocking(&codecs, second.values(), StorePolicy::PreserveCovering)
             .unwrap(),
         StoreOutcome::Published
     );
-    assert!(read_snapshot(&codecs, &first_target, 3).await.is_none());
+    assert!(read_snapshot(&codecs, &first_target, 3).is_none());
     assert_eq!(
-        read_snapshot(&codecs, &second_target, 1)
-            .await
-            .unwrap()
-            .values()[0]
-            .as_i64(),
+        read_snapshot(&codecs, &second_target, 1).unwrap().values()[0].as_i64(),
         Some(35)
     );
 }
 
-#[tokio::test]
-async fn broader_same_digest_blob_is_preserved() {
+#[test]
+fn broader_same_digest_blob_is_preserved() {
     let file = TempFile::new("coverage");
     let decode_calls = Calls::default();
     let codecs = BlobCodec::versioned(1, decode_calls.clone()).codecs();
@@ -96,13 +91,12 @@ async fn broader_same_digest_blob_is_preserved() {
     ]);
     assert_eq!(
         target
-            .store(&codecs, &partial, StorePolicy::KnownMiss)
-            .await
+            .store_blocking(&codecs, partial.values(), StorePolicy::KnownMiss)
             .unwrap(),
         StoreOutcome::Published
     );
     let second_output = [OutputDemand::Skip, OutputDemand::Produce];
-    assert!(target.read(&codecs, &second_output).await.is_none());
+    assert!(target.read_blocking(&codecs, &second_output).is_none());
     assert!(file.exists(), "an insufficient but valid blob is retained");
 
     let complete = OutputSnapshot::new(vec![
@@ -111,8 +105,7 @@ async fn broader_same_digest_blob_is_preserved() {
     ]);
     assert_eq!(
         target
-            .store(&codecs, &complete, StorePolicy::KnownMiss)
-            .await
+            .store_blocking(&codecs, complete.values(), StorePolicy::KnownMiss)
             .unwrap(),
         StoreOutcome::Published
     );
@@ -120,15 +113,14 @@ async fn broader_same_digest_blob_is_preserved() {
 
     assert_eq!(
         target
-            .store(&codecs, &partial, StorePolicy::PreserveCovering)
-            .await
+            .store_blocking(&codecs, partial.values(), StorePolicy::PreserveCovering)
             .unwrap(),
         StoreOutcome::AlreadyCovered
     );
     assert_eq!(fs::read(file.path()).unwrap(), complete_bytes);
-    assert!(target.covers(complete.values(), &codecs).await);
-    assert!(target.covers(partial.values(), &codecs).await);
-    let restored = read_snapshot(&codecs, &target, 2).await.unwrap();
+    assert!(target.covers(complete.values(), &codecs));
+    assert!(target.covers(partial.values(), &codecs));
+    let restored = read_snapshot(&codecs, &target, 2).unwrap();
     assert_eq!(restored.values()[0].as_i64(), Some(7));
     assert_eq!(
         restored.values()[1].as_custom::<Blob>(),
@@ -137,8 +129,8 @@ async fn broader_same_digest_blob_is_preserved() {
     assert_eq!(decode_calls.count(), 1);
 }
 
-#[tokio::test]
-async fn missing_and_changed_codecs_miss_before_decode() {
+#[test]
+fn missing_and_changed_codecs_miss_before_decode() {
     let file = TempFile::new("codec-version");
     let target = target(file.path(), Digest([12; 32]));
     let snapshot = OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![9]))]);
@@ -146,34 +138,28 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     let old_codecs = BlobCodec::versioned(1, old_calls.clone()).codecs();
     assert_eq!(
         target
-            .store(&old_codecs, &snapshot, StorePolicy::KnownMiss)
-            .await
+            .store_blocking(&old_codecs, snapshot.values(), StorePolicy::KnownMiss)
             .unwrap(),
         StoreOutcome::Published
     );
 
-    assert!(!target.covers(snapshot.values(), &Codecs::default()).await);
-    assert!(
-        read_snapshot(&Codecs::default(), &target, 1)
-            .await
-            .is_none()
-    );
+    assert!(!target.covers(snapshot.values(), &Codecs::default()));
+    assert!(read_snapshot(&Codecs::default(), &target, 1).is_none());
 
     let new_calls = Calls::default();
     let new_codecs = BlobCodec::versioned(2, new_calls.clone()).codecs();
-    assert!(!target.covers(snapshot.values(), &new_codecs).await);
-    assert!(read_snapshot(&new_codecs, &target, 1).await.is_none());
+    assert!(!target.covers(snapshot.values(), &new_codecs));
+    assert!(read_snapshot(&new_codecs, &target, 1).is_none());
     assert_eq!(new_calls.count(), 0);
 
     assert_eq!(
         target
-            .store(&new_codecs, &snapshot, StorePolicy::KnownMiss)
-            .await
+            .store_blocking(&new_codecs, snapshot.values(), StorePolicy::KnownMiss)
             .unwrap(),
         StoreOutcome::Published
     );
-    assert!(!target.covers(snapshot.values(), &old_codecs).await);
-    assert!(read_snapshot(&new_codecs, &target, 1).await.is_some());
+    assert!(!target.covers(snapshot.values(), &old_codecs));
+    assert!(read_snapshot(&new_codecs, &target, 1).is_some());
     assert_eq!(new_calls.count(), 1);
     assert_eq!(old_calls.count(), 0);
 }
@@ -195,7 +181,7 @@ async fn unregistered_custom_value_is_reported_unsupported_not_failed() {
     for policy in [StorePolicy::KnownMiss, StorePolicy::PreserveCovering] {
         assert_eq!(
             target(&blob, Digest([1; 32]))
-                .store(&Codecs::default(), &snapshot, policy)
+                .store(Arc::default(), snapshot.values().to_vec(), policy)
                 .await
                 .unwrap(),
             StoreOutcome::Unsupported { type_id: BLOB_TYPE }
@@ -204,20 +190,19 @@ async fn unregistered_custom_value_is_reported_unsupported_not_failed() {
     }
 }
 
-#[tokio::test]
-async fn failed_streaming_encode_preserves_previous_blob() {
+#[test]
+fn failed_streaming_encode_preserves_previous_blob() {
     let file = TempFile::new("encode-failure");
     let calls = Calls::default();
-    let good_codecs = BlobCodec::versioned(1, calls.clone()).codecs();
+    let good_codecs = BlobCodec::versioned(1, calls).codecs();
     let original_target = target(file.path(), Digest([4; 32]));
     assert_eq!(
         original_target
-            .store(
+            .store_blocking(
                 &good_codecs,
-                &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![1, 2]))]),
+                OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![1, 2]))]).values(),
                 StorePolicy::KnownMiss
             )
-            .await
             .unwrap(),
         StoreOutcome::Published
     );
@@ -228,13 +213,11 @@ async fn failed_streaming_encode_preserves_previous_blob() {
         ..BlobCodec::versioned(1, Calls::default())
     }
     .codecs();
-    let failed = target(file.path(), Digest([5; 32]))
-        .store(
-            &failing_codecs,
-            &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![8; 1024]))]),
-            StorePolicy::KnownMiss,
-        )
-        .await;
+    let failed = target(file.path(), Digest([5; 32])).store_blocking(
+        &failing_codecs,
+        OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![8; 1024]))]).values(),
+        StorePolicy::KnownMiss,
+    );
     // A codec that rejects the value it was handed is a failure, unlike a type with no codec — and
     // it names the blob it could not write.
     let Err(StoreError::Encode { path, source }) = &failed else {
@@ -248,29 +231,23 @@ async fn failed_streaming_encode_preserves_previous_blob() {
     );
     assert_eq!(fs::read(file.path()).unwrap(), original);
     assert!(publication_temp_files(file.path()).is_empty());
-    assert!(
-        read_snapshot(&good_codecs, &original_target, 1)
-            .await
-            .is_some()
-    );
+    assert!(read_snapshot(&good_codecs, &original_target, 1).is_some());
 }
 
 /// A publication that cannot land leaves the directory it was writing into
 /// exactly as it found it — neighbours intact, no temporary left behind.
-#[tokio::test]
-async fn a_failed_publication_disturbs_nothing_around_it() {
+#[test]
+fn a_failed_publication_disturbs_nothing_around_it() {
     let file = TempFile::new("publication-failure");
     fs::create_dir_all(file.path()).unwrap();
     let survivor = file.path().join("survivor");
     fs::write(&survivor, b"old").unwrap();
     let codecs = Codecs::default();
-    let failed = target(file.path(), Digest([9; 32]))
-        .store(
-            &codecs,
-            &OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::Int(9))]),
-            StorePolicy::PreserveCovering,
-        )
-        .await;
+    let failed = target(file.path(), Digest([9; 32])).store_blocking(
+        &codecs,
+        OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::Int(9))]).values(),
+        StorePolicy::PreserveCovering,
+    );
 
     // The blob path is a directory here. The body still streams fine (an `AtomicFile` writes to a
     // temporary beside the destination), so the failure lands on the publication, not the encode.
@@ -282,21 +259,21 @@ async fn a_failed_publication_disturbs_nothing_around_it() {
     assert!(publication_temp_files(file.path()).is_empty());
 }
 
-#[tokio::test]
-async fn truncated_blob_is_rejected_by_header_check_and_read() {
+#[test]
+fn truncated_blob_is_rejected_by_header_check_and_read() {
     let file = TempFile::new("truncated");
     let codecs = Codecs::default();
     let target = target(file.path(), Digest([6; 32]));
     assert_eq!(
         target
-            .store(
+            .store_blocking(
                 &codecs,
-                &OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::String(
+                OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::String(
                     "payload".into(),
-                ))]),
+                ))])
+                .values(),
                 StorePolicy::KnownMiss
             )
-            .await
             .unwrap(),
         StoreOutcome::Published
     );
@@ -304,16 +281,16 @@ async fn truncated_blob_is_rejected_by_header_check_and_read() {
     bytes.pop();
     fs::write(file.path(), bytes).unwrap();
     let expected = [DynamicValue::Static(ConstValue::String("payload".into()))];
-    assert!(!target.covers(&expected, &codecs).await);
-    assert!(read_snapshot(&codecs, &target, 1).await.is_none());
+    assert!(!target.covers(&expected, &codecs));
+    assert!(read_snapshot(&codecs, &target, 1).is_none());
     assert!(!file.exists(), "a corrupt cache blob is removed");
 }
 
 /// A store creates its directory when, and only when, a write finds it missing:
 /// the first write under a root that does not exist yet publishes, and so does
 /// a write after the root was removed behind the store's back.
-#[tokio::test]
-async fn a_missing_store_directory_is_created_on_the_write_that_needs_it() {
+#[test]
+fn a_missing_store_directory_is_created_on_the_write_that_needs_it() {
     let dir = TempDir::new("missing-store-directory");
     let root = dir.path().join("nested").join("root");
     let codecs = Codecs::default();
@@ -323,13 +300,12 @@ async fn a_missing_store_directory_is_created_on_the_write_that_needs_it() {
     for _ in 0..2 {
         assert!(!fs::exists(&root));
         assert_eq!(
-            blob.store(&codecs, &snapshot, StorePolicy::KnownMiss)
-                .await
+            blob.store_blocking(&codecs, snapshot.values(), StorePolicy::KnownMiss)
                 .unwrap(),
             StoreOutcome::Published
         );
         assert_eq!(
-            read_snapshot(&codecs, &blob, 1).await.unwrap().values()[0].as_i64(),
+            read_snapshot(&codecs, &blob, 1).unwrap().values()[0].as_i64(),
             Some(3)
         );
         fs::remove_dir_all(&root).unwrap();

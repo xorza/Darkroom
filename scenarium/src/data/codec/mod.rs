@@ -4,29 +4,29 @@ pub(crate) mod error;
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::io::{Read, Write};
 use std::sync::Arc;
-
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::data::codec::error::CodecError;
 use crate::data::data_type::custom_type::CustomTypeId;
 use crate::data::dynamic_value::CustomValue;
 
-#[async_trait::async_trait]
+/// How a custom value type writes itself to the disk cache and reads itself back.
+///
+/// Synchronous: the cache runs each blob's whole read or write as one closure on the blocking
+/// pool, where an async stream would cost a round trip to the pool for every read and write the
+/// codec makes.
 pub trait CustomValueCodec: Send + Sync + Debug {
     /// Version of this codec's persisted representation. Increment it whenever
     /// previously encoded bytes must not be decoded by the current implementation.
     fn version(&self) -> u32;
 
-    async fn encode(
-        &self,
-        value: &dyn CustomValue,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
-    ) -> Result<(), CodecError>;
+    fn encode(&self, value: &dyn CustomValue, writer: &mut dyn Write) -> Result<(), CodecError>;
 
-    async fn decode(
+    /// Read the value back from exactly `byte_len` bytes of `reader`.
+    fn decode(
         &self,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut dyn Read,
         byte_len: u64,
     ) -> Result<Arc<dyn CustomValue>, CodecError>;
 }

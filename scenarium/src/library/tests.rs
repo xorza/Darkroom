@@ -1,8 +1,7 @@
+use std::io::{Read, Write};
 use std::panic;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::async_lambda;
 use crate::data::codec::CustomValueCodec;
@@ -25,23 +24,18 @@ use crate::library::Library;
 #[derive(Debug)]
 struct StubCodec;
 
-#[async_trait::async_trait]
 impl CustomValueCodec for StubCodec {
     fn version(&self) -> u32 {
         0
     }
 
-    async fn encode(
-        &self,
-        _value: &dyn CustomValue,
-        _writer: &mut (dyn AsyncWrite + Unpin + Send),
-    ) -> Result<(), CodecError> {
+    fn encode(&self, _value: &dyn CustomValue, _writer: &mut dyn Write) -> Result<(), CodecError> {
         unreachable!()
     }
 
-    async fn decode(
+    fn decode(
         &self,
-        _reader: &mut (dyn AsyncRead + Unpin + Send),
+        _reader: &mut dyn Read,
         _byte_len: u64,
     ) -> Result<Arc<dyn CustomValue>, CodecError> {
         unreachable!()

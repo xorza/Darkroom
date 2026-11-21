@@ -1,9 +1,12 @@
 use super::*;
 use crate::graph::node::Keep;
 
+use std::time::SystemTime;
+
 use common::fs;
 
 use crate::exec::cache::disk_store::DiskStore;
+use crate::exec::cache::disk_store::error::PruneError;
 use crate::internals::test_graph::NodeSpec;
 
 /// Eviction is fire-and-forget: it happens inside the batch, before the
@@ -77,6 +80,68 @@ async fn an_eviction_failure_uses_the_general_worker_error_report() {
         "{error}"
     );
     w.quiet();
+}
+
+/// A store is pruned once against the program it serves: not at an attach with no program
+/// installed, which names no blob, but at the install after it, and not again at the next. A blob
+/// no node names, and a temporary a killed write left over a day ago, go; each live node's blob, a
+/// fresh temporary and a file not the store's stay. What would not go is reported.
+#[tokio::test]
+async fn an_attached_store_is_pruned_once_against_the_installed_program() {
+    let dir = TempDir::new("prune");
+    let mut w = TestWorker::over(TestGraph::sample());
+    let store = DiskStore::new(Some(dir.path().to_path_buf()));
+    let live = store.blob_path(w.id("get_a"));
+    let dead = store.blob_path(ProgramId::from(NodeId::from_u128(0xdead)));
+    let stuck = store.blob_path(ProgramId::from(NodeId::from_u128(0xbeef)));
+    let dead_name = dead.file_name().unwrap().to_str().unwrap();
+    let stale_temp = dir.path().join(format!("{dead_name}.1.0.tmp"));
+    let fresh_temp = dir.path().join(format!("{dead_name}.1.1.tmp"));
+    let foreign = dir.path().join(".gitignore");
+    for path in [&live, &dead, &stale_temp, &fresh_temp, &foreign] {
+        fs::write(path, b"x").unwrap();
+    }
+    let two_days = Duration::from_hours(48);
+    fs::open_write(&stale_temp)
+        .unwrap()
+        .set_modified(SystemTime::now() - two_days)
+        .unwrap();
+    // A folder under a dead blob's name, which a file removal cannot take.
+    fs::create_dir(&stuck).unwrap();
+    let every = [&live, &dead, &stale_temp, &fresh_temp, &foreign, &stuck];
+
+    w.settle([TestWorker::disk_store(dir.path())]).await;
+    w.quiet();
+    for path in every {
+        assert!(
+            fs::exists(path),
+            "{path:?} stays while no program is installed"
+        );
+    }
+
+    w.settle([w.update()]).await;
+    assert!(matches!(w.report().await, WorkerReport::Installed { .. }));
+    let WorkerReport::Error(WorkerError::CachePrune { failures }) = w.report().await else {
+        panic!("a file the prune could not remove is reported");
+    };
+    let [failure] = failures.as_slice() else {
+        panic!("only the folder stays, got {failures:?}");
+    };
+    let PruneError::Remove(removal) = failure else {
+        panic!("a folder under a blob's name fails its removal, got {failure:?}");
+    };
+    assert_eq!(removal.path, stuck);
+    for path in every {
+        let kept = ![&dead, &stale_temp].contains(&path);
+        assert_eq!(fs::exists(path), kept, "{path:?}");
+    }
+
+    // Pruned once: a blob no node names, written after, stays at the next install.
+    fs::write(&dead, b"x").unwrap();
+    w.settle([w.update()]).await;
+    assert!(matches!(w.report().await, WorkerReport::Installed { .. }));
+    w.quiet();
+    assert!(fs::exists(&dead));
 }
 
 /// `source` (pure, RAM) → `square` (pure, Disk) → `print` (sink).

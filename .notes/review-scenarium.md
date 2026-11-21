@@ -37,9 +37,6 @@ Named so no batch touches it.
 
 ## Root causes
 
-3. **Blob I/O is asynchronous one operation at a time.** `tokio::fs::File` turns each read, write,
-   seek and stat into its own blocking-pool round trip, the format seeks back to patch each
-   output's length, and the probe's header read is thrown away and repeated at the load.
 4. **The document's rules are written where they are used, not once.** "May this graph hold this
    bind" is assembled by hand at three host sites; the live wiring is two loose fields where the
    ghost wiring is a type.
@@ -113,112 +110,7 @@ pub struct CompiledGraph {
 }
 // data/data_type/mod.rs
 impl DataType { pub(crate) fn holds(self, value: &DynamicValue) -> bool; }
-
-// exec/cache/runtime_cache/mod.rs
-pub(crate) struct RuntimeCache {
-    /* … */
-    /// The header each reused node's probe read this run, which its load takes.
-    probed: Col<NodeIdx, Option<BlobHeader>>,
-}
 ```
-
-#### Blob I/O — `data/codec/mod.rs`, `exec/cache/disk_store/`, `exec/cache/stamp_job/mod.rs`
-
-```rust
-// data/codec/mod.rs — no `async_trait`, no tokio
-pub trait CustomValueCodec: Send + Sync + Debug {
-    fn version(&self) -> u32;
-    fn encode(&self, value: &dyn CustomValue, writer: &mut dyn io::Write) -> Result<(), CodecError>;
-    fn decode(&self, reader: &mut dyn io::Read, byte_len: u64) -> Result<Arc<dyn CustomValue>, CodecError>;
-}
-
-// exec/cache/disk_store/format/mod.rs — synchronous; `FORMAT_VERSION` 12, `DESC_LEN` 64
-struct OutputDesc {
-    kind: OutputKind,
-    payload_len: u64,
-    /// blake3 of the payload's bytes; of no bytes for an unbound output.
-    payload_hash: [u8; 32],
-}
-pub(crate) struct BlobHeader { digest: Digest, descs: Box<[OutputDesc]> }
-impl BlobHeader {
-    pub(crate) fn covers_demand(&self, codecs: &Codecs, demand: &[OutputDemand]) -> bool;
-    pub(crate) const fn digest(&self) -> Digest;
-}
-pub(super) struct BlobWriter<'a, W: io::Write + io::Seek> { /* … */ }
-pub(super) struct BlobReader<'a, R: io::Read> { /* … */ }
-/// What a codec writes through: counts and hashes one payload, so its length and hash are never
-/// read back from the stream.
-struct PayloadWriter<'a, W: io::Write> { writer: &'a mut W, written: u64, hasher: blake3::Hasher }
-/// What a codec reads through: at most the payload's length, hashed as it is read.
-struct PayloadReader<'a, R: io::Read> { reader: io::Take<&'a mut R>, hasher: blake3::Hasher }
-
-// exec/cache/disk_store/error.rs
-pub enum FrameError {
-    /* … */
-    /// A payload's bytes do not hash to what its descriptor states.
-    PayloadHash { output_idx: usize },
-}
-
-// exec/cache/disk_store/blob_target/mod.rs — each body one `common::task::run_blocking`
-impl BlobTarget {
-    pub(crate) async fn probe(&self) -> Option<BlobHeader>;                                  // [I/O]
-    pub(crate) async fn read(&self, codecs: Arc<Codecs>, header: BlobHeader,
-                             demand: Box<[OutputDemand]>) -> Option<OutputSnapshot>;         // [I/O]
-    pub(crate) async fn store(&self, codecs: Arc<Codecs>, values: Vec<DynamicValue>,
-                              policy: StorePolicy) -> StoreResult;                           // [I/O]
-}
-impl DiskStore {
-    /// Remove these nodes' blobs in one blocking pass.
-    pub(crate) async fn remove_nodes(&self, program_ids: Vec<ProgramId>) -> Vec<RemovalError>;  // [I/O]
-    /// Remove each blob no node of `program` names, and each temp file last written over
-    /// `STALE_TEMP` ago. One `read_dir`, in one blocking pass.
-    pub(crate) async fn sweep(&self, program: Arc<CompiledGraph>) -> Vec<RemovalError>;          // [I/O]
-}
-/// A day: longer than any one blob takes to write, so a temp file this old is one a killed
-/// process left, never a write in progress.
-const STALE_TEMP: Duration = Duration::from_secs(24 * 60 * 60);
-
-// exec/engine/mod.rs
-pub(crate) struct ExecEngine {
-    /* … */
-    /// The attached store has not been swept against a program yet.
-    sweep_owed: bool,
-}
-impl ExecEngine {
-    /// Sweep the store if it is owed and a program is installed; else nothing.
-    pub(crate) async fn sweep_store(&mut self) -> Vec<RemovalError>;                             // [I/O]
-}
-
-// exec/cache/stamp_job/mod.rs
-pub(super) struct StampJob {
-    requests: HashSet<String>,
-    stamped: Vec<(String, FsPathId)>,
-    /// A walked folder's relative paths, back to back.
-    names: Vec<u8>,
-    files: Vec<WalkedFile>,
-    pending: Vec<PathBuf>,
-}
-struct WalkedFile { name: Range<u32>, identity: FileIdentity }
-
-// common/src/fs/mod.rs
-pub fn entry_metadata(entry: &DirEntry) -> io::Result<Metadata>;
-```
-
-- The header's length is fixed by the output count (`FIXED_LEN + count × DESC_LEN`), so the writer
-  reserves it, streams each value once through a counter, then seeks to 0 and writes the finished
-  header, each descriptor with the length and hash its `PayloadWriter` counted: one seek a blob,
-  where each output cost a seek back, an 8-byte patch and a seek forward, and each seek a flush.
-- **A payload is held to its hash.** After a codec decodes an output, the reader drains what the
-  codec left of the payload, then compares the hash; a mismatch is `FrameError::PayloadHash`, a
-  miss, and the blob is removed as an undecodable one is. The value is dropped, never served.
-- A probe is one read of the fixed prefix and the descriptors. The header it read is kept for the
-  run in `RuntimeCache.probed`, so the load reads the body alone.
-- A directory stamp is one pass: each entry's metadata is the listing's own, and names sit in one
-  buffer.
-- **The store's bound is one blob per node of the installed program.** A store is swept once,
-  when it and a program are both present: at `set_disk_store` with a program installed, else at
-  the next `install`. Never against the empty program, which names no blob and would empty the
-  folder. What it could not remove is reported as an eviction's failures are.
 
 #### Document — `graph/`
 
@@ -541,7 +433,7 @@ event task (one tokio task per armed event)
 └─ owns watch::Receiver<u64> of the epoch
 
 blocking pool (one closure per blob operation, per stamp pass)
-└─ receives by value: BlobTarget, Arc<Codecs>, Vec<DynamicValue> or BlobHeader; returns the result
+└─ receives by value: BlobTarget, Arc<Codecs>, the demand or the values; returns the result
 ```
 
 Every shared-ownership case of the current code, with its verdict:
@@ -595,10 +487,10 @@ WorkerTask::run(self)                                                   worker/w
 │  │  ├─ RuntimeCache::reconcile(&mut self, prev, program)
 │  │  └─ Executor::reconcile(&mut self, prev, program)
 │  ├─ ExecEngine::set_disk_store(&mut self, DiskStore)
-│  ├─ ExecEngine::sweep_store(&mut self) -> Vec<RemovalError>           once a store and a program are both present
-│  │  └─ DiskStore::sweep(&self, Arc<CompiledGraph>) -> Vec<RemovalError>      [I/O]
+│  ├─ ExecEngine::prune_store(&mut self) -> Vec<RemovalError>           once a store and a program are both present
+│  │  └─ DiskStore::prune(&self, live ids) -> Vec<RemovalError>                [I/O]
 │  ├─ ExecEngine::evict_cache(&mut self, ids) -> Vec<CacheNodeFailure>
-│  │  └─ DiskStore::remove_nodes(&self, Vec<ProgramId>) -> Vec<RemovalError>   [I/O]
+│  │  └─ DiskStore::remove_nodes(&self, Vec<ProgramId>) -> Vec<Result<(), RemovalError>>  [I/O]
 │  ├─ ExecEngine::flush_cache(&mut self, ids) -> CacheFlushReport              [I/O]
 │  ├─ WorkerTask::execute(&mut self)                                    borrows &self.intent.seeds
 │  │  ├─ ExecEngine::execute(&mut self, ExecuteRequest, &mut ExecOutcome) -> ExecResult<()>
@@ -614,14 +506,14 @@ ExecEngine::execute(&mut self, ExecuteRequest, &mut ExecOutcome) -> ExecResult<(
 │  ├─ RuntimeCache::stamp_digests(&mut self, &CompiledGraph, &RunSchedule)
 │  ├─ RuntimeCache::mark_leaders(&mut self, &CompiledGraph, &RunSchedule)
 │  ├─ RuntimeCache::probe_reuse(&mut self, &CompiledGraph, NodeIdx, &[OutputDemand]) -> bool
-│  │  └─ BlobTarget::probe(&self) -> Option<BlobHeader>                        [I/O] from `Unknown`, and `Holds` under the stamp
+│  │  └─ BlobTarget::covers_demand(self, Arc<Codecs>, demand) -> bool          [I/O] from `Unknown`, and `Holds` under the stamp
 │  └─ RuntimeCache::twin_leader(&self, NodeIdx) -> Option<NodeIdx>
 ├─ Executor::run(&mut self, RunRequest, &mut ExecOutcome)
 │  └─ per node of `process_order`
 │     ├─ task::yield_now()                                              before `Run | Reuse | Twin` only
 │     ├─ ExecFrame::run_node(&mut self, NodeIdx)
 │     │  ├─ ExecFrame::serve_reuse → RuntimeCache::hydrate_reuse -> ReuseOutcome
-│     │  │  └─ BlobTarget::read(&self, Arc<Codecs>, BlobHeader, demand) -> Option<OutputSnapshot>  [I/O]
+│     │  │  └─ BlobTarget::read(self, Arc<Codecs>, demand) -> Option<OutputSnapshot>  [I/O]
 │     │  ├─ ExecFrame::serve_twin
 │     │  └─ ExecFrame::invoke_node
 │     │     ├─ ExecFrame::collect_inputs(&mut self, NodeIdx)
@@ -723,8 +615,7 @@ their satellites (`Before`, `GhostNotes`, `AdmittedGhosts`). Its module doc's "e
 
 Every type a graph names is declared above or kept; `Worker` owns a mailbox and a task handle and
 nothing else, as its tree shows; the event task's two shared edges are `Arc<Mailbox>` and
-`SharedAnyState`, both in the table; `BlobTarget::read` takes the `BlobHeader` that
-`RuntimeCache.probed` keeps and `probe` returns; `GraphLoad` borrows one graph mutably and a
+`SharedAnyState`, both in the table; `GraphLoad` borrows one graph mutably and a
 `Scope` over `decls`, two fields `graph_and_scope` splits; `Worker::exit` returns the `ExitError`
 `worker/error.rs` declares; the predicate `ExecFrame::relieve` hands `RuntimeCache::relieve`
 reads `node_outcomes` and `schedule.states`, which the frame borrows for the run, and the slot the
@@ -744,16 +635,8 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
   the map moved to hashbrown, whose default hasher is no SipHash, and one insert a stamped node a
   run is no cost a custom `Hasher` repays.
 - **Not taken: a disk belief that outlives the value.** It would save a probe for a node whose
-  digest changed, which then runs anyway, and keep a header for the load, which batch 5 keeps per
-  run instead. A failed write, the one state that must outlive the value, is the slot's
+  digest changed, which then runs anyway, and keep a header for the load. A failed write, the one state that must outlive the value, is the slot's
   `BlobState::Failed`.
-- **A blob operation is one blocking closure over `std` I/O, and a codec is synchronous.** A
-  `tokio::fs::File` read is a blocking-pool hop of at most 2 MiB and a copy, and
-  `BufWriter::seek` flushes: about 138 round trips and one extra copy of every byte for a 288 MiB
-  image, each way, by the count of calls and not by a measurement. `common::task::run_blocking`,
-  `common::fs::open` and `common::fs::publish` are the routes. Refused: buffering the `tokio`
-  file, which keeps the hop per refill; a header after the body, which changes the byte layout to
-  save the one seek left.
 - **A belief about disk saves a read only where being wrong costs a recompute.** Refused: trusting
   `Holds` under the stamp with no probe at the sweep, which saves one read per reused frontier
   node per run and turns a blob deleted behind the engine into a node that fails with
@@ -785,24 +668,13 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
   on its instances, the rule darkroom's `title` gives Blender's group node as its source. Refused:
   `Option<String>` with a func node still given its func's name at creation, which removes the
   sentinel and keeps two policies; the empty string as "the compound's".
-- **A blob states a blake3 hash of each payload, checked at every load.** A blob is published by a
-  rename with no sync, and `rename` promises only that the name "will be atomically replaced"
-  ([rename(2)](https://man7.org/linux/man-pages/man2/rename.2.html)), not that the data reached
-  disk; ext4 forces it only for a replace, and only under `auto_da_alloc`
-  ([ext4](https://www.kernel.org/doc/html/latest/admin-guide/ext4.html)). A pixel payload has no
-  redundancy, so one with unwritten blocks decodes as a valid image. blake3 is in the tree and
-  "much faster than MD5, SHA-1, SHA-2, SHA-3, and BLAKE2"
-  ([BLAKE3](https://github.com/BLAKE3-team/BLAKE3)). Cost: one hash pass over each payload, each
-  way, on the blocking pool, not measured here. Refused: a sync of the file before the rename, an
-  `fsync` a stored blob that still misses a later corruption; no check.
-- **A blob keeps its node's name, and an attach sweeps the rest.** The live set was already one
-  blob per node; the sweep bounds the dead set with one `read_dir`. Cost: a node deleted and
-  restored after the next attach recomputes, and twins store their payload twice. Refused: naming
-  by digest under a size cap, as Bazel's disk cache, a content-addressable store that "can be
-  garbage collected" ([remote caching](https://bazel.build/remote/caching)), and sccache, whose
-  "default cache size is 10 gigabytes"
-  ([local cache](https://github.com/mozilla/sccache/blob/main/docs/Local.md)): a cap setting,
-  access times and a collector, a cache policy of its own; leaving it unbounded.
+- **Not taken: the probe's header kept for the load (`RuntimeCache.probed`).** The load reads
+  the header again inside its one blocking closure: a small read the page cache serves, no hop of
+  its own, and it holds the file as it is at the load, where a kept header would meet a blob
+  replaced since the probe as a hash failure and delete it.
+- **The store's bound is a prune, `DiskStore::prune`, not a sweep**, as the worker's flush of
+  every node and the resolver's pass already take that word. A temporary is the store's by the
+  name `common::fs::temporary_destination` reads, so a file of any other name stays.
 - **A set holds a compound's declaration apart from its body.** A scope reads a compound's name,
   description and interface and never its graph, so a graph of the set can change while a scope
   lives, and a load step reads and writes in one method. It amends "a repair reads, then writes":
@@ -823,34 +695,6 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
 # Part 2 — Plan
 
 Each batch leaves the build and the tests green. Whoever addresses an item deletes it.
-
-## Batch 5 — blob and stamp I/O
-
-Files: `data/codec/`, `exec/cache/disk_store/`, `exec/cache/stamp_job/`,
-`exec/cache/runtime_cache/mod.rs`, `internals/blob.rs`, `library/tests.rs`,
-`lens/src/image/codec/mod.rs`, `common/src/fs/mod.rs`, `clippy.toml`, `Cargo.toml` (`async-trait`
-leaves `scenarium`).
-
-- [ ] `disk_store/blob_target/mod.rs:98-106,193-229`, `format/mod.rs:76-139,266-296,353-382` —
-  3 + K round trips to probe, about 8K + 7 to store, each payload byte copied once more. Target:
-  the synchronous codec and format, one `run_blocking` per operation.
-- [ ] `format/mod.rs:19-26,46-49` — a read checks magic, version, digest, id and lengths, and no
-  payload byte: a blob with unwritten blocks is served as a hit. Target: `payload_hash`,
-  `PayloadWriter`, `PayloadReader`, `FrameError::PayloadHash`. Tests: one flipped payload byte,
-  and a zeroed tail, are each a miss that removes the blob; a codec that reads less than its
-  payload still has the whole payload hashed.
-- [ ] `format/mod.rs:99` — a `debug_assert_eq!` that flushes and seeks. Target: gone with the seek.
-- [ ] `runtime_cache/mod.rs` `probe_reuse`, `hydrate_reuse` — the probe's header is read again
-  at the load. Target: `RuntimeCache.probed`, passed to `BlobTarget::read`.
-- [ ] `runtime_cache/mod.rs:178-180` — one `remove_file` hop per cone node. Target:
-  `DiskStore::remove_nodes`.
-- [ ] `disk_store/mod.rs:25-78` — no bound on dead blobs. Target: `DiskStore::sweep`,
-  `ExecEngine.sweep_owed`. Tests: a blob of a removed node and a temp file over `STALE_TEMP` old
-  are gone after an attach, a fresh temp file and each live node's blob stay; a store attached
-  with no program removes nothing until the install.
-- [ ] `stamp_job/mod.rs:152-205` — two passes, two `PathBuf`s and a path-walk stat per file.
-  Target: one pass, `names` and `WalkedFile`, `common::fs::entry_metadata`.
-- [ ] `format/tests.rs:41-101` — a 60-line chunked async double. Target: gone; a `Cursor`.
 
 ## Batch 6 — the wiring type and what repeats around it
 

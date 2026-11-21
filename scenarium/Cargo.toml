@@ -13,12 +13,11 @@ common = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 thiserror = { workspace = true }
 strum = { workspace = true }
-tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 futures-util = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
 hashbrown = { workspace = true, features = ["default-hasher", "inline-more", "serde"] }
-async-trait = { workspace = true }
 blake3 = { workspace = true, features = ["std"] }
 
 [features]

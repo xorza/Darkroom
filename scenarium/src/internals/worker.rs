@@ -195,7 +195,9 @@ impl TestWorker {
                 | WorkerReport::Activity(_)
                 | WorkerReport::Progress { .. }
                 | WorkerReport::Error(
-                    WorkerError::CacheEviction { .. } | WorkerError::CacheFlush { .. },
+                    WorkerError::CacheEviction { .. }
+                    | WorkerError::CachePrune { .. }
+                    | WorkerError::CacheFlush { .. },
                 ) => {}
             }
         }

@@ -1,10 +1,9 @@
 //! Streaming disk-cache codec for [`Image`].
 
 use std::borrow::Cow;
-use std::io;
+use std::io::{self, Read, Write};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use common::{Buffer2, DeserializeError, SerdeFormat, USize2};
 use imaginarium::{
     ChannelCount, ChannelLayout, ColorFormat, DescError, InterleavedDesc, PlanarImage, SampleType,
@@ -12,7 +11,6 @@ use imaginarium::{
 use lumos::{FlatGain, FrameDescError, FrameGain, ImageMetadata, PixelFlags, frame_desc};
 use scenarium::{CodecError, CustomType, CustomValue, CustomValueCodec};
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::image;
 use crate::image::{Image, Pixels};
@@ -81,18 +79,13 @@ enum DecodeError {
     PlanarFormat(ColorFormat),
 }
 
-#[async_trait]
 impl CustomValueCodec for ImageCodec {
     fn version(&self) -> u32 {
         VERSION
     }
 
     /// The header, the record, the samples in the order the record names, then the flag plane.
-    async fn encode(
-        &self,
-        value: &dyn CustomValue,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
-    ) -> Result<(), CodecError> {
+    fn encode(&self, value: &dyn CustomValue, writer: &mut dyn Write) -> Result<(), CodecError> {
         let image = value
             .downcast_ref::<Image>()
             .expect("ImageCodec is only registered for the Image type");
@@ -106,35 +99,33 @@ impl CustomValueCodec for ImageCodec {
             flagged: image.flags.is_some(),
         };
         let record = SerdeFormat::Bitcode.serialize(&record)?;
-        writer
-            .write_all(&header(image.desc(), record.len()))
-            .await?;
-        writer.write_all(&record).await?;
+        writer.write_all(&header(image.desc(), record.len()))?;
+        writer.write_all(&record)?;
         match &image.pixels {
-            Pixels::Interleaved(samples) => writer.write_all(samples.bytes()).await?,
+            Pixels::Interleaved(samples) => writer.write_all(samples.bytes())?,
             Pixels::Planar(planes) => {
                 let mut chunk = vec![0_u8; PLANE_CHUNK];
                 for plane in planes.planes() {
-                    write_plane(writer, plane.pixels(), &mut chunk).await?;
+                    write_plane(writer, plane.pixels(), &mut chunk)?;
                 }
             }
         }
         if let Some(flags) = &image.flags {
-            writer.write_all(flags.bytes()).await?;
+            writer.write_all(flags.bytes())?;
         }
         Ok(())
     }
 
-    async fn decode(
+    fn decode(
         &self,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut dyn Read,
         byte_len: u64,
     ) -> Result<Arc<dyn CustomValue>, CodecError> {
         if byte_len < HEADER_LEN {
             return Err(DecodeError::Short { byte_len }.into());
         }
         let mut header = [0; HEADER_LEN as usize];
-        reader.read_exact(&mut header).await?;
+        reader.read_exact(&mut header)?;
         let color_format =
             format_from_bytes([header[0], header[1]]).ok_or(DecodeError::UnknownFormat)?;
         let width = usize::try_from(u64::from_le_bytes(header[2..10].try_into().unwrap()))
@@ -147,7 +138,7 @@ impl CustomValueCodec for ImageCodec {
         }
         let mut record =
             vec![0; usize::try_from(record_len).map_err(|_| DecodeError::RecordLenOverflow)?];
-        reader.read_exact(&mut record).await?;
+        reader.read_exact(&mut record)?;
         let record: ImageRecord<'static> = SerdeFormat::Bitcode
             .deserialize(&record)
             .map_err(DecodeError::from)?;
@@ -189,17 +180,17 @@ impl CustomValueCodec for ImageCodec {
         let pixels = match record.order {
             SampleOrder::Interleaved => {
                 let mut bytes = vec![0; pixel_len];
-                reader.read_exact(&mut bytes).await?;
+                reader.read_exact(&mut bytes)?;
                 Pixels::Interleaved(
                     imaginarium::InterleavedImage::new_with_data(desc, bytes)
                         .expect("the payload's length is the descriptor's"),
                 )
             }
-            SampleOrder::Planar => Pixels::Planar(read_planes(reader, desc).await?),
+            SampleOrder::Planar => Pixels::Planar(read_planes(reader, desc)?),
         };
         let flags = if record.flagged {
             let mut bytes = vec![0; pixel_count];
-            reader.read_exact(&mut bytes).await?;
+            reader.read_exact(&mut bytes)?;
             let flags = PixelFlags::from_bytes(Buffer2::new(desc.size(), bytes))
                 .ok_or(DecodeError::EmptyFlags)?;
             Some(flags)
@@ -216,10 +207,7 @@ impl CustomValueCodec for ImageCodec {
 }
 
 /// The planes of an image of `desc`, read from `reader`.
-async fn read_planes(
-    reader: &mut (dyn AsyncRead + Unpin + Send),
-    desc: InterleavedDesc,
-) -> Result<PlanarImage, CodecError> {
+fn read_planes(reader: &mut dyn Read, desc: InterleavedDesc) -> Result<PlanarImage, CodecError> {
     let layout = match desc.color_format() {
         ColorFormat::MONO_F32 => ChannelLayout::Mono,
         ColorFormat::RGB_F32 => ChannelLayout::Rgb,
@@ -229,7 +217,7 @@ async fn read_planes(
     let mut chunk = vec![0_u8; PLANE_CHUNK];
     let mut planes = Vec::with_capacity(layout.count());
     for _ in 0..layout.count() {
-        planes.push(read_plane(reader, planar_desc.pixel_count(), &mut chunk).await?);
+        planes.push(read_plane(reader, planar_desc.pixel_count(), &mut chunk)?);
     }
     Ok(PlanarImage::from_planar_channels(planar_desc, planes))
 }
@@ -249,33 +237,25 @@ fn extent(len: usize) -> u64 {
 }
 
 /// One plane as little-endian `f32`s, a `chunk` at a time.
-async fn write_plane(
-    writer: &mut (dyn AsyncWrite + Unpin + Send),
-    plane: &[f32],
-    chunk: &mut [u8],
-) -> io::Result<()> {
+fn write_plane(writer: &mut dyn Write, plane: &[f32], chunk: &mut [u8]) -> io::Result<()> {
     for samples in plane.chunks(PLANE_CHUNK / size_of::<f32>()) {
         let (words, _) = chunk.as_chunks_mut::<{ size_of::<f32>() }>();
         for (bytes, sample) in words.iter_mut().zip(samples) {
             *bytes = sample.to_le_bytes();
         }
-        writer.write_all(&chunk[..size_of_val(samples)]).await?;
+        writer.write_all(&chunk[..size_of_val(samples)])?;
     }
     Ok(())
 }
 
 /// `count` little-endian `f32`s into a plane allocated once at its size, a
 /// `chunk` at a time.
-async fn read_plane(
-    reader: &mut (dyn AsyncRead + Unpin + Send),
-    count: usize,
-    chunk: &mut [u8],
-) -> io::Result<Vec<f32>> {
+fn read_plane(reader: &mut dyn Read, count: usize, chunk: &mut [u8]) -> io::Result<Vec<f32>> {
     let mut plane = Vec::with_capacity(count);
     let mut remaining = count * size_of::<f32>();
     while remaining > 0 {
         let len = remaining.min(PLANE_CHUNK);
-        reader.read_exact(&mut chunk[..len]).await?;
+        reader.read_exact(&mut chunk[..len])?;
         plane.extend(
             chunk[..len]
                 .as_chunks::<{ size_of::<f32>() }>()

@@ -10,6 +10,7 @@ use common::{CancelToken, is_debug};
 
 use crate::data::ram_usage::RamUsage;
 use crate::exec::cache::disk_store::DiskStore;
+use crate::exec::cache::disk_store::error::PruneError;
 use crate::exec::cache::runtime_cache::RuntimeCache;
 use crate::exec::cache::runtime_cache::cache_flush_report::CacheFlushReport;
 use crate::exec::cache::runtime_cache::error::CacheNodeFailure;
@@ -57,6 +58,8 @@ pub(crate) struct ExecEngine {
     ram_headroom: u64,
     /// Where the allocatable memory is read.
     memory: MemoryProbe,
+    /// The attached store has not been pruned against a program yet.
+    prune_owed: bool,
 }
 
 /// One run as a host asks for it: what to seed, where live feedback goes, and
@@ -106,8 +109,21 @@ impl ExecEngine {
         self.cache.measure_resident_ram()
     }
 
+    /// Attach `disk_store`, which owes a [`prune_store`](Self::prune_store).
     pub(crate) fn set_disk_store(&mut self, disk_store: DiskStore) {
         self.cache.set_disk_store(disk_store);
+        self.prune_owed = true;
+    }
+
+    /// Prune the attached store against the installed program, once a store is attached: at the
+    /// attach when a program is installed, else at the first install after it. Never against the
+    /// empty program, which names no blob and would empty the folder. Answers what would not go.
+    pub(crate) async fn prune_store(&mut self) -> Vec<PruneError> {
+        if !self.prune_owed || self.is_empty() {
+            return Vec::new();
+        }
+        self.prune_owed = false;
+        self.cache.prune_store(&self.compiled).await
     }
 
     /// Keep `bytes` of memory free for everything else; see [`Self::ram_headroom`].

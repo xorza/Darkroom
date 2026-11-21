@@ -60,6 +60,20 @@ pub struct RemovalError {
     pub source: io::Error,
 }
 
+/// What a prune of a store could not do.
+#[derive(Debug, thiserror::Error)]
+pub enum PruneError {
+    /// The store's folder would not list, so nothing in it was weighed.
+    #[error("could not list {}", path.display())]
+    List {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error(transparent)]
+    Remove(#[from] RemovalError),
+}
+
 /// What the blob format itself rejected — distinct from [`CodecError`], which
 /// is whatever an individual codec handed back and which this wraps.
 #[derive(Debug, thiserror::Error)]
@@ -116,6 +130,10 @@ pub enum FrameError {
     PayloadLen { actual: u64, expected: u64 },
     #[error("cached payload decoder did not consume its complete region")]
     PayloadNotConsumed,
+    /// The payload's bytes do not hash to what its descriptor states: a blob whose blocks were
+    /// not all written, or were changed since.
+    #[error("cached output {output_idx}'s payload does not hash to its descriptor's")]
+    PayloadHash { output_idx: usize },
     #[error("cached string length overflow")]
     StringLenOverflow,
     #[error("cached string does not fit in memory")]

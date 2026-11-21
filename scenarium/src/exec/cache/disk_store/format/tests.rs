@@ -1,18 +1,11 @@
-use std::io;
 use std::io::Cursor;
-use std::io::SeekFrom;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
-use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
 use crate::data::const_value::ConstValue;
 use crate::data::dynamic_value::DynamicValue;
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::disk_store::error::{CodecFormatError, FrameError};
 use crate::exec::cache::disk_store::format::{
-    BODY_LEN_OFFSET, BlobReader, BlobWriter, DESC_LEN, FIXED_LEN, FORMAT_VERSION,
-    PAYLOAD_LEN_OFFSET, header_len,
+    BlobReader, BlobWriter, COUNT_OFFSET, DESC_LEN, FIXED_LEN, FORMAT_VERSION, header_len,
 };
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::NodeId;
@@ -37,71 +30,11 @@ fn demand(output_count: usize, produced: &[usize]) -> Vec<OutputDemand> {
     demand
 }
 
-#[derive(Debug)]
-struct ChunkedIo<T, const N: usize>(T);
+/// Where a descriptor's payload length sits in it.
+const PAYLOAD_LEN_OFFSET: usize = 1 + 3 + 16 + 4;
 
-impl<T, const N: usize> AsyncRead for ChunkedIo<T, N>
-where
-    T: AsyncRead + Unpin,
-{
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        output: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        if output.remaining() == 0 {
-            return Poll::Ready(Ok(()));
-        }
-        let mut bytes = [0; N];
-        let mut limited = ReadBuf::new(&mut bytes[..output.remaining().min(N)]);
-        match Pin::new(&mut self.get_mut().0).poll_read(cx, &mut limited) {
-            Poll::Ready(Ok(())) => {
-                output.put_slice(limited.filled());
-                Poll::Ready(Ok(()))
-            }
-            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-impl<T, const N: usize> AsyncWrite for ChunkedIo<T, N>
-where
-    T: AsyncWrite + Unpin,
-{
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        bytes: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        let chunk_len = bytes.len().min(N);
-        Pin::new(&mut self.get_mut().0).poll_write(cx, &bytes[..chunk_len])
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut().0).poll_flush(cx)
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut().0).poll_shutdown(cx)
-    }
-}
-
-impl<T, const N: usize> AsyncSeek for ChunkedIo<T, N>
-where
-    T: AsyncSeek + Unpin,
-{
-    fn start_seek(self: Pin<&mut Self>, pos: SeekFrom) -> io::Result<()> {
-        Pin::new(&mut self.get_mut().0).start_seek(pos)
-    }
-
-    fn poll_complete(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
-        Pin::new(&mut self.get_mut().0).poll_complete(cx)
-    }
-}
-
-async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) -> Vec<u8> {
-    let mut writer = ChunkedIo::<_, 3>(Cursor::new(Vec::new()));
+fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) -> Vec<u8> {
+    let mut writer = Cursor::new(Vec::new());
     BlobWriter {
         writer: &mut writer,
         program_id: node(),
@@ -109,17 +42,16 @@ async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) ->
         codecs: library.codecs(),
     }
     .write(outputs)
-    .await
     .unwrap();
-    writer.0.into_inner()
+    writer.into_inner()
 }
 
 /// One small blob's exact bytes, written out by hand from the layout rather than from the
 /// format's own constants. They move only when the layout changes on purpose, which must also
 /// bump `FORMAT_VERSION`; any other failure is accidental drift, which would make every blob on
 /// disk unreadable or read with the wrong meaning.
-#[tokio::test]
-async fn a_small_blob_has_the_pinned_layout() {
+#[test]
+fn a_small_blob_has_the_pinned_layout() {
     let library = BlobCodec::versioned(7, Calls::default()).library();
     let outputs = [
         DynamicValue::Unbound,
@@ -127,13 +59,20 @@ async fn a_small_blob_has_the_pinned_layout() {
         DynamicValue::Static(ConstValue::String("ab".into())),
         DynamicValue::from_custom(Blob(vec![10, 11])),
     ];
-    let bytes = encoded(Digest([0xab; 32]), &outputs, &library).await;
+    let bytes = encoded(Digest([0xab; 32]), &outputs, &library);
 
+    // Int: tag 2, -2 as little-endian two's complement.
+    let int: &[u8] = &[2, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    // String: tag 4, its byte length, its bytes.
+    let string: &[u8] = &[4, 2, 0, 0, 0, 0, 0, 0, 0, b'a', b'b'];
+    // The custom payload, as the codec wrote it.
+    let custom: &[u8] = &[10, 11];
+    let hash = |payload: &[u8]| *blake3::hash(payload).as_bytes();
     #[rustfmt::skip]
     let expected: Vec<u8> = [
-        // Magic, format version 11, the digest.
+        // Magic, format version 12, the digest.
         &b"SCENBLOB"[..],
-        &[11, 0, 0, 0],
+        &[12, 0, 0, 0],
         &[0xab; 32],
         // The path: one id, node 7 little-endian, then seven nil ids.
         &[1],
@@ -144,20 +83,17 @@ async fn a_small_blob_has_the_pinned_layout() {
         // Body length: 9 (Int) + 11 (String) + 2 (Blob).
         &[22, 0, 0, 0, 0, 0, 0, 0],
         // One descriptor per output: tag, three zero bytes, the custom type id (16, little-endian),
-        // its codec version (4), the payload length (8).
-        &[0; 32],
-        &[1, 0, 0, 0], &[0; 16], &[0; 4], &[9, 0, 0, 0, 0, 0, 0, 0],
-        &[1, 0, 0, 0], &[0; 16], &[0; 4], &[11, 0, 0, 0, 0, 0, 0, 0],
+        // its codec version (4), the payload length (8), the payload's blake3 hash (32).
+        &[0; 32], &hash(&[]),
+        &[1, 0, 0, 0], &[0; 16], &[0; 4], &[9, 0, 0, 0, 0, 0, 0, 0], &hash(int),
+        &[1, 0, 0, 0], &[0; 16], &[0; 4], &[11, 0, 0, 0, 0, 0, 0, 0], &hash(string),
         &[2, 0, 0, 0],
         // The blob type, 78391861-24da-4368-a3a5-2a6b7a47f112, little-endian.
         &[0x12, 0xf1, 0x47, 0x7a, 0x6b, 0x2a, 0xa5, 0xa3, 0x68, 0x43, 0xda, 0x24, 0x61, 0x18, 0x39, 0x78],
-        &[7, 0, 0, 0], &[2, 0, 0, 0, 0, 0, 0, 0],
-        // Int: tag 2, -2 as little-endian two's complement.
-        &[2, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
-        // String: tag 4, its byte length, its bytes.
-        &[4, 2, 0, 0, 0, 0, 0, 0, 0, b'a', b'b'],
-        // The custom payload, as the codec wrote it.
-        &[10, 11],
+        &[7, 0, 0, 0], &[2, 0, 0, 0, 0, 0, 0, 0], &hash(custom),
+        int,
+        string,
+        custom,
     ]
     .concat();
     assert_eq!(bytes, expected);
@@ -165,16 +101,16 @@ async fn a_small_blob_has_the_pinned_layout() {
 
 /// A blob holds the path it was written for, and a reader for another node finds no value in it,
 /// as for another digest: a name two paths share serves neither the other's value.
-#[tokio::test]
-async fn a_blob_of_another_node_serves_nothing() {
+#[test]
+fn a_blob_of_another_node_serves_nothing() {
     let library = BlobCodec::versioned(7, Calls::default()).library();
     let digest = Digest([5; 32]);
     let outputs = [DynamicValue::Static(ConstValue::Int(3))];
-    let bytes = encoded(digest, &outputs, &library).await;
+    let bytes = encoded(digest, &outputs, &library);
     let read = |program_id| {
         let bytes = &bytes;
         let library = &library;
-        async move {
+        {
             BlobReader {
                 reader: &mut Cursor::new(bytes),
                 file_len: bytes.len() as u64,
@@ -183,23 +119,22 @@ async fn a_blob_of_another_node_serves_nothing() {
                 codecs: library.codecs(),
             }
             .read(&demand(1, &[0]))
-            .await
             .unwrap()
         }
     };
-    assert!(read(node()).await.is_some(), "its own node reads it");
+    assert!(read(node()).is_some(), "its own node reads it");
     let inner = InstancePath::MAIN
         .child(node().node_id())
         .node(NodeId::from_u128(9));
-    assert!(read(inner).await.is_none(), "a node inside it does not");
+    assert!(read(inner).is_none(), "a node inside it does not");
     assert!(
-        read(ProgramId::from(NodeId::from_u128(8))).await.is_none(),
+        read(ProgramId::from(NodeId::from_u128(8))).is_none(),
         "another node does not"
     );
 }
 
-#[tokio::test]
-async fn indexed_header_checks_without_body_and_all_values_round_trip() {
+#[test]
+fn indexed_header_checks_without_body_and_all_values_round_trip() {
     let calls = Calls::default();
     let library = BlobCodec::versioned(7, calls.clone()).library();
     let digest = Digest([3; 32]);
@@ -229,7 +164,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         DynamicValue::from_custom(Blob(second_blob.clone())),
         DynamicValue::Static(ConstValue::Int(99)),
     ];
-    let bytes = encoded(digest, &outputs, &library).await;
+    let bytes = encoded(digest, &outputs, &library);
     let header_len = header_len(outputs.len());
 
     let mut header_only = Cursor::new(&bytes[..header_len]);
@@ -242,7 +177,6 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
             codecs: library.codecs()
         }
         .covers_outputs(&outputs)
-        .await
         .unwrap()
     );
     assert_eq!(header_only.position() as usize, header_len);
@@ -256,13 +190,12 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
             codecs: library.codecs()
         }
         .read(&demand(outputs.len(), &[0]))
-        .await
         .unwrap()
         .is_none()
     );
     assert_eq!(calls.count(), 0);
 
-    let mut reader = ChunkedIo::<_, 2>(Cursor::new(&bytes));
+    let mut reader = Cursor::new(&bytes);
     let restored = BlobReader {
         reader: &mut reader,
         file_len: bytes.len() as u64,
@@ -271,7 +204,6 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         codecs: library.codecs(),
     }
     .read(&demand(outputs.len(), &[]))
-    .await
     .unwrap()
     .unwrap();
     assert_eq!(restored.len(), outputs.len());
@@ -296,16 +228,16 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
     assert_eq!(calls.count(), 2);
 }
 
-#[tokio::test]
-async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
+#[test]
+fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     let digest = Digest([4; 32]);
     let outputs = vec![
         DynamicValue::from_custom(Blob(vec![10, 11, 12])),
         DynamicValue::Static(ConstValue::Int(77)),
     ];
     let calls = Calls::default();
-    let complete_library = BlobCodec::versioned(1, calls.clone()).library();
-    let bytes = encoded(digest, &outputs, &complete_library).await;
+    let complete_library = BlobCodec::versioned(1, calls).library();
+    let bytes = encoded(digest, &outputs, &complete_library);
     let restored = BlobReader {
         reader: &mut Cursor::new(&bytes),
         file_len: bytes.len() as u64,
@@ -314,7 +246,6 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         codecs: complete_library.codecs(),
     }
     .read(&demand(outputs.len(), &[]))
-    .await
     .unwrap()
     .unwrap();
     assert_eq!(
@@ -337,17 +268,74 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         codecs: underread_library.codecs(),
     }
     .read(&demand(outputs.len(), &[]))
-    .await
     .unwrap_err();
     assert!(matches!(
         error,
         CodecFormatError::Frame(FrameError::PayloadNotConsumed)
     ));
     assert_eq!(underread_calls.count(), 1);
+
+    // The decoder reads none of the custom payload, and its last byte changed: the whole payload
+    // is still hashed, so the change is named, not the short read.
+    let mut changed_tail = bytes;
+    changed_tail[header_len(outputs.len()) + 2] ^= 1;
+    let error = BlobReader {
+        reader: &mut Cursor::new(&changed_tail),
+        file_len: changed_tail.len() as u64,
+        program_id: node(),
+        digest,
+        codecs: underread_library.codecs(),
+    }
+    .read(&demand(outputs.len(), &[]))
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            CodecFormatError::Frame(FrameError::PayloadHash { output_idx: 0 })
+        ),
+        "{error}"
+    );
 }
 
-#[tokio::test]
-async fn descriptors_selectively_validate_codecs_and_coverage() {
+/// A payload is held to the hash its descriptor states: one flipped bit, or a tail of zeros as a
+/// write cut short by a power loss leaves, is refused, naming the output, though every value
+/// still decodes.
+#[test]
+fn a_payload_that_no_longer_hashes_as_written_is_refused() {
+    let digest = Digest([8; 32]);
+    let library = BlobCodec::versioned(1, Calls::default()).library();
+    let outputs = [
+        DynamicValue::Static(ConstValue::Int(5)),
+        DynamicValue::from_custom(Blob(vec![1, 2, 3, 4])),
+    ];
+    let bytes = encoded(digest, &outputs, &library);
+    let body = header_len(outputs.len());
+    // The Int's payload is 9 bytes, so the blob's 4 follow it.
+    let custom = body + 9;
+
+    let mut flipped = bytes.clone();
+    flipped[body + 1] ^= 0x10;
+    let mut zeroed = bytes;
+    zeroed[custom + 2..].fill(0);
+    for (bytes, output_idx) in [(&flipped, 0), (&zeroed, 1)] {
+        let error = BlobReader {
+            reader: &mut Cursor::new(bytes),
+            file_len: bytes.len() as u64,
+            program_id: node(),
+            digest,
+            codecs: library.codecs(),
+        }
+        .read(&demand(outputs.len(), &[]))
+        .unwrap_err();
+        assert!(
+            matches!(&error, CodecFormatError::Frame(FrameError::PayloadHash { output_idx: idx }) if *idx == output_idx),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn descriptors_selectively_validate_codecs_and_coverage() {
     let digest = Digest([5; 32]);
     let calls = Calls::default();
     let registered = BlobCodec::versioned(2, calls).library();
@@ -355,7 +343,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
         DynamicValue::Static(ConstValue::Int(1)),
         DynamicValue::from_custom(Blob(vec![2])),
     ];
-    let bytes = encoded(digest, &outputs, &registered).await;
+    let bytes = encoded(digest, &outputs, &registered);
 
     assert!(
         BlobReader {
@@ -366,7 +354,6 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             codecs: registered.codecs()
         }
         .covers_outputs(&outputs)
-        .await
         .unwrap()
     );
     let partial = vec![
@@ -382,7 +369,6 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             codecs: registered.codecs()
         }
         .covers_outputs(&partial)
-        .await
         .unwrap()
     );
     let wrong_kind = vec![
@@ -398,7 +384,6 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             codecs: registered.codecs()
         }
         .covers_outputs(&wrong_kind)
-        .await
         .unwrap()
     );
 
@@ -413,26 +398,25 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             codecs: changed.codecs()
         }
         .covers_outputs(&outputs)
-        .await
         .unwrap()
     );
     assert_eq!(changed_calls.count(), 0);
 }
 
-#[tokio::test]
-async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
+#[test]
+fn malformed_header_lengths_tags_and_const_values_are_rejected() {
     let digest = Digest([6; 32]);
     let outputs = vec![DynamicValue::Static(ConstValue::Bool(true))];
     let library = Library::default();
-    let original = encoded(digest, &outputs, &library).await;
+    let original = encoded(digest, &outputs, &library);
 
     let corrupt = |edit: &dyn Fn(&mut Vec<u8>)| {
         let mut bytes = original.clone();
         edit(&mut bytes);
         bytes
     };
-    let length_offset = FIXED_LEN + PAYLOAD_LEN_OFFSET as usize;
-    let body_offset = BODY_LEN_OFFSET as usize;
+    let length_offset = FIXED_LEN + PAYLOAD_LEN_OFFSET;
+    let body_offset = COUNT_OFFSET + 4;
     let cases: [(FrameError, Vec<u8>); 7] = [
         (FrameError::WrongMagic, corrupt(&|b| b[0] ^= 0xff)),
         (
@@ -463,7 +447,6 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
             codecs: library.codecs(),
         }
         .covers_outputs(&outputs)
-        .await
         .unwrap_err();
         assert!(
             matches!(&error, CodecFormatError::Frame(frame) if *frame == refusal),
@@ -471,22 +454,33 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
         );
     }
 
+    // A boolean of 2: under the hash it was written with, the change is what is named, though
+    // the decode fails on it too; under a hash of the bytes as they stand, as a writer that
+    // wrote it would state, the decode's own refusal is.
+    let body = header_len(1);
     let mut invalid_bool = original.clone();
-    invalid_bool[header_len(1) + 1] = 2;
-    let error = BlobReader {
-        reader: &mut Cursor::new(&invalid_bool),
-        file_len: invalid_bool.len() as u64,
-        program_id: node(),
-        digest,
-        codecs: library.codecs(),
+    invalid_bool[body + 1] = 2;
+    let mut rehashed = invalid_bool.clone();
+    let hash = *blake3::hash(&rehashed[body..]).as_bytes();
+    rehashed[FIXED_LEN + PAYLOAD_LEN_OFFSET + 8..FIXED_LEN + DESC_LEN].copy_from_slice(&hash);
+    for (bytes, refusal) in [
+        (&invalid_bool, FrameError::PayloadHash { output_idx: 0 }),
+        (&rehashed, FrameError::InvalidBool),
+    ] {
+        let error = BlobReader {
+            reader: &mut Cursor::new(bytes),
+            file_len: bytes.len() as u64,
+            program_id: node(),
+            digest,
+            codecs: library.codecs(),
+        }
+        .read(&demand(outputs.len(), &[]))
+        .unwrap_err();
+        assert!(
+            matches!(&error, CodecFormatError::Frame(frame) if *frame == refusal),
+            "{refusal}: {error}"
+        );
     }
-    .read(&demand(outputs.len(), &[]))
-    .await
-    .unwrap_err();
-    assert!(matches!(
-        error,
-        CodecFormatError::Frame(FrameError::InvalidBool)
-    ));
 
-    assert_eq!(DESC_LEN, 32);
+    assert_eq!(DESC_LEN, 64);
 }

@@ -5,17 +5,11 @@
 pub(crate) mod file_identity;
 pub(crate) mod temp_dir;
 
-use std::fs::{self, File, Metadata, OpenOptions, Permissions, ReadDir};
+use std::fs::{self, DirEntry, File, Metadata, OpenOptions, Permissions, ReadDir};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::task::{Context, Poll};
-
-use tokio::fs as tokio_fs;
-use tokio::io::{AsyncSeek, AsyncWrite, AsyncWriteExt as _};
-use tokio::task;
 
 use crate::platform;
 
@@ -61,6 +55,12 @@ pub fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
 
 pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
     fs::read_dir(path)
+}
+
+/// Of a listed entry, as `DirEntry::metadata`: a link itself, not its target. On Unix one
+/// `fstatat` beside the listing; on Windows the listing's own, with no call.
+pub fn entry_metadata(entry: &DirEntry) -> io::Result<Metadata> {
+    entry.metadata()
 }
 
 /// Following a link, as `std::fs::metadata`.
@@ -136,18 +136,6 @@ pub fn create_new(path: impl AsRef<Path>) -> io::Result<File> {
     File::create_new(path)
 }
 
-pub async fn open_async(path: impl AsRef<Path>) -> io::Result<tokio_fs::File> {
-    tokio_fs::File::open(path).await
-}
-
-pub async fn remove_file_async(path: impl AsRef<Path>) -> io::Result<()> {
-    tokio_fs::remove_file(path).await
-}
-
-pub async fn create_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
-    tokio_fs::create_dir_all(path).await
-}
-
 /// Whether publishing a file must survive an abrupt system shutdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PublicationMode {
@@ -198,16 +186,21 @@ impl Drop for Publication {
     }
 }
 
+/// A file that atomically replaces its destination only when [`commit`](Self::commit) succeeds.
+/// Dropping it removes the temporary file and keeps the existing destination. Readers see either
+/// the previous complete file or the new complete file.
 #[derive(Debug)]
-struct SyncAtomicFile {
+pub struct AtomicFile {
     // The handle must close before `Publication` removes the path on Windows.
     file: File,
     publication: Publication,
 }
 
-impl SyncAtomicFile {
-    /// Opens a new temporary beside `destination`; a name another writer holds is skipped.
-    fn new(destination: &Path, mode: PublicationMode) -> io::Result<Self> {
+impl AtomicFile {
+    /// A new temporary beside `destination`, for reading and writing; a name another writer holds
+    /// is skipped.
+    pub fn new(destination: impl AsRef<Path>, mode: PublicationMode) -> io::Result<Self> {
+        let destination = destination.as_ref();
         loop {
             let temporary = temporary_path(destination)?;
             match OpenOptions::new()
@@ -232,13 +225,14 @@ impl SyncAtomicFile {
         }
     }
 
-    fn commit(self) -> io::Result<()> {
+    /// Publish the completed file at its destination.
+    pub fn commit(self) -> io::Result<()> {
         let Self { file, publication } = self;
         publication.commit(file)
     }
 }
 
-impl Write for SyncAtomicFile {
+impl Write for AtomicFile {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.file.write(bytes)
     }
@@ -248,72 +242,19 @@ impl Write for SyncAtomicFile {
     }
 }
 
-impl Seek for SyncAtomicFile {
+impl Seek for AtomicFile {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         self.file.seek(pos)
     }
 }
 
-/// A Tokio file that atomically replaces its destination only when [`commit`](Self::commit)
-/// succeeds. Dropping it removes the temporary file and preserves the existing destination.
-#[derive(Debug)]
-pub struct AtomicFile {
-    // The handle must close before `Publication` removes the path on Windows.
-    file: tokio_fs::File,
-    publication: Publication,
-}
-
-impl AtomicFile {
-    /// Create a writable same-directory temporary file for later atomic commit.
-    pub async fn new(destination: impl AsRef<Path>, mode: PublicationMode) -> io::Result<Self> {
-        let destination = destination.as_ref().to_path_buf();
-        let SyncAtomicFile { file, publication } =
-            task::spawn_blocking(move || SyncAtomicFile::new(&destination, mode))
-                .await
-                .expect("atomic-file create task panicked")?;
-        Ok(Self {
-            file: tokio_fs::File::from_std(file),
-            publication,
-        })
-    }
-
-    /// Atomically publish the completed file at its destination.
-    pub async fn commit(mut self) -> io::Result<()> {
-        self.file.flush().await?;
-        let Self { file, publication } = self;
-        let file = file.into_std().await;
-        task::spawn_blocking(move || publication.commit(file))
-            .await
-            .expect("atomic-file commit task panicked")
-    }
-}
-
-impl AsyncWrite for AtomicFile {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        bytes: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.file).poll_write(cx, bytes)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.file).poll_flush(cx)
-    }
-
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.file).poll_shutdown(cx)
-    }
-}
-
-impl AsyncSeek for AtomicFile {
-    fn start_seek(mut self: Pin<&mut Self>, pos: SeekFrom) -> io::Result<()> {
-        Pin::new(&mut self.file).start_seek(pos)
-    }
-
-    fn poll_complete(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
-        Pin::new(&mut self.file).poll_complete(cx)
-    }
+/// The destination name `name` is the temporary of, when it is one: what [`AtomicFile`] names its
+/// temporary beside the destination, `<destination>.<process id>.<sequence>.tmp`.
+pub fn temporary_destination(name: &str) -> Option<&str> {
+    let is_number = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    let (rest, sequence) = name.strip_suffix(".tmp")?.rsplit_once('.')?;
+    let (destination, process) = rest.rsplit_once('.')?;
+    (is_number(sequence) && is_number(process) && !destination.is_empty()).then_some(destination)
 }
 
 fn temporary_path(destination: &Path) -> io::Result<PathBuf> {
@@ -337,9 +278,8 @@ pub fn publish_bytes(
     publish(path, mode, |file| file.write_all(bytes))
 }
 
-/// Publish a file through a unique same-directory temporary file.
+/// Publish a file through an [`AtomicFile`], in one call.
 ///
-/// Readers see either the previous complete file or the new complete file.
 /// Durable publication synchronizes the file before replacement and the
 /// directory entry after replacement. Cache publication skips those durability
 /// barriers because a lost cache entry can be rebuilt. `write` fails with its own
@@ -350,7 +290,7 @@ pub fn publish<E: From<io::Error>>(
     mode: PublicationMode,
     write: impl FnOnce(&mut File) -> Result<(), E>,
 ) -> Result<(), E> {
-    let mut file = SyncAtomicFile::new(path.as_ref(), mode)?;
+    let mut file = AtomicFile::new(path, mode)?;
     write(&mut file.file)?;
     Ok(file.commit()?)
 }

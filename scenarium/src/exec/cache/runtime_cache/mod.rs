@@ -24,7 +24,7 @@ use crate::data::dynamic_value::DynamicValue;
 use crate::data::ram_usage::RamUsage;
 use crate::exec::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::exec::cache::disk_store::blob_target::BlobTarget;
-use crate::exec::cache::disk_store::error::StoreResult;
+use crate::exec::cache::disk_store::error::{PruneError, StoreResult};
 use crate::exec::cache::disk_store::store_outcome::StoreOutcome;
 use crate::exec::cache::disk_store::{DiskStore, StorePolicy};
 use crate::exec::cache::path_identities::PathIdentities;
@@ -182,19 +182,35 @@ impl RuntimeCache {
                 .into_iter()
                 .filter_map(|program_id| program.node(program_id)),
         );
+        let removals = self
+            .disk_store
+            .remove_nodes(
+                downstream
+                    .into_iter()
+                    .map(|node_idx| program.program_ids[node_idx])
+                    .collect(),
+            )
+            .await;
         let mut failures = Vec::new();
-        for node_idx in downstream {
-            let program_id = program.program_ids[node_idx];
-            match self.disk_store.remove_node(program_id).await {
+        for (node_idx, removal) in downstream.into_iter().zip(removals) {
+            match removal {
                 // The removal just made the belief that a blob backed the value false.
                 Ok(()) => self.slots[node_idx].clear_output(),
                 Err(error) => failures.push(CacheNodeFailure {
-                    program_id,
+                    program_id: program.program_ids[node_idx],
                     cause: error.into(),
                 }),
             }
         }
         failures
+    }
+
+    /// Remove the blobs no node of `program` names, and what writes left behind; see
+    /// [`DiskStore::prune`].
+    pub(crate) async fn prune_store(&self, program: &CompiledGraph) -> Vec<PruneError> {
+        self.disk_store
+            .prune(program.program_ids.iter().copied())
+            .await
     }
 
     /// Measure the RAM held by resident values: the global total, returned, and the per-node
@@ -609,7 +625,11 @@ impl RuntimeCache {
         match self.reuse_source(program, node_idx, demand) {
             None => false,
             Some(ReuseSource::Resident) => true,
-            Some(ReuseSource::Blob(target)) => target.covers_demand(&program.codecs, demand).await,
+            Some(ReuseSource::Blob(target)) => {
+                target
+                    .covers_demand(Arc::clone(&program.codecs), demand.into())
+                    .await
+            }
         }
     }
 
@@ -645,10 +665,14 @@ impl RuntimeCache {
             Some(ReuseSource::Resident) => return ReuseOutcome::Served,
             Some(ReuseSource::Blob(target)) => target,
         };
-        let Some(snapshot) = target.read(&program.codecs, demand).await else {
+        let digest = target.digest;
+        let Some(snapshot) = target
+            .read(Arc::clone(&program.codecs), demand.into())
+            .await
+        else {
             return ReuseOutcome::Missed;
         };
-        self.slots[node_idx].load_from_blob(snapshot, target.digest);
+        self.slots[node_idx].load_from_blob(snapshot, digest);
         ReuseOutcome::Served
     }
 
@@ -705,7 +729,13 @@ impl RuntimeCache {
         ) else {
             return Ok(StoreOutcome::NothingOwed);
         };
-        let outcome = target.store(&program.codecs, snapshot, policy).await;
+        let outcome = target
+            .store(
+                Arc::clone(&program.codecs),
+                snapshot.values().to_vec(),
+                policy,
+            )
+            .await;
         self.slots[node_idx].note_store(&outcome);
         outcome
     }
