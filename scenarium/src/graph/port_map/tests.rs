@@ -115,9 +115,9 @@ fn a_replaced_node_keeps_what_the_map_names_and_ghosts_the_rest() {
     let record = graph.replaced(scope, n(2), node(&library, SHARPEN), &remap);
     assert_eq!(record.node().func_id(), Some(SHARPEN));
     let live: Vec<_> = record
+        .wiring()
         .bindings()
-        .iter()
-        .map(|entry| (entry.port, entry.binding.clone()))
+        .map(|(port, binding)| (port, binding.clone()))
         .collect();
     assert_eq!(
         live,
@@ -219,7 +219,7 @@ fn a_load_moves_a_redirected_funcs_nodes_to_the_func_its_redirects_end_at() {
     let mut set = GraphSet::from(graph);
     let report = set.reconcile(&library, &manifest);
     assert_eq!(
-        report.main.repairs[..2],
+        report.of(GraphId::Main)[..2],
         [n(2), n(4)].map(|node_id| Repair::Redirected {
             node_id,
             from: old_blur,
@@ -229,16 +229,16 @@ fn a_load_moves_a_redirected_funcs_nodes_to_the_func_its_redirects_end_at() {
     let main = set.main();
     assert_eq!(main.find(n(2)).unwrap().func_id(), Some(SHARPEN));
     assert_eq!(
-        main.bindings.get(&InputPort::new(n(2), p(5))),
+        main.wiring().binding(InputPort::new(n(2), p(5))),
         Some(&Binding::wire(n(1), p(1)))
     );
     assert_eq!(
-        main.bindings.get(&InputPort::new(n(3), p(1))),
+        main.wiring().binding(InputPort::new(n(3), p(1))),
         Some(&Binding::wire(n(2), p(1)))
     );
     assert_eq!(main.find(n(4)).unwrap().func_id(), Some(SHARPEN));
     assert_eq!(
-        main.bindings.get(&InputPort::new(n(4), p(5))),
+        main.wiring().binding(InputPort::new(n(4), p(5))),
         Some(&Binding::wire(n(1), p(1))),
         "the ghost node's ghost wire is live again on its new port"
     );

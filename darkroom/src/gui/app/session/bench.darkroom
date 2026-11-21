@@ -11,7 +11,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "brightness_contrast",
+                        name: Some("brightness_contrast"),
                         disabled: false,
                     ),
                     ("0d921c89-28c0-445f-a759-33f28164085e"): (
@@ -22,7 +22,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "save_image",
+                        name: Some("save_image"),
                         disabled: true,
                     ),
                     ("12981187-f976-4192-8f54-bc3c4523544e"): (
@@ -33,7 +33,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "build_masters",
+                        name: Some("build_masters"),
                         disabled: false,
                     ),
                     ("20380988-300d-4857-af58-7497acd6848a"): (
@@ -44,7 +44,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "Concat",
+                        name: Some("Concat"),
                         disabled: false,
                     ),
                     ("2067de48-57e0-4900-b589-32320647bb55"): (
@@ -55,7 +55,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "ml_denoise",
+                        name: Some("ml_denoise"),
                         disabled: false,
                     ),
                     ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"): (
@@ -66,7 +66,7 @@
                                 disk: true,
                             ),
                         ),
-                        name: "stack_lights",
+                        name: Some("stack_lights"),
                         disabled: false,
                     ),
                     ("2b827f10-a3a1-4d54-bb25-a40133b3a18c"): (
@@ -77,7 +77,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "print",
+                        name: Some("print"),
                         disabled: false,
                     ),
                     ("41884f76-a80f-4bb9-82c4-83e5016d37a9"): (
@@ -88,7 +88,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "Preview",
+                        name: Some("Preview"),
                         disabled: false,
                     ),
                     ("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc"): (
@@ -99,7 +99,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "Run on Event",
+                        name: Some("Run on Event"),
                         disabled: false,
                     ),
                     ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"): (
@@ -110,7 +110,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "frame event",
+                        name: Some("frame event"),
                         disabled: false,
                     ),
                     ("609d124e-47c7-43c1-adef-32db510ac421"): (
@@ -121,7 +121,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "save_image",
+                        name: Some("save_image"),
                         disabled: true,
                     ),
                     ("7e110fc6-8391-48bc-b07b-c970827bcdd2"): (
@@ -132,7 +132,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "auto_stretch",
+                        name: Some("auto_stretch"),
                         disabled: false,
                     ),
                     ("8c44e556-5072-44fc-8802-9ae2feec2421"): (
@@ -143,7 +143,7 @@
                                 disk: true,
                             ),
                         ),
-                        name: "ml_denoise",
+                        name: Some("ml_denoise"),
                         disabled: false,
                     ),
                     ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"): (
@@ -154,7 +154,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "scnr",
+                        name: Some("scnr"),
                         disabled: false,
                     ),
                     ("e156726f-3c5b-4d41-bbeb-380773608e40"): (
@@ -165,7 +165,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "blend",
+                        name: Some("blend"),
                         disabled: false,
                     ),
                     ("efc228bd-27f8-455a-8e22-97dbd688a2c6"): (
@@ -176,7 +176,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "brightness_contrast",
+                        name: Some("brightness_contrast"),
                         disabled: false,
                     ),
                     ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"): (
@@ -187,7 +187,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "save_image",
+                        name: Some("save_image"),
                         disabled: true,
                     ),
                     ("f74c1e36-8888-4301-95b1-95e194e106c7"): (
@@ -198,7 +198,7 @@
                                 disk: true,
                             ),
                         ),
-                        name: "remove_stars",
+                        name: Some("remove_stars"),
                         disabled: false,
                     ),
                     ("fabb092d-f756-441d-b6f5-1d1e629beda1"): (
@@ -209,7 +209,7 @@
                                 disk: false,
                             ),
                         ),
-                        name: "blend",
+                        name: Some("blend"),
                         disabled: false,
                     ),
                     ("fd576928-3f2a-4ba9-9d38-1be67824652f"): (
@@ -220,350 +220,352 @@
                                 disk: false,
                             ),
                         ),
-                        name: "brightness_contrast",
+                        name: Some("brightness_contrast"),
                         disabled: false,
                     ),
                 },
-                bindings: [
-                    ((
-                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                        port: 2,
-                    ), Const(Float(0.2))),
-                    ((
-                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                        port: 3,
-                    ), Const(Float(1.6))),
-                    ((
-                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                        port: 4,
-                    ), Const(Enum("Black"))),
-                    ((
-                        node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
-                        port: 2,
-                    ), Const(FsPath("output/img.png"))),
-                    ((
-                        node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
-                        port: 3,
-                    ), Const(Enum("RGB u8"))),
-                    ((
-                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                        port: 1,
-                    ), Const(FsPaths([
-                        "inputs/darks/frame_001.raw",
-                        "inputs/darks/frame_002.raw",
-                        "inputs/darks/frame_003.raw",
-                        "inputs/darks/frame_004.raw",
-                        "inputs/darks/frame_005.raw",
-                        "inputs/darks/frame_006.raw",
-                        "inputs/darks/frame_007.raw",
-                        "inputs/darks/frame_008.raw",
-                        "inputs/darks/frame_009.raw",
-                        "inputs/darks/frame_010.raw",
-                        "inputs/darks/frame_011.raw",
-                        "inputs/darks/frame_012.raw",
-                        "inputs/darks/frame_013.raw",
-                        "inputs/darks/frame_014.raw",
-                        "inputs/darks/frame_015.raw",
-                    ]))),
-                    ((
-                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                        port: 2,
-                    ), Const(FsPaths([
-                        "inputs/flats/frame_016.raw",
-                        "inputs/flats/frame_017.raw",
-                        "inputs/flats/frame_018.raw",
-                        "inputs/flats/frame_019.raw",
-                        "inputs/flats/frame_020.raw",
-                        "inputs/flats/frame_021.raw",
-                        "inputs/flats/frame_022.raw",
-                        "inputs/flats/frame_023.raw",
-                        "inputs/flats/frame_024.raw",
-                        "inputs/flats/frame_025.raw",
-                        "inputs/flats/frame_026.raw",
-                        "inputs/flats/frame_027.raw",
-                        "inputs/flats/frame_028.raw",
-                        "inputs/flats/frame_029.raw",
-                        "inputs/flats/frame_030.raw",
-                    ]))),
-                    ((
-                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                        port: 3,
-                    ), Const(FsPaths([
-                        "inputs/bias/frame_031.raw",
-                        "inputs/bias/frame_032.raw",
-                        "inputs/bias/frame_033.raw",
-                        "inputs/bias/frame_034.raw",
-                        "inputs/bias/frame_035.raw",
-                        "inputs/bias/frame_036.raw",
-                        "inputs/bias/frame_037.raw",
-                        "inputs/bias/frame_038.raw",
-                        "inputs/bias/frame_039.raw",
-                        "inputs/bias/frame_040.raw",
-                        "inputs/bias/frame_041.raw",
-                        "inputs/bias/frame_042.raw",
-                        "inputs/bias/frame_043.raw",
-                        "inputs/bias/frame_044.raw",
-                        "inputs/bias/frame_045.raw",
-                        "inputs/bias/frame_046.raw",
-                        "inputs/bias/frame_047.raw",
-                        "inputs/bias/frame_048.raw",
-                        "inputs/bias/frame_049.raw",
-                        "inputs/bias/frame_050.raw",
-                    ]))),
-                    ((
-                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                        port: 5,
-                    ), Const(Float(5.0))),
-                    ((
-                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                        port: 6,
-                    ), Const(Bool(true))),
-                    ((
-                        node_id: ("20380988-300d-4857-af58-7497acd6848a"),
-                        port: 1,
-                    ), Const(String("frameNo_"))),
-                    ((
-                        node_id: ("20380988-300d-4857-af58-7497acd6848a"),
-                        port: 2,
-                    ), Wire((
-                        node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
-                        port: 2,
-                    ))),
-                    ((
-                        node_id: ("2067de48-57e0-4900-b589-32320647bb55"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("2067de48-57e0-4900-b589-32320647bb55"),
-                        port: 2,
-                    ), Const(Enum("Linear"))),
-                    ((
-                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                        port: 1,
-                    ), Const(FsPaths([
-                        "inputs/lights/frame_051.raw",
-                        "inputs/lights/frame_052.raw",
-                        "inputs/lights/frame_053.raw",
-                        "inputs/lights/frame_054.raw",
-                        "inputs/lights/frame_055.raw",
-                        "inputs/lights/frame_056.raw",
-                        "inputs/lights/frame_057.raw",
-                        "inputs/lights/frame_058.raw",
-                        "inputs/lights/frame_059.raw",
-                        "inputs/lights/frame_060.raw",
-                    ]))),
-                    ((
-                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                        port: 2,
-                    ), Wire((
-                        node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                        port: 3,
-                    ), Const(Enum("precise_ground"))),
-                    ((
-                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                        port: 4,
-                    ), Const(Enum("wide_field"))),
-                    ((
-                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                        port: 5,
-                    ), Const(Enum("sigma_clipped"))),
-                    ((
-                        node_id: ("2b827f10-a3a1-4d54-bb25-a40133b3a18c"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("20380988-300d-4857-af58-7497acd6848a"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("41884f76-a80f-4bb9-82c4-83e5016d37a9"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("41884f76-a80f-4bb9-82c4-83e5016d37a9"),
-                        port: 2,
-                    ), Const(Enum("Linear"))),
-                    ((
-                        node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
-                        port: 1,
-                    ), Const(Float(1.0))),
-                    ((
-                        node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
-                        port: 2,
-                    ), Const(FsPath("output/img2.png"))),
-                    ((
-                        node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
-                        port: 3,
-                    ), Const(Enum("RGB u8"))),
-                    ((
-                        node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
-                        port: 2,
-                    ), Const(Enum("auto_stf"))),
-                    ((
-                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                        port: 2,
-                    ), Const(FsPath("models/DeepSNR_weights_v2.onnx"))),
-                    ((
-                        node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
-                        port: 2,
-                    ), Const(Enum("average_neutral"))),
-                    ((
-                        node_id: ("e156726f-3c5b-4d41-bbeb-380773608e40"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("e156726f-3c5b-4d41-bbeb-380773608e40"),
-                        port: 2,
-                    ), Const(Enum("Linear"))),
-                    ((
-                        node_id: ("efc228bd-27f8-455a-8e22-97dbd688a2c6"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("efc228bd-27f8-455a-8e22-97dbd688a2c6"),
-                        port: 2,
-                    ), Const(Enum("Linear"))),
-                    ((
-                        node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
-                        port: 2,
-                    ), Const(FsPath("output/starless.png"))),
-                    ((
-                        node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
-                        port: 3,
-                    ), Const(Enum("RGB u8"))),
-                    ((
-                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                        port: 2,
-                    ), Const(FsPath("models/StarNet2_weights.onnx"))),
-                    ((
-                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                        port: 2,
-                    ), Wire((
-                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                        port: 1,
-                    ))),
-                    ((
-                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                        port: 3,
-                    ), Const(Enum("Add"))),
-                    ((
-                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                        port: 4,
-                    ), Const(Float(1.0))),
-                    ((
-                        node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
-                        port: 5,
-                    ), Const(Enum("Black"))),
-                    ((
-                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                        port: 1,
-                    ), Wire((
-                        node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
-                        port: 2,
-                    ))),
-                    ((
-                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                        port: 2,
-                    ), Const(Float(-0.055))),
-                    ((
-                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                        port: 3,
-                    ), Const(Float(1.084))),
-                    ((
-                        node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
-                        port: 4,
-                    ), Const(Enum("Black"))),
-                ],
-                subscriptions: [
-                    (
-                        event: (
+                wiring: (
+                    bindings: [
+                        ((
+                            node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                            port: 2,
+                        ), Const(Float(0.2))),
+                        ((
+                            node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                            port: 3,
+                        ), Const(Float(1.6))),
+                        ((
+                            node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                            port: 4,
+                        ), Const(Enum("Black"))),
+                        ((
+                            node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
+                            port: 2,
+                        ), Const(FsPath("output/img.png"))),
+                        ((
+                            node_id: ("0d921c89-28c0-445f-a759-33f28164085e"),
+                            port: 3,
+                        ), Const(Enum("RGB u8"))),
+                        ((
+                            node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                            port: 1,
+                        ), Const(FsPaths([
+                            "inputs/darks/frame_001.raw",
+                            "inputs/darks/frame_002.raw",
+                            "inputs/darks/frame_003.raw",
+                            "inputs/darks/frame_004.raw",
+                            "inputs/darks/frame_005.raw",
+                            "inputs/darks/frame_006.raw",
+                            "inputs/darks/frame_007.raw",
+                            "inputs/darks/frame_008.raw",
+                            "inputs/darks/frame_009.raw",
+                            "inputs/darks/frame_010.raw",
+                            "inputs/darks/frame_011.raw",
+                            "inputs/darks/frame_012.raw",
+                            "inputs/darks/frame_013.raw",
+                            "inputs/darks/frame_014.raw",
+                            "inputs/darks/frame_015.raw",
+                        ]))),
+                        ((
+                            node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                            port: 2,
+                        ), Const(FsPaths([
+                            "inputs/flats/frame_016.raw",
+                            "inputs/flats/frame_017.raw",
+                            "inputs/flats/frame_018.raw",
+                            "inputs/flats/frame_019.raw",
+                            "inputs/flats/frame_020.raw",
+                            "inputs/flats/frame_021.raw",
+                            "inputs/flats/frame_022.raw",
+                            "inputs/flats/frame_023.raw",
+                            "inputs/flats/frame_024.raw",
+                            "inputs/flats/frame_025.raw",
+                            "inputs/flats/frame_026.raw",
+                            "inputs/flats/frame_027.raw",
+                            "inputs/flats/frame_028.raw",
+                            "inputs/flats/frame_029.raw",
+                            "inputs/flats/frame_030.raw",
+                        ]))),
+                        ((
+                            node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                            port: 3,
+                        ), Const(FsPaths([
+                            "inputs/bias/frame_031.raw",
+                            "inputs/bias/frame_032.raw",
+                            "inputs/bias/frame_033.raw",
+                            "inputs/bias/frame_034.raw",
+                            "inputs/bias/frame_035.raw",
+                            "inputs/bias/frame_036.raw",
+                            "inputs/bias/frame_037.raw",
+                            "inputs/bias/frame_038.raw",
+                            "inputs/bias/frame_039.raw",
+                            "inputs/bias/frame_040.raw",
+                            "inputs/bias/frame_041.raw",
+                            "inputs/bias/frame_042.raw",
+                            "inputs/bias/frame_043.raw",
+                            "inputs/bias/frame_044.raw",
+                            "inputs/bias/frame_045.raw",
+                            "inputs/bias/frame_046.raw",
+                            "inputs/bias/frame_047.raw",
+                            "inputs/bias/frame_048.raw",
+                            "inputs/bias/frame_049.raw",
+                            "inputs/bias/frame_050.raw",
+                        ]))),
+                        ((
+                            node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                            port: 5,
+                        ), Const(Float(5.0))),
+                        ((
+                            node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                            port: 6,
+                        ), Const(Bool(true))),
+                        ((
+                            node_id: ("20380988-300d-4857-af58-7497acd6848a"),
+                            port: 1,
+                        ), Const(String("frameNo_"))),
+                        ((
+                            node_id: ("20380988-300d-4857-af58-7497acd6848a"),
+                            port: 2,
+                        ), Wire((
                             node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
-                            event: 2,
+                            port: 2,
+                        ))),
+                        ((
+                            node_id: ("2067de48-57e0-4900-b589-32320647bb55"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("2067de48-57e0-4900-b589-32320647bb55"),
+                            port: 2,
+                        ), Const(Enum("Linear"))),
+                        ((
+                            node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                            port: 1,
+                        ), Const(FsPaths([
+                            "inputs/lights/frame_051.raw",
+                            "inputs/lights/frame_052.raw",
+                            "inputs/lights/frame_053.raw",
+                            "inputs/lights/frame_054.raw",
+                            "inputs/lights/frame_055.raw",
+                            "inputs/lights/frame_056.raw",
+                            "inputs/lights/frame_057.raw",
+                            "inputs/lights/frame_058.raw",
+                            "inputs/lights/frame_059.raw",
+                            "inputs/lights/frame_060.raw",
+                        ]))),
+                        ((
+                            node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                            port: 2,
+                        ), Wire((
+                            node_id: ("12981187-f976-4192-8f54-bc3c4523544e"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                            port: 3,
+                        ), Const(Enum("precise_ground"))),
+                        ((
+                            node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                            port: 4,
+                        ), Const(Enum("wide_field"))),
+                        ((
+                            node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                            port: 5,
+                        ), Const(Enum("sigma_clipped"))),
+                        ((
+                            node_id: ("2b827f10-a3a1-4d54-bb25-a40133b3a18c"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("20380988-300d-4857-af58-7497acd6848a"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("41884f76-a80f-4bb9-82c4-83e5016d37a9"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("41884f76-a80f-4bb9-82c4-83e5016d37a9"),
+                            port: 2,
+                        ), Const(Enum("Linear"))),
+                        ((
+                            node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
+                            port: 1,
+                        ), Const(Float(1.0))),
+                        ((
+                            node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
+                            port: 2,
+                        ), Const(FsPath("output/img2.png"))),
+                        ((
+                            node_id: ("609d124e-47c7-43c1-adef-32db510ac421"),
+                            port: 3,
+                        ), Const(Enum("RGB u8"))),
+                        ((
+                            node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
+                            port: 2,
+                        ), Const(Enum("auto_stf"))),
+                        ((
+                            node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                            port: 2,
+                        ), Const(FsPath("models/DeepSNR_weights_v2.onnx"))),
+                        ((
+                            node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("25b00fb1-cdc1-4b3f-b927-1aa43b072784"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("bbc78216-1118-4ec7-ad7e-5d4175fcecd2"),
+                            port: 2,
+                        ), Const(Enum("average_neutral"))),
+                        ((
+                            node_id: ("e156726f-3c5b-4d41-bbeb-380773608e40"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("e156726f-3c5b-4d41-bbeb-380773608e40"),
+                            port: 2,
+                        ), Const(Enum("Linear"))),
+                        ((
+                            node_id: ("efc228bd-27f8-455a-8e22-97dbd688a2c6"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("043a77db-9446-4ded-9231-8bac95b7fe12"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("efc228bd-27f8-455a-8e22-97dbd688a2c6"),
+                            port: 2,
+                        ), Const(Enum("Linear"))),
+                        ((
+                            node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
+                            port: 2,
+                        ), Const(FsPath("output/starless.png"))),
+                        ((
+                            node_id: ("f69f0aa7-6de4-4660-8dc5-1ec9f19d18de"),
+                            port: 3,
+                        ), Const(Enum("RGB u8"))),
+                        ((
+                            node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("7e110fc6-8391-48bc-b07b-c970827bcdd2"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                            port: 2,
+                        ), Const(FsPath("models/StarNet2_weights.onnx"))),
+                        ((
+                            node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("8c44e556-5072-44fc-8802-9ae2feec2421"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                            port: 2,
+                        ), Wire((
+                            node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                            port: 1,
+                        ))),
+                        ((
+                            node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                            port: 3,
+                        ), Const(Enum("Add"))),
+                        ((
+                            node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                            port: 4,
+                        ), Const(Float(1.0))),
+                        ((
+                            node_id: ("fabb092d-f756-441d-b6f5-1d1e629beda1"),
+                            port: 5,
+                        ), Const(Enum("Black"))),
+                        ((
+                            node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                            port: 1,
+                        ), Wire((
+                            node_id: ("f74c1e36-8888-4301-95b1-95e194e106c7"),
+                            port: 2,
+                        ))),
+                        ((
+                            node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                            port: 2,
+                        ), Const(Float(-0.055))),
+                        ((
+                            node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                            port: 3,
+                        ), Const(Float(1.084))),
+                        ((
+                            node_id: ("fd576928-3f2a-4ba9-9d38-1be67824652f"),
+                            port: 4,
+                        ), Const(Enum("Black"))),
+                    ],
+                    subscriptions: [
+                        (
+                            event: (
+                                node_id: ("5fcd3fd1-6bb5-4241-ab6e-d4397a454896"),
+                                event: 2,
+                            ),
+                            trigger: (
+                                node_id: ("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc"),
+                                trigger: 1,
+                            ),
                         ),
-                        trigger: (
-                            node_id: ("5fb6630e-e3aa-4f4d-9b48-d8ee886a2efc"),
-                            trigger: 1,
-                        ),
-                    ),
-                ],
+                    ],
+                ),
                 ghost_nodes: {},
                 ghost_wiring: (
                     bindings: [],

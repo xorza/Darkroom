@@ -4,12 +4,11 @@ use glam::Vec2;
 use palantir::InspectedWidget;
 use palantir::{Rect, Sense, Ui};
 use scenarium::{
-    Binding, GhostSource, Graph, GraphId, InputPort, NodeDecl, NodeId, NodeTriggers, OutputPort,
-    SavedPort, Scope, TriggerPort,
+    Binding, GhostNode, GhostSource, Graph, GraphId, InputPort, NodeDecl, NodeId, NodeTriggers,
+    OutputPort, SavedPort, Scope, TriggerPort,
 };
 use serde::Serialize;
 
-use crate::core::document;
 use crate::core::document::Document;
 use crate::gui::app::App;
 use crate::gui::pane::graph_ui::wid;
@@ -212,11 +211,10 @@ impl Report<'_> {
         // By name, then id, as a reader looks a node up by its name.
         let mut matching: Vec<_> = graph
             .iter()
-            .filter(|node| listed(document::title(node, scope)))
+            .filter(|node| listed(scope.title(node)))
             .collect();
-        matching.sort_unstable_by(|a, b| {
-            (document::title(a, scope), a.node_id).cmp(&(document::title(b, scope), b.node_id))
-        });
+        matching
+            .sort_unstable_by(|a, b| (scope.title(a), a.node_id).cmp(&(scope.title(b), b.node_id)));
         GraphSummary {
             name: match id {
                 GraphId::Main => "main".to_string(),
@@ -236,7 +234,7 @@ impl Report<'_> {
                     let node_id = node.node_id;
                     let func = scope.resolve(&node);
                     let mut state = NodeSummary {
-                        name: document::title(&node, scope).to_owned(),
+                        name: scope.title(&node).to_owned(),
                         func: func
                             .map_or_else(|why| format!("{why:?}"), |func| func.name().to_string()),
                         screen: ui.response_for(wid::body(id, node_id)).rect.map(rect),
@@ -279,14 +277,14 @@ impl Report<'_> {
                 .filter_map(|item| {
                     graph
                         .find(item.node()?)
-                        .map(|node| document::title(node, scope).to_owned())
+                        .map(|node| scope.title(node).to_owned())
                 })
                 .collect(),
             ghost_nodes: graph
                 .ghost_nodes()
-                .filter(|(_, ghost)| listed(&ghost.node.name))
+                .filter(|(_, ghost)| listed(ghost.title()))
                 .map(|(_, ghost)| GhostNodeSummary {
-                    name: ghost.node.name.clone(),
+                    name: ghost.title().to_owned(),
                     reason: ghost.reason.to_string(),
                     was: ghost.saved.as_ref().map(|saved| saved.name.clone()),
                 })
@@ -337,12 +335,13 @@ fn output_name(graph: &Graph, scope: Scope<'_>, output: OutputPort) -> String {
         .ok()
         .and_then(|func| func.ports().output(output.port))
         .map_or_else(|| output.port.to_string(), |port| port.name.clone());
-    format!("{}.{port}", document::title(node, scope))
+    format!("{}.{port}", scope.title(node))
 }
 
 fn binding(graph: &Graph, scope: Scope<'_>, input: InputPort) -> Option<String> {
     graph
-        .input_bindings(input.node_id)
+        .wiring()
+        .bindings_on(input.node_id)
         .find(|(port, _)| *port == input)
         .map(|(_, binding)| match binding {
             Binding::Wire(output) => format!("wire from {}", output_name(graph, scope, *output)),
@@ -353,10 +352,8 @@ fn binding(graph: &Graph, scope: Scope<'_>, input: InputPort) -> Option<String> 
 /// A node of `graph` by its title, a ghost node's included.
 fn node_title<'a>(graph: &'a Graph, scope: Scope<'a>, node_id: NodeId) -> &'a str {
     match graph.find(node_id) {
-        Some(node) => document::title(node, scope),
-        None => graph
-            .ghost_node(node_id)
-            .map_or("?", |ghost| ghost.node.name.as_str()),
+        Some(node) => scope.title(node),
+        None => graph.ghost_node(node_id).map_or("?", GhostNode::title),
     }
 }
 
@@ -428,12 +425,12 @@ fn wires(graph: &Graph, scope: Scope<'_>, listed: impl Fn(&str) -> bool) -> Vec<
     let mut wires = Vec::new();
     for node in graph.iter() {
         let ports = scope.resolve(&node).ok().map(NodeDecl::ports);
-        for (port, binding) in graph.input_bindings(node.node_id) {
+        for (port, binding) in graph.wiring().bindings_on(node.node_id) {
             if let Binding::Wire(output) = binding
-                && (listed(document::title(&node, scope))
+                && (listed(scope.title(&node))
                     || graph
                         .find(output.node_id)
-                        .is_some_and(|producer| listed(document::title(producer, scope))))
+                        .is_some_and(|producer| listed(scope.title(producer))))
             {
                 let input = ports
                     .and_then(|ports| ports.input(port.port))
@@ -441,7 +438,7 @@ fn wires(graph: &Graph, scope: Scope<'_>, listed: impl Fn(&str) -> bool) -> Vec<
                 wires.push(format!(
                     "{} -> {}.{input}",
                     output_name(graph, scope, *output),
-                    document::title(&node, scope)
+                    scope.title(&node)
                 ));
             }
         }

@@ -68,9 +68,9 @@ pub(crate) fn reconcile(
     for definition in &*carried {
         set.insert_compound(definition.id, definition.compound.clone());
     }
-    for (id, reconciled) in set.reconcile(library, manifest).compounds {
-        for repair in reconciled.repairs {
-            tracing::info!(target: "darkroom::edit", "bringing in compound {id:?}: {repair}");
+    for (graph, repairs) in set.reconcile(library, manifest).repairs {
+        for repair in repairs {
+            tracing::info!(target: "darkroom::edit", "bringing in {graph:?}: {repair}");
         }
     }
     for definition in carried {
@@ -165,7 +165,7 @@ fn take_path_defaults(compound: &mut Compound, library: &Library) {
         }
     }
     for (port, default) in defaults {
-        graph.bindings.insert(port, Binding::Const(default));
+        graph.set_input_binding(port, Binding::Const(default));
     }
 }
 
@@ -182,10 +182,10 @@ impl BroughtIn {
 fn strip_output_paths(compound: &mut Compound, library: &Library) {
     let graph = &mut compound.graph;
     let outputs: Vec<_> = graph
-        .bindings
-        .iter()
+        .wiring()
+        .bindings()
         .filter(|(_, binding)| matches!(binding, Binding::Const(_)))
-        .filter_map(|(&port, _)| {
+        .filter_map(|(port, _)| {
             let func = library.by_id(graph.find(port.node_id)?.func_id()?)?;
             let input = func.ports().input(port.port)?;
             matches!(
@@ -199,10 +199,7 @@ fn strip_output_paths(compound: &mut Compound, library: &Library) {
         })
         .collect();
     for (port, default) in outputs {
-        match default {
-            Some(value) => graph.bindings.insert(port, Binding::Const(value)),
-            None => graph.bindings.remove(&port),
-        };
+        graph.set_input_binding(port, default.map(Binding::Const));
     }
 }
 
@@ -244,8 +241,8 @@ mod tests {
             InputPort::new(node, PortId::new(1)),
             InputPort::new(node, PortId::new(2)),
         );
-        compound.graph.bindings.insert(read, path("in.tif"));
-        compound.graph.bindings.insert(write, path("out.tif"));
+        compound.graph.set_input_binding(read, path("in.tif"));
+        compound.graph.set_input_binding(write, path("out.tif"));
         let view = GraphView::new(&compound.graph);
         let id = CompoundId::from_u128(1);
         let brought = bring_in(
@@ -264,11 +261,11 @@ mod tests {
             panic!("one definition comes in");
         };
         assert_eq!(entered.id, id, "an id the document lacks is kept");
-        let bindings = &entered.compound.graph.bindings;
-        assert_eq!(bindings.get(&read), Some(&path("in.tif")));
-        assert_eq!(bindings.get(&write), None);
+        let bindings = entered.compound.graph.wiring();
+        assert_eq!(bindings.binding(read), Some(&path("in.tif")));
+        assert_eq!(bindings.binding(write), None);
         assert_eq!(
-            bindings.get(&InputPort::new(node, PortId::new(3))),
+            bindings.binding(InputPort::new(node, PortId::new(3))),
             Some(&Binding::Const(ConstValue::FsPath(
                 "/models/here.onnx".to_string()
             ))),

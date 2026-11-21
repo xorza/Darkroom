@@ -5,7 +5,6 @@ use glam::Vec2;
 use palantir::{Found, Locate, LocateError, Rect, Ui};
 use scenarium::{GraphId, NodeId, PortId};
 
-use crate::core::document;
 use crate::gui::app::App;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::wid;
@@ -70,11 +69,11 @@ impl Locate<App> for EditorTarget {
                         locator: locator(),
                         nearest: nearest(
                             document.graphs.graph(graph).iter().map(|candidate| {
-                                document::title(
-                                    &candidate,
-                                    document.graphs.scope(app.library(), graph),
-                                )
-                                .to_owned()
+                                document
+                                    .graphs
+                                    .scope(app.library(), graph)
+                                    .title(&candidate)
+                                    .to_owned()
                             }),
                             node,
                         ),
@@ -127,9 +126,7 @@ fn node_ids(app: &App, graph: GraphId, node: &str) -> Vec<NodeId> {
     graphs
         .graph(graph)
         .iter()
-        .filter(|candidate| {
-            document::title(candidate, scope) == node || candidate.node_id.to_string() == node
-        })
+        .filter(|candidate| scope.title(candidate) == node || candidate.node_id.to_string() == node)
         .map(|candidate| candidate.node_id)
         .collect()
 }

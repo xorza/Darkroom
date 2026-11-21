@@ -114,8 +114,7 @@ fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores
     });
     compound
         .graph
-        .bindings
-        .insert(inner_input, Binding::Wire(OutputPort::new(inputs_node, a)));
+        .set_input_binding(inner_input, Binding::Wire(OutputPort::new(inputs_node, a)));
     insert_compound(&mut fixture.document, id, compound);
     let instance = fixture.add_instance(id);
     let producer = fixture.node_at(Vec2::new(0.0, 300.0));
@@ -170,18 +169,20 @@ fn an_interface_edit_drops_wires_and_their_ties_in_every_graph_and_undo_restores
     .unwrap();
     let graph = GraphId::Compound(id);
     assert!(
-        !document
+        document
             .graphs
             .main()
-            .bindings
-            .contains_key(&InputPort::new(instance, a))
+            .wiring()
+            .binding(InputPort::new(instance, a))
+            .is_none()
     );
     assert!(
-        !document
+        document
             .graphs
             .graph(graph)
-            .bindings
-            .contains_key(&inner_input)
+            .wiring()
+            .binding(inner_input)
+            .is_none()
     );
     assert!(document.main_view.routes.is_empty());
     assert!(!document.main_view.ties.contains_key(&outer_tie));

@@ -6,14 +6,11 @@
 //!   program node, so the path down to it is its whole address: what a compile expands under and
 //!   what a pane shows through.
 
-use std::cmp::Ordering;
-use std::fmt;
-use std::hash::{Hash, Hasher};
-
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::graph::identity::NodeId;
+use crate::graph::inline_ids::InlineIds;
 use crate::graph::program_id::ProgramId;
 
 /// The instances from the main graph down, outermost first: one expansion of a graph in the
@@ -22,13 +19,9 @@ use crate::graph::program_id::ProgramId;
 ///
 /// Held inline, as a [`ProgramId`] is, so a pane or a run state keys on it with no allocation.
 /// In a file, its list of ids, read through [`Self::checked`].
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "Vec<NodeId>", into = "Vec<NodeId>")]
-pub struct InstancePath {
-    len: u8,
-    /// The path in `..len`; the tail is nil, so no two equal paths differ in memory.
-    ids: [NodeId; Self::MAX_LEN],
-}
+pub struct InstancePath(InlineIds<{ Self::MAX_LEN }>);
 
 /// Why a sequence of node ids is no [`InstancePath`].
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -45,10 +38,7 @@ impl InstancePath {
     pub const MAX_LEN: usize = ProgramId::MAX_LEN - 1;
 
     /// The path of the main graph, which nothing places.
-    pub const MAIN: Self = Self {
-        len: 0,
-        ids: [NodeId::nil(); Self::MAX_LEN],
-    };
+    pub const MAIN: Self = Self(InlineIds::EMPTY);
 
     /// The path `ids`, outermost instance first.
     ///
@@ -70,20 +60,17 @@ impl InstancePath {
         if ids.iter().any(|id| id.is_nil()) {
             return Err(InstancePathError::Nil);
         }
-        let mut path = Self::MAIN;
-        path.len = ids.len() as u8;
-        path.ids[..ids.len()].copy_from_slice(ids);
-        Ok(path)
+        Ok(Self(InlineIds::new(ids)))
     }
 
     /// The instances, outermost first.
     pub fn ids(&self) -> &[NodeId] {
-        &self.ids[..usize::from(self.len)]
+        self.0.ids()
     }
 
     /// Whether this is the main graph's path.
-    pub const fn is_main(&self) -> bool {
-        self.len == 0
+    pub fn is_main(&self) -> bool {
+        self.ids().is_empty()
     }
 
     /// The path inside `instance`, an instance in the graph this path ends in.
@@ -94,15 +81,12 @@ impl InstancePath {
     #[must_use]
     pub fn child(self, instance: NodeId) -> Self {
         assert!(
-            usize::from(self.len) < Self::MAX_LEN,
+            self.ids().len() < Self::MAX_LEN,
             "an instance path holds at most {} ids",
             Self::MAX_LEN
         );
         assert!(!instance.is_nil(), "an instance path holds no nil id");
-        let mut child = self;
-        child.ids[usize::from(self.len)] = instance;
-        child.len += 1;
-        child
+        Self(self.0.pushed(instance))
     }
 
     /// The program id of `node_id`, a node of the graph this path ends in.
@@ -111,9 +95,10 @@ impl InstancePath {
     /// If `node_id` is nil.
     pub fn node(self, node_id: NodeId) -> ProgramId {
         let mut ids = [NodeId::nil(); ProgramId::MAX_LEN];
-        ids[..usize::from(self.len)].copy_from_slice(self.ids());
-        ids[usize::from(self.len)] = node_id;
-        ProgramId::new(&ids[..=usize::from(self.len)])
+        let len = self.ids().len();
+        ids[..len].copy_from_slice(self.ids());
+        ids[len] = node_id;
+        ProgramId::new(&ids[..=len])
     }
 
     /// The path of the graph that places the innermost instance, or `None` for the main graph.
@@ -139,39 +124,6 @@ impl TryFrom<Vec<NodeId>> for InstancePath {
 impl From<InstancePath> for Vec<NodeId> {
     fn from(path: InstancePath) -> Self {
         path.ids().to_vec()
-    }
-}
-
-impl PartialEq for InstancePath {
-    fn eq(&self, other: &Self) -> bool {
-        self.ids() == other.ids()
-    }
-}
-
-impl Eq for InstancePath {}
-
-impl PartialOrd for InstancePath {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for InstancePath {
-    /// Element by element, as [`ProgramId`] orders: a path before every longer path it begins.
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.ids().cmp(other.ids())
-    }
-}
-
-impl Hash for InstancePath {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.ids().hash(state);
-    }
-}
-
-impl fmt::Debug for InstancePath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("InstancePath").field(&self.ids()).finish()
     }
 }
 

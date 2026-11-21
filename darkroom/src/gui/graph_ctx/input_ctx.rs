@@ -83,7 +83,7 @@ impl<'a> InputCtx<'a> {
 
     /// What the graph has bound here, or `None` for an unbound port.
     pub(crate) fn binding(self) -> Option<&'a Binding> {
-        self.node.graph_ctx.body().bindings.get(&self.port())
+        self.node.graph_ctx.body().wiring().binding(self.port())
     }
 
     /// The ghost this input holds in place of a binding: a wire or a constant the load kept

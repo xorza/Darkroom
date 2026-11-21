@@ -38,3 +38,15 @@ pub struct GhostNode {
     /// when nothing knew it: a missing compound, a func no manifest listed.
     pub saved: Option<SavedDecl>,
 }
+
+impl GhostNode {
+    /// What the ghost node's title reads: its own name, else the name its saved declaration
+    /// holds, else empty.
+    pub fn title(&self) -> &str {
+        self.node
+            .name
+            .as_deref()
+            .or_else(|| self.saved.as_ref().map(|saved| saved.name.as_str()))
+            .unwrap_or_default()
+    }
+}

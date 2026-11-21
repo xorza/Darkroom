@@ -283,12 +283,12 @@ impl<'a> GraphCtx<'a> {
 
     /// This graph's wires, as `(consumer input ← producer output)`.
     pub(crate) fn wires(self) -> impl Iterator<Item = (InputPort, OutputPort)> + 'a {
-        self.body().wires()
+        self.body().wiring().wires()
     }
 
     /// This graph's event-subscription edges.
     pub(crate) fn subscriptions(self) -> impl Iterator<Item = Subscription> + 'a {
-        self.body().subscriptions()
+        self.body().wiring().subscriptions()
     }
 
     /// This graph's committed selection.

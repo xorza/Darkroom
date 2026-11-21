@@ -7,7 +7,6 @@ use glam::UVec2;
 use palantir::{AgentWindow, Found, Image, LocateError, PlayError, Rect, Screenshot, Ui};
 use serde::Serialize;
 
-use crate::core::document;
 use crate::core::document::tab_ref::TabRef;
 use crate::driver::error::DriverError;
 use crate::driver::locator::{EditorTarget, Locator};
@@ -238,7 +237,7 @@ fn legend(screenshot: &Screenshot, picture: UVec2, app: &App, ui: &Ui) -> Vec<Le
             continue;
         };
         let mut legend = LegendNode {
-            name: document::title(&node, scope).to_owned(),
+            name: scope.title(&node).to_owned(),
             rect,
             inputs: Vec::new(),
             outputs: Vec::new(),

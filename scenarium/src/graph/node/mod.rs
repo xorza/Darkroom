@@ -145,7 +145,10 @@ pub enum Boundary {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Node {
     pub(crate) kind: NodeKind,
-    pub name: String,
+    /// The node's own name; `None` shows its declaration's, so a func or a compound renamed reads
+    /// renamed on each node nobody named ([`Scope::title`]).
+    #[serde(default)]
+    pub name: Option<String>,
 
     /// Disabled nodes remain in the compiled program but ambient planning
     /// excludes them. A binding from one behaves like an unbound input unless
@@ -289,57 +292,54 @@ impl Node {
         }
     }
 
-    /// An instance of the compound held under `id`, with no name of its own: a host shows the
-    /// compound's name until the instance is named, so a renamed compound reads renamed on each
-    /// instance.
+    /// An instance of the compound held under `id`, with no name of its own.
     pub const fn instance(id: CompoundId) -> Self {
         Self {
             kind: NodeKind::Instance {
                 compound: id,
                 cache: CacheMode::AUTO,
             },
-            name: String::new(),
+            name: None,
             disabled: false,
         }
     }
 }
 
 impl From<&Func> for Node {
-    /// Copies the func's name and `default_cache_mode`; `Graph::add_func_node` seeds the default
-    /// input bindings.
+    /// A node of `func` with no name of its own, cached as the func's `default_cache_mode`;
+    /// `Graph::add_func_node` seeds the default input bindings.
     fn from(func: &Func) -> Self {
         Self {
             kind: NodeKind::Body {
                 source: BodySource::Func(func.id()),
                 cache: func.default_cache_mode(),
             },
-            name: func.name().to_owned(),
+            name: None,
             disabled: false,
         }
     }
 }
 
 impl From<SpecialNode> for Node {
-    /// A built-in, named and cached as its hardcoded declaration says.
+    /// A built-in with no name of its own, cached as its hardcoded declaration says.
     fn from(special: SpecialNode) -> Self {
-        let func = special.func();
         Self {
             kind: NodeKind::Body {
                 source: BodySource::Special(special),
-                cache: func.default_cache_mode(),
+                cache: special.func().default_cache_mode(),
             },
-            name: func.name().to_owned(),
+            name: None,
             disabled: false,
         }
     }
 }
 
 impl From<Boundary> for Node {
-    /// A compound's boundary node, named for its side.
+    /// A compound's boundary node, which shows its side's name.
     fn from(boundary: Boundary) -> Self {
         Self {
             kind: NodeKind::Boundary(boundary),
-            name: boundary.name().to_owned(),
+            name: None,
             disabled: false,
         }
     }
@@ -370,7 +370,7 @@ pub(crate) mod internals {
                     source: BodySource::Func(func_id),
                     cache: CacheMode::AUTO,
                 },
-                name: String::new(),
+                name: None,
                 disabled: false,
             }
         }

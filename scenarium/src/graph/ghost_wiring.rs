@@ -3,7 +3,7 @@
 //! # Decisions
 //!
 //! - **Ghost wiring is the graph's, in tables of its own beside the live ones.** No reader of
-//!   `bindings` sees a ghost, as no reader of the nodes sees a ghost node. As Blender keeps an
+//!   the [`Wiring`](crate::Wiring) sees a ghost, as no reader of the nodes sees a ghost node. As Blender keeps an
 //!   undefined node's links in the tree
 //!   ([undefined node](https://projects.blender.org/blender/blender/pulls/114783)) and Node-RED's
 //!   unknown node "preserves the original configuration and connections"
@@ -24,6 +24,7 @@
 //!   refill.
 
 use std::collections::BTreeMap;
+use std::mem;
 
 use ::serde::{Deserialize, Serialize};
 
@@ -32,6 +33,7 @@ use crate::graph::binding::Binding;
 use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort, PortId};
 use crate::graph::saved_decl::{SavedEvent, SavedPort};
 use crate::graph::subscription::Subscription;
+use crate::graph::wiring::{self, subscription_touches};
 
 /// A binding a graph keeps and cannot hold: what was on an input, and the ports as they were
 /// where a node no longer declares them.
@@ -71,12 +73,9 @@ impl GhostBinding {
         }
     }
 
-    /// Whether this ghost, on `port`, touches `node_id` from either end.
-    fn touches(&self, port: InputPort, node_id: NodeId) -> bool {
-        port.node_id == node_id
-            || self
-                .output()
-                .is_some_and(|output| output.node_id == node_id)
+    /// Whether this ghost, on `port`, touches a node `touches` holds, from either end.
+    fn touches(&self, port: InputPort, touches: impl Fn(NodeId) -> bool) -> bool {
+        touches(port.node_id) || self.output().is_some_and(|output| touches(output.node_id))
     }
 }
 
@@ -190,14 +189,15 @@ impl GhostWiring {
 
     /// How many ghosts touch `node_id`, from either end.
     pub fn count_touching(&self, node_id: NodeId) -> usize {
+        let touches = |id: NodeId| id == node_id;
         self.bindings
             .iter()
-            .filter(|(port, ghost)| ghost.touches(**port, node_id))
+            .filter(|(port, ghost)| ghost.touches(**port, touches))
             .count()
             + self
                 .subscriptions
                 .keys()
-                .filter(|subscription| subscription.touches(node_id))
+                .filter(|subscription| subscription_touches(**subscription, touches))
                 .count()
     }
 
@@ -222,40 +222,77 @@ impl GhostWiring {
             .filter_map(|(port, ghost)| Some((*port, ghost.output()?)))
     }
 
-    /// Each ghost that touches `node_id`, from either end.
-    pub(super) fn touching(&self, node_id: NodeId) -> Self {
+    /// The ghost wires that read `producer`'s outputs, by input.
+    pub fn wires_from(&self, producer: NodeId) -> impl Iterator<Item = (InputPort, &GhostBinding)> {
+        self.bindings().filter(move |(_, ghost)| {
+            ghost
+                .output()
+                .is_some_and(|output| output.node_id == producer)
+        })
+    }
+
+    /// The ghost subscriptions that land on `subscriber`'s triggers, by event.
+    pub fn subscriptions_to(
+        &self,
+        subscriber: NodeId,
+    ) -> impl Iterator<Item = (Subscription, &GhostSubscription)> {
+        self.subscriptions()
+            .filter(move |(subscription, _)| subscription.trigger.node_id == subscriber)
+    }
+
+    /// Each ghost that touches any of `nodes`, from either end. `nodes` is ascending, each once:
+    /// one node is `&[node_id]`.
+    #[must_use]
+    pub fn touching(&self, nodes: &[NodeId]) -> Self {
+        let touches = wiring::touches(nodes);
         Self {
             bindings: self
                 .bindings
                 .iter()
-                .filter(|(port, ghost)| ghost.touches(**port, node_id))
+                .filter(|(port, ghost)| ghost.touches(**port, touches))
                 .map(|(port, ghost)| (*port, ghost.clone()))
                 .collect(),
             subscriptions: self
                 .subscriptions
                 .iter()
-                .filter(|(subscription, _)| subscription.touches(node_id))
+                .filter(|(subscription, _)| subscription_touches(**subscription, touches))
                 .map(|(subscription, ghost)| (*subscription, ghost.clone()))
                 .collect(),
         }
     }
 
-    /// Take out each ghost that touches `node_id`.
-    pub(super) fn remove_touching(&mut self, node_id: NodeId) {
-        self.bindings
-            .retain(|port, ghost| !ghost.touches(*port, node_id));
-        self.subscriptions
-            .retain(|subscription, _| !subscription.touches(node_id));
+    /// Take out each ghost that touches any of `nodes`, as [`Self::touching`] reads it.
+    pub(crate) fn remove_touching(&mut self, nodes: &[NodeId]) -> Self {
+        let touches = wiring::touches(nodes);
+        let (bindings, kept) = mem::take(&mut self.bindings)
+            .into_iter()
+            .partition(|(port, ghost)| ghost.touches(*port, touches));
+        self.bindings = kept;
+        let (subscriptions, kept) = mem::take(&mut self.subscriptions)
+            .into_iter()
+            .partition(|(subscription, _)| subscription_touches(*subscription, touches));
+        self.subscriptions = kept;
+        Self {
+            bindings,
+            subscriptions,
+        }
+    }
+
+    /// Add `other`'s, whose keys this holds none of.
+    pub(super) fn extend(&mut self, other: Self) {
+        self.bindings.extend(other.bindings);
+        self.subscriptions.extend(other.subscriptions);
     }
 
     /// Whether each ghost touches `node_id`: what a removal's record holds.
     pub(super) fn all_touch(&self, node_id: NodeId) -> bool {
+        let touches = |id: NodeId| id == node_id;
         self.bindings
             .iter()
-            .all(|(port, ghost)| ghost.touches(*port, node_id))
+            .all(|(port, ghost)| ghost.touches(*port, touches))
             && self
                 .subscriptions
                 .keys()
-                .all(|subscription| subscription.touches(node_id))
+                .all(|subscription| subscription_touches(*subscription, touches))
     }
 }

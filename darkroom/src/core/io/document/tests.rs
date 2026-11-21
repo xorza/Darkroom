@@ -222,7 +222,7 @@ fn paths_document(one: &str, many: &[&str], ghost: &str, inner: &str) -> (Docume
     fixture.bind_ghost_node(ghosted, ConstValue::FsPath(ghost.to_string()));
     let mut document = fixture.document;
     let bind = |document: &mut Document, node_id, value| {
-        document.graphs.main_mut().bindings.insert(
+        document.graphs.main_mut().set_input_binding(
             InputPort::new(node_id, PortId::new(1)),
             Binding::Const(value),
         );
@@ -239,7 +239,7 @@ fn paths_document(one: &str, many: &[&str], ghost: &str, inner: &str) -> (Docume
     compound
         .graph
         .insert(nested, Node::from(&func("Load Image")));
-    compound.graph.bindings.insert(
+    compound.graph.set_input_binding(
         InputPort::new(nested, PortId::new(1)),
         Binding::Const(ConstValue::FsPath(inner.to_string())),
     );
@@ -252,8 +252,12 @@ fn paths_document(one: &str, many: &[&str], ghost: &str, inner: &str) -> (Docume
 fn paths_of(document: &Document, nodes: [NodeId; 4]) -> Vec<String> {
     let mut paths = Vec::new();
     for node_id in &nodes[..3] {
-        let Binding::Const(value) =
-            &document.graphs.main().bindings[&InputPort::new(*node_id, PortId::new(1))]
+        let Binding::Const(value) = &document
+            .graphs
+            .main()
+            .wiring()
+            .binding(InputPort::new(*node_id, PortId::new(1)))
+            .unwrap()
         else {
             panic!("a const binding");
         };
@@ -270,7 +274,13 @@ fn paths_of(document: &Document, nodes: [NodeId; 4]) -> Vec<String> {
     };
     paths.extend(value.as_fs_paths().unwrap().iter().cloned());
     let (_, compound) = document.graphs.compounds().next().unwrap();
-    let Some(Binding::Const(value)) = compound.graph.bindings.values().next() else {
+    let Some(Binding::Const(value)) = compound
+        .graph
+        .wiring()
+        .bindings()
+        .map(|(_, binding)| binding)
+        .next()
+    else {
         panic!("a const binding");
     };
     paths.extend(value.as_fs_paths().unwrap().iter().cloned());

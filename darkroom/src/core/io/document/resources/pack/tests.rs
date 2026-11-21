@@ -35,7 +35,10 @@ fn a_pack_copies_each_file_an_input_reads_once_and_names_the_copies() {
     let node = fixture.add(&reader);
     let port = |id| InputPort::new(node, PortId::new(id));
     let graph = fixture.document.graphs.main_mut();
-    graph.bindings.clear();
+    let bound: Vec<InputPort> = graph.wiring().bindings().map(|(port, _)| port).collect();
+    for port in bound {
+        graph.set_input_binding(port, None);
+    }
     graph.set_input_binding(port(1), Binding::Const(ConstValue::FsPath(a.clone())));
     graph.set_input_binding(
         port(2),

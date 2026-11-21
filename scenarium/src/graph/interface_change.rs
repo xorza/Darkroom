@@ -23,53 +23,61 @@
 //!   Refused: a second rule that reads the types beside [`Graph::admit`](crate::Graph::admit),
 //!   which would drift from it.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::graph::RefusedWiring;
 use crate::graph::binding::Binding;
 use crate::graph::ghost_wiring::{
-    GhostBinding, GhostSource, GhostSubscription, InputState, SubscriptionState,
+    GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
 };
 use crate::graph::graph_set::GraphSet;
 use crate::graph::identity::{CompoundId, EventPort, GraphId, InputPort, OutputPort, TriggerPort};
 use crate::graph::interface::Interface;
 use crate::graph::node_decl::NodeTriggers;
 use crate::graph::saved_decl::{SavedEvent, SavedPort};
-use crate::graph::subscription::Subscription;
 use crate::library::Library;
 
-/// An edit of one compound's interface: the interface before and after, each binding the new
-/// interface does not hold, in any graph, and what becomes of them. [`GraphSet::write_interface`]
-/// lands either side.
+/// An edit of one compound's interface: the interface before and after, what it changes of each
+/// graph's wiring, and what becomes of the wiring it refuses. [`GraphSet::write_interface`] lands
+/// either side.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterfaceChange {
     id: CompoundId,
     before: Interface,
     after: Interface,
-    refused: Vec<RefusedBinding>,
-    refused_subscriptions: Vec<RefusedSubscription>,
-    named: Vec<NamedGhost<InputPort, GhostBinding>>,
-    named_subscriptions: Vec<NamedGhost<Subscription, GhostSubscription>>,
     fate: RefusedFate,
+    /// Each graph the edit changes the wiring of, and how.
+    #[serde(
+        serialize_with = "crate::graph::serde::serialize_pairs",
+        deserialize_with = "crate::graph::serde::deserialize_wiring_changes"
+    )]
+    graphs: BTreeMap<GraphId, WiringChange>,
 }
 
-/// A ghost an interface edit keeps in place and names an end of, as the edit removed that end's
-/// port: the ghost before and after, under its key in `graph`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NamedGhost<K, G> {
-    pub graph: GraphId,
-    pub key: K,
-    pub before: G,
-    pub after: G,
+/// What an interface edit changes of one graph's wiring, as ghosts under the keys the graph keeps
+/// them by.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WiringChange {
+    /// Each binding and subscription the new interface refuses, as the ghost it would be: with
+    /// the name and type of each of its ends the new interface no longer gives.
+    refused: GhostWiring,
+    /// Each ghost already kept that the edit names an end of, as it was.
+    named_before: GhostWiring,
+    /// The same ghosts, named: each end the edit removes under the name the old interface gave it.
+    named_after: GhostWiring,
 }
 
-/// A subscription an interface edit refuses, to or from an event or a trigger the new interface
-/// lacks, as the ghost it would be, with the name of an event it no longer gives.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RefusedSubscription {
-    pub graph: GraphId,
-    pub subscription: Subscription,
-    pub ghost: GhostSubscription,
+impl WiringChange {
+    /// Each binding and subscription the new interface refuses, as the ghost it would be.
+    pub const fn refused(&self) -> &GhostWiring {
+        &self.refused
+    }
+
+    fn is_empty(&self) -> bool {
+        self.refused.is_empty() && self.named_before.is_empty()
+    }
 }
 
 /// What an interface edit does with each binding the new interface refuses.
@@ -81,38 +89,11 @@ pub enum RefusedFate {
     Ghost,
 }
 
-/// A binding an interface edit refuses: on an instance, from an instance's output, or on or from
-/// a boundary node inside, as the ghost it would be, with the name and type of each of its ports
-/// the new interface no longer gives.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RefusedBinding {
-    pub graph: GraphId,
-    pub port: InputPort,
-    pub ghost: GhostBinding,
-}
-
-impl RefusedBinding {
-    /// The binding the graph held.
-    pub fn binding(&self) -> Binding {
-        self.ghost.binding()
-    }
-}
-
 /// Which side of an [`InterfaceChange`] a write lands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChangeSide {
     Before,
     After,
-}
-
-impl<K, G> NamedGhost<K, G> {
-    /// The ghost a write of `side` finds, and the one it leaves.
-    const fn landing(&self, side: ChangeSide) -> [&G; 2] {
-        match side {
-            ChangeSide::After => [&self.before, &self.after],
-            ChangeSide::Before => [&self.after, &self.before],
-        }
-    }
 }
 
 impl InterfaceChange {
@@ -128,29 +109,13 @@ impl InterfaceChange {
         &self.after
     }
 
-    /// In graph order, then in the order each graph keeps its bindings.
-    pub fn refused(&self) -> &[RefusedBinding] {
-        &self.refused
-    }
-
-    /// In graph order, then in the order each graph keeps its subscriptions.
-    pub fn refused_subscriptions(&self) -> &[RefusedSubscription] {
-        &self.refused_subscriptions
-    }
-
-    /// The ghost bindings the edit names an end of, in graph order, then in the order each graph
-    /// keeps its ghosts.
-    pub fn named(&self) -> &[NamedGhost<InputPort, GhostBinding>] {
-        &self.named
-    }
-
-    /// [`Self::named`] for the ghost subscriptions.
-    pub fn named_subscriptions(&self) -> &[NamedGhost<Subscription, GhostSubscription>] {
-        &self.named_subscriptions
-    }
-
     pub const fn fate(&self) -> RefusedFate {
         self.fate
+    }
+
+    /// Each graph the edit changes the wiring of, in graph order.
+    pub fn graphs(&self) -> impl ExactSizeIterator<Item = (GraphId, &WiringChange)> {
+        self.graphs.iter().map(|(graph, change)| (*graph, change))
     }
 }
 
@@ -176,11 +141,9 @@ impl GraphSet {
             .clone();
         let mut after = self.clone();
         after.set_interface(id, to.clone());
-        let mut refused = Vec::new();
-        let mut refused_subscriptions = Vec::new();
-        let mut named = Vec::new();
-        let mut named_subscriptions = Vec::new();
+        let mut graphs = BTreeMap::new();
         for (graph, held) in after.graphs() {
+            let mut change = WiringChange::default();
             let scope = after.scope(library, graph);
             let was = self.scope(library, graph);
             let was_graph = self.graph(graph);
@@ -262,32 +225,30 @@ impl GraphSet {
                 let port = match refusal {
                     RefusedWiring::Binding { port, .. } => port,
                     RefusedWiring::Subscription { subscription, .. } => {
-                        refused_subscriptions.push(RefusedSubscription {
-                            graph,
+                        change.refused.subscriptions.insert(
                             subscription,
-                            ghost: GhostSubscription {
+                            GhostSubscription {
                                 event: lost_event(subscription.event),
                                 trigger: lost_trigger(subscription.trigger),
                             },
-                        });
+                        );
                         continue;
                     }
                 };
-                let source = match held.bindings[&port].clone() {
+                let source = match held.wiring.bindings[&port].clone() {
                     Binding::Const(value) => GhostSource::Const(value),
                     Binding::Wire(output) => GhostSource::Wire {
                         output,
                         saved: lost_output(output),
                     },
                 };
-                refused.push(RefusedBinding {
-                    graph,
+                change.refused.bindings.insert(
                     port,
-                    ghost: GhostBinding {
+                    GhostBinding {
                         input: lost_input(port),
                         source,
                     },
-                });
+                );
             }
             // A ghost already kept whose end names a port the edit removes takes the name the
             // old interface gave it, as a func's remap names one (`port_map`): its row then reads
@@ -305,12 +266,8 @@ impl GraphSet {
                     source,
                 };
                 if after != *ghost {
-                    named.push(NamedGhost {
-                        graph,
-                        key: port,
-                        before: ghost.clone(),
-                        after,
-                    });
+                    change.named_before.bindings.insert(port, ghost.clone());
+                    change.named_after.bindings.insert(port, after);
                 }
             }
             for (subscription, ghost) in held.ghost_wiring().subscriptions() {
@@ -325,24 +282,23 @@ impl GraphSet {
                         .or_else(|| lost_trigger(subscription.trigger)),
                 };
                 if after != *ghost {
-                    named_subscriptions.push(NamedGhost {
-                        graph,
-                        key: subscription,
-                        before: ghost.clone(),
-                        after,
-                    });
+                    change
+                        .named_before
+                        .subscriptions
+                        .insert(subscription, ghost.clone());
+                    change.named_after.subscriptions.insert(subscription, after);
                 }
+            }
+            if !change.is_empty() {
+                graphs.insert(graph, change);
             }
         }
         InterfaceChange {
             id,
             before,
             after: to,
-            refused,
-            refused_subscriptions,
-            named,
-            named_subscriptions,
             fate,
+            graphs,
         }
     }
 
@@ -353,71 +309,122 @@ impl GraphSet {
     /// If the set is not on the other side of `change`: an input does not hold what was
     /// recorded.
     pub fn write_interface(&mut self, change: &InterfaceChange, side: ChangeSide) {
-        // What an input holds on either side of the change.
-        let halves = |refused: &RefusedBinding| {
-            let live = InputState::Live(refused.binding());
-            let after = match change.fate {
-                RefusedFate::Drop => InputState::Unbound,
-                RefusedFate::Ghost => InputState::Ghost(refused.ghost.clone()),
-            };
-            match side {
-                ChangeSide::After => [live, after],
-                ChangeSide::Before => [after, live],
-            }
-        };
         if side == ChangeSide::Before {
             self.set_interface(change.id, change.before.clone());
         }
-        for refused in &change.refused {
-            let [from, to] = halves(refused);
-            let graph = self.graph_mut(refused.graph);
-            assert_eq!(
-                graph.input_state(refused.port),
-                from,
-                "an interface edit lands on the input it recorded"
-            );
-            graph.set_input_state(refused.port, to);
-        }
-        for refused in &change.refused_subscriptions {
-            let after = match change.fate {
-                RefusedFate::Drop => SubscriptionState::Absent,
-                RefusedFate::Ghost => SubscriptionState::Ghost(refused.ghost.clone()),
-            };
+        for (&graph, wiring) in &change.graphs {
+            let held = self.graph_mut(graph);
+            for (&port, ghost) in &wiring.refused.bindings {
+                let live = InputState::Live(ghost.binding());
+                let refused = match change.fate {
+                    RefusedFate::Drop => InputState::Unbound,
+                    RefusedFate::Ghost => InputState::Ghost(ghost.clone()),
+                };
+                let [from, to] = match side {
+                    ChangeSide::After => [live, refused],
+                    ChangeSide::Before => [refused, live],
+                };
+                assert_eq!(
+                    held.input_state(port),
+                    from,
+                    "an interface edit lands on the input it recorded"
+                );
+                held.set_input_state(port, to);
+            }
+            for (&subscription, ghost) in &wiring.refused.subscriptions {
+                let refused = match change.fate {
+                    RefusedFate::Drop => SubscriptionState::Absent,
+                    RefusedFate::Ghost => SubscriptionState::Ghost(ghost.clone()),
+                };
+                let [from, to] = match side {
+                    ChangeSide::After => [SubscriptionState::Live, refused],
+                    ChangeSide::Before => [refused, SubscriptionState::Live],
+                };
+                assert_eq!(
+                    held.subscription_state(subscription),
+                    from,
+                    "an interface edit lands on the subscription it recorded"
+                );
+                held.set_subscription_state(subscription, to);
+            }
+            // A ghost the edit names an end of takes the name, and gives it back on the way back.
             let [from, to] = match side {
-                ChangeSide::After => [SubscriptionState::Live, after],
-                ChangeSide::Before => [after, SubscriptionState::Live],
+                ChangeSide::After => [&wiring.named_before, &wiring.named_after],
+                ChangeSide::Before => [&wiring.named_after, &wiring.named_before],
             };
-            let graph = self.graph_mut(refused.graph);
-            assert_eq!(
-                graph.subscription_state(refused.subscription),
-                from,
-                "an interface edit lands on the subscription it recorded"
-            );
-            graph.set_subscription_state(refused.subscription, to);
-        }
-        // A ghost the edit names an end of takes the name, and gives it back on the way back.
-        for named in &change.named {
-            let [from, to] = named.landing(side);
-            let graph = self.graph_mut(named.graph);
-            assert_eq!(
-                graph.input_state(named.key),
-                InputState::Ghost(from.clone()),
-                "an interface edit names the ghost it recorded"
-            );
-            graph.set_input_state(named.key, InputState::Ghost(to.clone()));
-        }
-        for named in &change.named_subscriptions {
-            let [from, to] = named.landing(side);
-            let graph = self.graph_mut(named.graph);
-            assert_eq!(
-                graph.subscription_state(named.key),
-                SubscriptionState::Ghost(from.clone()),
-                "an interface edit names the ghost it recorded"
-            );
-            graph.set_subscription_state(named.key, SubscriptionState::Ghost(to.clone()));
+            for (&port, ghost) in &to.bindings {
+                assert_eq!(
+                    held.input_state(port),
+                    InputState::Ghost(from.bindings[&port].clone()),
+                    "an interface edit names the ghost it recorded"
+                );
+                held.set_input_state(port, InputState::Ghost(ghost.clone()));
+            }
+            for (&subscription, ghost) in &to.subscriptions {
+                assert_eq!(
+                    held.subscription_state(subscription),
+                    SubscriptionState::Ghost(from.subscriptions[&subscription].clone()),
+                    "an interface edit names the ghost it recorded"
+                );
+                held.set_subscription_state(subscription, SubscriptionState::Ghost(ghost.clone()));
+            }
         }
         if side == ChangeSide::After {
             self.set_interface(change.id, change.after.clone());
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::graph::ghost_wiring::{GhostBinding, GhostSubscription};
+    use crate::graph::identity::{GraphId, InputPort};
+    use crate::graph::interface_change::InterfaceChange;
+    use crate::graph::subscription::Subscription;
+
+    /// One binding an interface edit refuses, as a test reads it.
+    #[derive(Debug)]
+    pub(crate) struct RefusedBinding<'a> {
+        pub(crate) graph: GraphId,
+        pub(crate) port: InputPort,
+        pub(crate) ghost: &'a GhostBinding,
+    }
+
+    /// One subscription an interface edit refuses, as a test reads it.
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) struct RefusedSubscription<'a> {
+        pub(crate) graph: GraphId,
+        pub(crate) subscription: Subscription,
+        pub(crate) ghost: &'a GhostSubscription,
+    }
+
+    impl InterfaceChange {
+        /// Each binding the edit refuses, graph by graph, then by input.
+        pub(crate) fn refused_bindings(&self) -> Vec<RefusedBinding<'_>> {
+            self.graphs()
+                .flat_map(|(graph, change)| {
+                    change
+                        .refused()
+                        .bindings()
+                        .map(move |(port, ghost)| RefusedBinding { graph, port, ghost })
+                })
+                .collect()
+        }
+
+        /// Each subscription the edit refuses, graph by graph, then by subscription.
+        pub(crate) fn refused_subscriptions(&self) -> Vec<RefusedSubscription<'_>> {
+            self.graphs()
+                .flat_map(|(graph, change)| {
+                    change
+                        .refused()
+                        .subscriptions()
+                        .map(move |(subscription, ghost)| RefusedSubscription {
+                            graph,
+                            subscription,
+                            ghost,
+                        })
+                })
+                .collect()
         }
     }
 }

@@ -72,8 +72,8 @@ impl GraphSet {
             write(&encode(&node.node_id));
             write(&encode_node(&node, known));
         }
-        write(&encode(&graph.bindings));
-        write(&encode(&graph.subscriptions().collect::<Vec<_>>()));
+        write(&encode(&graph.wiring.bindings));
+        write(&encode(&graph.wiring.subscriptions().collect::<Vec<_>>()));
         for (node_id, ghost) in graph.ghost_nodes() {
             write(&encode(&node_id));
             write(&encode(&ghost.reason));

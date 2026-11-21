@@ -752,43 +752,17 @@ fn a_compound_path_is_checked_and_mapped() {
     ));
     document.map_paths(|path| Some(format!("/root/{path}")));
     assert_eq!(
-        document.graphs.graph(GraphId::Compound(id)).bindings[&port],
+        *document
+            .graphs
+            .graph(GraphId::Compound(id))
+            .wiring()
+            .binding(port)
+            .unwrap(),
         Binding::Const(ConstValue::FsPath("/root/inputs/x.tiff".to_string()))
     );
     let mut visited = Vec::new();
     document.for_each_path(|node, path| visited.push((node, path.to_string())));
     assert_eq!(visited, [(addr, "/root/inputs/x.tiff".to_string())]);
-}
-
-/// A node's title is its own name, or for an instance with none its compound's, which a rename
-/// of the compound changes on each such instance; a named instance keeps its name, and a func
-/// node with none reads blank, which a surface shows as "Unnamed".
-#[test]
-fn an_unnamed_instance_is_titled_by_its_compound() {
-    let mut fixture = DocumentFixture::default();
-    let id = CompoundId::from_u128(1);
-    insert_compound(
-        &mut fixture.document,
-        id,
-        Compound::new("Denoise", Interface::default()),
-    );
-    let [unnamed, named] = [(); 2].map(|()| fixture.add_instance(id));
-    let blank = fixture.node_at(Vec2::ZERO);
-    let DocumentFixture {
-        mut document,
-        library,
-    } = fixture;
-    let main = document.graphs.main_mut();
-    main.find_mut(named).unwrap().name = "Mine".to_owned();
-    main.find_mut(blank).unwrap().name.clear();
-    let titles = |document: &Document| {
-        let scope = document.graphs.scope(&library, GraphId::Main);
-        [unnamed, named, blank]
-            .map(|node_id| title(document.graphs.main().find(node_id).unwrap(), scope).to_owned())
-    };
-    assert_eq!(titles(&document), ["Denoise", "Mine", ""]);
-    document.graphs.rename_compound(id, "Stars".to_owned());
-    assert_eq!(titles(&document), ["Stars", "Mine", ""]);
 }
 
 /// Run on Change seeds a preview the document holds that is not disabled: not a disabled one, not

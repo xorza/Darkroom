@@ -180,8 +180,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
         .document
         .graphs
         .main_mut()
-        .bindings
-        .insert(port, Binding::Const(ConstValue::Int(5)));
+        .set_input_binding(port, Binding::Const(ConstValue::Int(5)));
     let synced = fixture.document.graphs.digest(id);
     fixture.document.sides.get_mut(&id).unwrap().synced = Some(synced);
     let DocumentFixture { document, library } = fixture;
@@ -204,7 +203,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     assert_eq!((facts.dropped, facts.ghosted), (0, 1));
     let updated = open.document();
     assert_eq!(updated.graphs.compound(id), Some(&theirs));
-    assert!(!updated.graphs.main().bindings.contains_key(&port));
+    assert!(updated.graphs.main().wiring().binding(port).is_none());
     assert_eq!(
         updated.graphs.main().ghost_wiring().binding(port),
         Some(&GhostBinding {
@@ -232,8 +231,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     file_with_instance
         .graphs
         .main_mut()
-        .bindings
-        .insert(held_port, Binding::Const(ConstValue::Int(9)));
+        .set_input_binding(held_port, Binding::Const(ConstValue::Int(9)));
     let mut ours = before;
     let mut changed = ours.graphs.compound(id).unwrap().clone();
     changed.name = "Denoise, ours".to_string();
@@ -250,7 +248,7 @@ fn an_update_takes_the_librarys_definition_and_a_publish_gives_ours() {
     assert!(written.sides[&id].shared);
     assert_eq!(written.sides[&id].synced, Some(ours.graphs.digest(id)));
     assert!(
-        !written.graphs.main().bindings.contains_key(&held_port),
+        written.graphs.main().wiring().binding(held_port).is_none(),
         "the file's instance loses the port our interface does not hold"
     );
     written.validate().unwrap();

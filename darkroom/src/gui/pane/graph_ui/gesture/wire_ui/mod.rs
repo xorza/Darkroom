@@ -172,10 +172,10 @@ fn scan_snap_target(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Option<P
         .filter(|&port| accepts_wire(graph_ctx, start, port))
 }
 
-/// Whether a wire dragged from `start` may land on `port`: the graph admits the bind, and it
-/// closes no data cycle. These are the edit gate's two questions, asked of the same authoring
-/// graph, so the snap filter and `GraphIntent::into_step` cannot answer differently. Both ends
-/// are live graph nodes: the wire drops once its start is gone.
+/// Whether a wire dragged from `start` may land on `port`: the edit gate's question,
+/// [`Graph::admit_bind`](scenarium::Graph::admit_bind), asked of the same authoring graph, so the
+/// snap filter and `GraphIntent::into_step` cannot answer differently. Both ends are live graph
+/// nodes: the wire drops once its start is gone.
 fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool {
     // `start.kind` fixes which side is the producer (output) and which the
     // consumer (input).
@@ -185,11 +185,10 @@ fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool 
     };
     let input = consumer.input_port().expect("a wire lands on an input");
     let output = producer.output_port().expect("a wire reads an output");
-    let graph = graph_ctx.body();
-    graph
-        .admit(graph_ctx.scope(), input, &Binding::Wire(output))
+    graph_ctx
+        .body()
+        .admit_bind(graph_ctx.scope(), input, &Binding::Wire(output))
         .is_ok()
-        && !graph.produces_cycle(output.node_id, input.node_id)
 }
 
 /// A wire dropped on a compound's boundary node of the side that takes it: a port the interface

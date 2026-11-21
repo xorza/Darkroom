@@ -20,8 +20,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, Compound, CompoundId, GraphId, InputDecl, InputPort, Interface, Library,
-    Node, NodeId, Numbered, OutputDecl, OutputPort, PortId, Ports, TypeNames,
+    Binding, Compound, CompoundId, GraphId, InputDecl, InputPort, Interface, Library, Node, NodeId,
+    Numbered, OutputDecl, OutputPort, PortId, Ports, TypeNames, Wiring,
 };
 use thiserror::Error;
 
@@ -112,13 +112,13 @@ pub(crate) fn collapse(
     if inside.is_empty() {
         return None;
     }
+    let scope = document.graphs.scope(library, graph);
     let name = |node_id: NodeId| {
-        held.find(node_id)
-            .expect("a crossing names a graph node")
-            .name
-            .clone()
+        scope
+            .title(held.find(node_id).expect("a crossing names a graph node"))
+            .to_owned()
     };
-    for subscription in held.subscriptions() {
+    for subscription in held.wiring().subscriptions() {
         let (emitter, subscriber) = (subscription.event.node_id, subscription.trigger.node_id);
         if inside.contains(&emitter) != inside.contains(&subscriber) {
             let node = if inside.contains(&emitter) {
@@ -142,7 +142,7 @@ pub(crate) fn collapse(
     // The crossing wires, grouped by the output they read, in the graph's binding order.
     let mut incoming: Vec<Crossing> = Vec::new();
     let mut outgoing: Vec<Crossing> = Vec::new();
-    for (&input, binding) in &held.bindings {
+    for (input, binding) in held.wiring().bindings() {
         let Binding::Wire(source) = *binding else {
             continue;
         };
@@ -266,14 +266,16 @@ pub(crate) fn collapse(
         pos: centroid,
         node_id: instance_id,
         node: instance,
-        bindings: incoming
-            .iter()
-            .enumerate()
-            .map(|(idx, crossing)| BindingEntry {
-                port: InputPort::new(instance_id, port_id(idx)),
-                binding: Binding::Wire(crossing.source),
-            })
-            .collect(),
+        bindings: {
+            let mut bindings = Wiring::default();
+            for (idx, crossing) in incoming.iter().enumerate() {
+                bindings.bind(
+                    InputPort::new(instance_id, port_id(idx)),
+                    Binding::Wire(crossing.source),
+                );
+            }
+            bindings
+        },
     });
     for (idx, crossing) in outgoing.iter().enumerate() {
         for &consumer in &crossing.consumers {
@@ -335,7 +337,9 @@ pub(crate) fn expand(
     let mut fragment = Fragment::capture(document, inner, library, &items, IncomingWires::Keep);
     for inputs_node in definition.inputs_nodes() {
         fragment.rebind_from(inputs_node, |port: PortId| {
-            held.bindings.get(&InputPort::new(instance, port)).cloned()
+            held.wiring()
+                .binding(InputPort::new(instance, port))
+                .cloned()
         });
     }
     // Fresh ids in the fragment's node order, so the outputs below follow the nodes.
@@ -367,10 +371,11 @@ pub(crate) fn expand(
     intents.insert(0, GraphIntent::RemoveNode { node_id: instance });
     let fed: BTreeMap<PortId, Binding> = definition
         .graph
-        .input_bindings(outputs_node)
+        .wiring()
+        .bindings_on(outputs_node)
         .map(|(port, binding)| (port.port, remapped(binding, &fresh)))
         .collect();
-    for (&input, binding) in &held.bindings {
+    for (input, binding) in held.wiring().bindings() {
         if let Binding::Wire(source) = binding
             && source.node_id == instance
             && let Some(to) = fed.get(&source.port)
@@ -406,17 +411,15 @@ fn feeds_itself(document: &Document, graph: GraphId, inside: &BTreeSet<NodeId>) 
     let held = document.graphs.graph(graph);
     let mut consumers: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
     let mut producers: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-    for (input, binding) in &held.bindings {
-        if let Binding::Wire(source) = binding {
-            consumers
-                .entry(source.node_id)
-                .or_default()
-                .push(input.node_id);
-            producers
-                .entry(input.node_id)
-                .or_default()
-                .push(source.node_id);
-        }
+    for (input, source) in held.wiring().wires() {
+        consumers
+            .entry(source.node_id)
+            .or_default()
+            .push(input.node_id);
+        producers
+            .entry(input.node_id)
+            .or_default()
+            .push(source.node_id);
     }
     let reach = |edges: &HashMap<NodeId, Vec<NodeId>>| {
         // A walk over the graph's nodes, each visited once: bounded by their count.

@@ -56,7 +56,7 @@ pub fn nested_preview(dir: &Path) -> PathBuf {
 
     let mut inner = Compound::new("Inner", Interface::default());
     let shown = inner.graph.add_func_node(&preview);
-    inner.graph.bindings.insert(
+    inner.graph.set_input_binding(
         InputPort::new(shown, PortId::new(1)),
         Binding::Const(ConstValue::Int(NESTED_PREVIEW_VALUE)),
     );
@@ -102,12 +102,12 @@ pub fn previews_beside_a_save(dir: &Path) -> PathBuf {
     ] {
         let id = fixture.add(&preview);
         let graph = fixture.document.graphs.main_mut();
-        graph.bindings.insert(
+        graph.set_input_binding(
             InputPort::new(id, PortId::new(1)),
             Binding::Const(ConstValue::Int(value)),
         );
         let node = graph.find_mut(id).expect("just added");
-        node.name = name.to_string();
+        node.name = Some(name.to_string());
         node.disabled = disabled;
     }
     fixture.add(&save);

@@ -26,7 +26,7 @@ fn document_with_preview(node: ProgramId) -> Document {
 /// [`document_with_preview`], its node's Display set to `stretch`.
 fn document_with_display(node: ProgramId, stretch: DisplayStretch) -> Document {
     let mut document = document_with_preview(node);
-    document.graphs.main_mut().bindings.insert(
+    document.graphs.main_mut().set_input_binding(
         InputPort::new(node.node_id(), preview_sink::DISPLAY_PORT),
         Binding::Const(ConstValue::Enum(stretch.name().to_owned())),
     );

@@ -178,19 +178,16 @@ impl<'a> NodeEvents<'a> {
 
     /// In the order the node shows them.
     pub fn iter(self) -> impl ExactSizeIterator<Item = EventRef<'a>> {
-        let (funcs, declared) = match self {
-            Self::Func(events) => (events, &[][..]),
-            Self::Declared(events) => (&[][..], events),
-        };
-        let funcs = funcs.iter().map(|event| EventRef {
-            id: event.id,
-            name: &event.name,
-        });
-        let declared = declared.iter().map(|event| EventRef {
-            id: event.id,
-            name: &event.name,
-        });
-        ExactChain(funcs.chain(declared), self.len())
+        (0..self.len()).map(move |idx| match self {
+            Self::Func(events) => EventRef {
+                id: events[idx].id,
+                name: &events[idx].name,
+            },
+            Self::Declared(events) => EventRef {
+                id: events[idx].id,
+                name: &events[idx].name,
+            },
+        })
     }
 
     /// The event under `id`, if the node fires one.
@@ -198,25 +195,3 @@ impl<'a> NodeEvents<'a> {
         self.iter().find(|event| event.id == id)
     }
 }
-
-/// A chain whose length is known: one of its halves is empty.
-#[derive(Debug)]
-struct ExactChain<I>(I, usize);
-
-impl<I: Iterator> Iterator for ExactChain<I> {
-    type Item = I::Item;
-
-    fn next(&mut self) -> Option<I::Item> {
-        let next = self.0.next();
-        if next.is_some() {
-            self.1 -= 1;
-        }
-        next
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.1, Some(self.1))
-    }
-}
-
-impl<I: Iterator> ExactSizeIterator for ExactChain<I> {}

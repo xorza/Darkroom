@@ -194,7 +194,7 @@ impl From<NodeId> for TriggerPort {
     }
 }
 
-/// Address of a consumer node's input port; keys `Graph.bindings`. Distinct from `OutputPort`
+/// Address of a consumer node's input port; keys a graph's bindings. Distinct from `OutputPort`
 /// so source and sink can't be confused.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InputPort {

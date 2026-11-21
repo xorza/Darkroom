@@ -1,6 +1,6 @@
 //! [`SetNode`]: a node added to the document or removed from it.
 
-use scenarium::{Binding, DetachedGhost, DetachedNode, GraphId, InputPort, NodeId};
+use scenarium::{DetachedGhost, DetachedNode, GraphId, InputPort, NodeId, Wiring};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
@@ -65,18 +65,20 @@ impl NodeEntry {
     /// The wires the graph holds on this node: none for a ghost node, whose
     /// wiring is ghosts.
     pub(crate) fn wires(&self) -> impl Iterator<Item = WireKey> + '_ {
-        let (bindings, subscriptions) = match &self.held {
-            Held::Node(record) => (record.bindings(), record.subscriptions()),
-            Held::Ghost(_) => (&[][..], &[][..]),
+        let wiring = match &self.held {
+            Held::Node(record) => Some(record.wiring()),
+            Held::Ghost(_) => None,
         };
-        let data = bindings.iter().filter_map(|entry| match entry.binding {
-            Binding::Wire(output) => Some(WireKey::Data(DataWire {
-                output,
-                input: entry.port,
-            })),
-            Binding::Const(_) => None,
-        });
-        data.chain(subscriptions.iter().copied().map(WireKey::Event))
+        let data = wiring
+            .into_iter()
+            .flat_map(Wiring::wires)
+            .map(|(input, output)| WireKey::Data(DataWire { output, input }));
+        data.chain(
+            wiring
+                .into_iter()
+                .flat_map(Wiring::subscriptions)
+                .map(WireKey::Event),
+        )
     }
 
     /// The ghost wires that touch this node, a node's or a ghost node's, which go with it and

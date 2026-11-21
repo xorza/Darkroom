@@ -8,12 +8,11 @@
 //!   copying and pasting the selection. Refused: the copy written out once per command, five times.
 
 use std::collections::{BTreeSet, HashMap};
-use std::mem;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, CompoundId, EventPort, GraphId, InputPort, Library, Node, NodeId,
-    OutputPort, PortId, Subscription, TriggerPort,
+    Binding, CompoundId, EventPort, GraphId, InputPort, Library, Node, NodeId, OutputPort, PortId,
+    Subscription, TriggerPort, Wiring,
 };
 use serde::{Deserialize, Serialize};
 
@@ -47,13 +46,13 @@ pub(crate) struct Fragment {
 
 /// A node of a [`Fragment`]: its id, the node, where it sits, and the bindings its own inputs
 /// start with — each constant, and each wire from outside as the capture's [`IncomingWires`]
-/// left it.
+/// left it; no subscription.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct FragmentNode {
     node_id: NodeId,
     node: Node,
     pos: Vec2,
-    bindings: Vec<BindingEntry>,
+    bindings: Wiring,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -101,8 +100,8 @@ impl Fragment {
         };
         for &node_id in &inside {
             let node = held.find(node_id).expect("`inside` holds graph nodes");
-            let mut bindings = Vec::new();
-            for (port, binding) in held.input_bindings(node_id) {
+            let mut bindings = Wiring::default();
+            for (port, binding) in held.wiring().bindings_on(node_id) {
                 let binding = match binding {
                     Binding::Wire(source) if inside.contains(&source.node_id) => {
                         fragment.wires.push(DataWire {
@@ -117,7 +116,9 @@ impl Fragment {
                     },
                     Binding::Const(_) => Some(binding.clone()),
                 };
-                bindings.extend(binding.map(|binding| BindingEntry { port, binding }));
+                if let Some(binding) = binding {
+                    bindings.bind(port, binding);
+                }
             }
             fragment.nodes.push(FragmentNode {
                 node_id,
@@ -131,6 +132,7 @@ impl Fragment {
             });
         }
         fragment.subscriptions = held
+            .wiring()
             .subscriptions()
             .filter(|subscription| inside.contains(&subscription.trigger.node_id))
             .filter(|subscription| {
@@ -192,18 +194,18 @@ impl Fragment {
     /// instance's own input held.
     pub(crate) fn rebind_from(&mut self, node: NodeId, to: impl Fn(PortId) -> Option<Binding>) {
         for fragment_node in &mut self.nodes {
-            fragment_node.bindings = mem::take(&mut fragment_node.bindings)
-                .into_iter()
-                .filter_map(|entry| match entry.binding {
-                    Binding::Wire(source) if source.node_id == node => {
-                        to(source.port).map(|binding| BindingEntry {
-                            port: entry.port,
-                            binding,
-                        })
-                    }
-                    _ => Some(entry),
-                })
+            let read: Vec<(InputPort, PortId)> = fragment_node
+                .bindings
+                .wires()
+                .filter(|(_, source)| source.node_id == node)
+                .map(|(port, source)| (port, source.port))
                 .collect();
+            for (port, source) in read {
+                match to(source) {
+                    Some(binding) => fragment_node.bindings.bind(port, binding),
+                    None => fragment_node.bindings.unbind(port),
+                };
+            }
         }
     }
 
@@ -243,14 +245,13 @@ impl Fragment {
                 .into_iter()
                 .map(|fragment_node| FragmentNode {
                     node_id: node(fragment_node.node_id),
-                    bindings: fragment_node
-                        .bindings
-                        .into_iter()
-                        .map(|entry| BindingEntry {
-                            port: input(entry.port),
-                            binding: entry.binding,
-                        })
-                        .collect(),
+                    bindings: {
+                        let mut bindings = Wiring::default();
+                        for (port, binding) in fragment_node.bindings.bindings() {
+                            bindings.bind(input(port), binding.clone());
+                        }
+                        bindings
+                    },
                     ..fragment_node
                 })
                 .collect(),

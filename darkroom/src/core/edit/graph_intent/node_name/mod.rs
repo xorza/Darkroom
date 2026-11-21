@@ -1,19 +1,17 @@
 //! The name a new node takes: its own, or the next free number on it.
 
-use scenarium::Graph as CoreGraph;
+use scenarium::{Graph as CoreGraph, Scope};
 
-/// `wanted` when no node of `graph` has that name, else the base of `wanted` — its name with a
-/// trailing ` <number>` taken off — with the smallest number from 2 that no node has: a second
-/// "Blend" is "Blend 2", and a copy of "Blend 2" beside it is "Blend 3". Blender names a copy
-/// the same way (`Cube`, `Cube.001`); a space and a plain count read as the editor's other text.
+/// `wanted` when no node of `graph` reads that title in `scope`, else the base of `wanted` — its
+/// name with a trailing ` <number>` taken off — with the smallest number from 2 that no node
+/// reads: a second "Blend" is "Blend 2", and a copy of "Blend 2" beside it is "Blend 3". Blender
+/// names a copy the same way (`Cube`, `Cube.001`); a space and a plain count read as the editor's
+/// other text.
 ///
-/// An empty name stays empty: a node with none shows what it places, and two of them take no
-/// number.
-pub(super) fn free(graph: &CoreGraph, wanted: &str) -> String {
-    if wanted.is_empty() {
-        return String::new();
-    }
-    let taken = |name: &str| graph.iter().any(|node| node.name == name);
+/// A node with no name of its own takes none: it reads its declaration's, so two of them take
+/// no number.
+pub(super) fn free(graph: &CoreGraph, scope: Scope<'_>, wanted: &str) -> String {
+    let taken = |name: &str| graph.iter().any(|node| scope.title(&node) == name);
     if !taken(wanted) {
         return wanted.to_owned();
     }

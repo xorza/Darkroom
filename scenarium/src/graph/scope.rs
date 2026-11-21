@@ -45,6 +45,16 @@ impl<'a> Scope<'a> {
         self.owner
     }
 
+    /// What `node`'s title reads: its own name, else its declaration's, as Blender's group node
+    /// shows its group's name while its label is empty, so a renamed func or compound reads
+    /// renamed on each node nobody named; empty for a node that resolves to nothing here.
+    pub fn title(self, node: &'a Node) -> &'a str {
+        match &node.name {
+            Some(name) => name,
+            None => self.resolve(node).map_or("", NodeDecl::name),
+        }
+    }
+
     /// What `node` declares, or why it declares nothing here: no func or compound under its id,
     /// or a boundary node outside a compound. A declaration whose ports changed since the node
     /// was authored still resolves: the node's wiring names ports by id, and the load admits

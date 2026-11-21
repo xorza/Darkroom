@@ -39,11 +39,10 @@ pub use exec::report::node_status::NodeStatus;
 pub use exec::report::run_reporter::RunPhase;
 pub use graph::Graph;
 pub use graph::binding::Binding;
-pub use graph::binding_entry::BindingEntry;
 pub use graph::compound::Compound;
 pub use graph::detached::{DetachedGhost, DetachedNode, DetachedNodeParts};
 pub use graph::error::{
-    BindingRejection, DetachReason, DetachedNodeError, GhostRejection, GhostSubscriptionRejection,
+    BindRejection, BindingRejection, DetachReason, DetachedNodeError, GhostSubscriptionRejection,
     GraphSetValidationError, GraphValidationError, PlacementRejection, SubscriptionRejection,
     Unresolved,
 };
@@ -66,9 +65,7 @@ pub use graph::identity::{
 pub use graph::instance_path::{InstancePath, InstancePathError};
 pub use graph::interface::EventPorts;
 pub use graph::interface::Interface;
-pub use graph::interface_change::{
-    ChangeSide, InterfaceChange, NamedGhost, RefusedBinding, RefusedFate, RefusedSubscription,
-};
+pub use graph::interface_change::{ChangeSide, InterfaceChange, RefusedFate, WiringChange};
 pub use graph::manifest::Manifest;
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{Boundary, CacheMode, Keep, Node};
@@ -78,7 +75,7 @@ pub use graph::node_ref::NodeRef;
 pub use graph::port_map::{NodeRemap, PortMap, PortMapError};
 pub use graph::ports::{EventDecl, InputDecl, Numbered, OutputDecl, PortList, Ports, PortsError};
 pub use graph::program_id::{ProgramId, ProgramIdError};
-pub use graph::reconciled::{GraphSetReconciled, Reconciled, Repair};
+pub use graph::reconciled::{GraphSetReconciled, Repair};
 pub use graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 pub use graph::scope::Scope;
 pub use graph::subscription::Subscription;
@@ -87,6 +84,7 @@ pub use graph::value_domain::ValueDomain;
 pub use graph::value_domain::float_span::FloatSpan;
 pub use graph::value_domain::int_span::IntSpan;
 pub use graph::value_domain::span_error::SpanError;
+pub use graph::wiring::Wiring;
 pub use library::Library;
 pub use library::func_redirect::{FuncRedirect, MAX_REDIRECTS};
 pub use runtime::any_state::AnyState;

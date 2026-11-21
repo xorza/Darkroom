@@ -16,7 +16,6 @@ use palantir::{
 };
 use scenarium::{GraphId, RamUsage};
 
-use crate::core::document;
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::status_log::Severity;
@@ -249,7 +248,7 @@ fn run_line(ui: &mut Ui, stage: &mut Stage<'_, DocCtx<'_>>, outcome: RunOutcome)
     let Some(node) = graphs.graph(graph).find(cause.node_id()) else {
         return;
     };
-    let name = document::title(node, graphs.scope(ctx.library(), graph));
+    let name = graphs.scope(ctx.library(), graph).title(node);
     let text = fmt!(ui, "Show {name}");
     if Link::new(cause_link_wid(), text).show(ui, theme) {
         if let GraphId::Compound(compound) = graph {

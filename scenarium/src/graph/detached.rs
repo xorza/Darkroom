@@ -11,91 +11,70 @@
 
 use ::serde::{Deserialize, Serialize};
 
-use crate::graph::binding_entry::BindingEntry;
 use crate::graph::error::DetachedNodeError;
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::GhostWiring;
 use crate::graph::identity::NodeId;
 use crate::graph::node::Node;
-use crate::graph::subscription::Subscription;
+use crate::graph::wiring::Wiring;
 
-/// A node taken out of a graph, with every binding and subscription that
-/// touched it, in the order the graph keeps them, and each ghost that touched it. Well formed by
-/// construction: [`new`](Self::new) checks and orders a record from outside,
-/// deserializing goes through it, and a graph builds one from its own tables.
+/// A node taken out of a graph, with every binding and subscription that touched it and each
+/// ghost that touched it. Well formed by construction: [`new`](Self::new) checks a record from
+/// outside, deserializing goes through it, and a graph builds one from its own tables.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "DetachedNodeParts")]
 pub struct DetachedNode {
     pub(super) node_id: NodeId,
     pub(super) node: Node,
-    pub(super) bindings: Vec<BindingEntry>,
-    pub(super) subscriptions: Vec<Subscription>,
+    pub(super) wiring: Wiring,
     pub(super) ghost_wiring: GhostWiring,
 }
 
 impl DetachedNode {
-    /// A record of `parts.node` under `parts.node_id` with the wiring that
-    /// touches it, put in the graph's order. Refused when the id is nil, a
-    /// binding, a subscription or a ghost does not touch the node, one appears twice, or an
+    /// A record of `parts.node` under `parts.node_id` with the wiring that touches it. Refused
+    /// when the id is nil, a binding, a subscription or a ghost does not touch the node, or an
     /// input or a subscription is both live and a ghost.
     pub fn new(parts: DetachedNodeParts) -> Result<Self, DetachedNodeError> {
         let DetachedNodeParts {
             node_id,
             node,
-            mut bindings,
-            mut subscriptions,
+            wiring,
             ghost_wiring,
         } = parts;
         if node_id.is_nil() {
             return Err(DetachedNodeError::NilNodeId);
         }
-        if let Some(entry) = bindings
-            .iter()
-            .find(|entry| !entry.binding.touches(entry.port, node_id))
+        if let Some((port, _)) = wiring
+            .bindings()
+            .find(|(port, binding)| !binding.touches(*port, node_id))
         {
-            return Err(DetachedNodeError::ForeignBinding { port: entry.port });
+            return Err(DetachedNodeError::ForeignBinding { port });
         }
-        if let Some(subscription) = subscriptions
-            .iter()
+        if let Some(subscription) = wiring
+            .subscriptions()
             .find(|subscription| !subscription.touches(node_id))
         {
-            return Err(DetachedNodeError::ForeignSubscription {
-                subscription: *subscription,
-            });
-        }
-        bindings.sort_unstable_by_key(|entry| entry.port);
-        if let Some(pair) = bindings
-            .windows(2)
-            .find(|pair| pair[0].port == pair[1].port)
-        {
-            return Err(DetachedNodeError::DuplicateBinding { port: pair[0].port });
-        }
-        subscriptions.sort_unstable();
-        if let Some(pair) = subscriptions.windows(2).find(|pair| pair[0] == pair[1]) {
-            return Err(DetachedNodeError::DuplicateSubscription {
-                subscription: pair[0],
-            });
+            return Err(DetachedNodeError::ForeignSubscription { subscription });
         }
         if !ghost_wiring.all_touch(node_id) {
             return Err(DetachedNodeError::ForeignGhost);
         }
-        if let Some(entry) = bindings
-            .iter()
-            .find(|entry| ghost_wiring.binding(entry.port).is_some())
+        if let Some((port, _)) = wiring
+            .bindings()
+            .find(|(port, _)| ghost_wiring.binding(*port).is_some())
         {
-            return Err(DetachedNodeError::GhostOnBoundInput { port: entry.port });
+            return Err(DetachedNodeError::GhostOnBoundInput { port });
         }
-        if let Some(&subscription) = subscriptions
-            .iter()
-            .find(|subscription| ghost_wiring.subscription(**subscription).is_some())
+        if let Some(subscription) = wiring
+            .subscriptions()
+            .find(|subscription| ghost_wiring.subscription(*subscription).is_some())
         {
             return Err(DetachedNodeError::GhostOfSubscription { subscription });
         }
         Ok(Self {
             node_id,
             node,
-            bindings,
-            subscriptions,
+            wiring,
             ghost_wiring,
         })
     }
@@ -108,12 +87,9 @@ impl DetachedNode {
         &self.node
     }
 
-    pub fn bindings(&self) -> &[BindingEntry] {
-        &self.bindings
-    }
-
-    pub fn subscriptions(&self) -> &[Subscription] {
-        &self.subscriptions
+    /// Each binding and subscription that touched the node.
+    pub const fn wiring(&self) -> &Wiring {
+        &self.wiring
     }
 
     /// Each ghost that touched the node.
@@ -122,15 +98,15 @@ impl DetachedNode {
     }
 }
 
-/// The contents of a [`DetachedNode`] before [`DetachedNode::new`] checks and
-/// orders them — what a caller assembles a record from, and what one
-/// deserializes as.
+/// The contents of a [`DetachedNode`] before [`DetachedNode::new`] checks them — what a caller
+/// assembles a record from, and what one deserializes as.
 #[derive(Clone, Debug, Deserialize)]
 pub struct DetachedNodeParts {
     pub node_id: NodeId,
     pub node: Node,
-    pub bindings: Vec<BindingEntry>,
-    pub subscriptions: Vec<Subscription>,
+    /// Each binding and subscription that touches the node.
+    #[serde(default)]
+    pub wiring: Wiring,
     /// Each ghost that touches the node: none for a node an edit authors.
     #[serde(default)]
     pub ghost_wiring: GhostWiring,

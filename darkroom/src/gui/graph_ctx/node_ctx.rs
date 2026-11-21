@@ -7,7 +7,6 @@ use scenarium::{
     NodeTriggers, Numbered, PortId, ProgramId, RamUsage, SavedDecl, TriggerPort, Unresolved,
 };
 
-use crate::core::document;
 use crate::core::preview_sink;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::ghost_port::{GhostEvent, GhostPort, GhostTrigger};
@@ -145,10 +144,10 @@ impl<'a> NodeCtx<'a> {
         self.graph_ctx.theme()
     }
 
-    /// The node's title ([`document::title`]): its name, or an unnamed instance's compound's;
-    /// empty for any other node that carries none.
+    /// The node's title ([`Scope::title`](scenarium::Scope::title)): its name, else its
+    /// declaration's.
     pub(crate) fn name(self) -> &'a str {
-        document::title(self.node, self.graph_ctx.scope())
+        self.graph_ctx.scope().title(self.node)
     }
 
     /// Human-readable type identity: the declaration's name, or for a ghost node why the load took it
@@ -245,29 +244,31 @@ impl<'a> NodeCtx<'a> {
                 data_type: Some(output.data_type),
                 held: None,
             });
-        let unknown = wiring.bindings().filter_map(move |(input, ghost)| {
-            let GhostSource::Wire {
-                output,
-                saved: saved_port,
-            } = &ghost.source
-            else {
-                return None;
-            };
-            if output.node_id != node_id || known(output.port) {
-                return None;
-            }
-            // The first ghost wire that reads the output shows it.
-            let shown = wiring
-                .bindings()
-                .take_while(|(earlier, _)| *earlier < input)
-                .any(|(_, earlier)| earlier.output() == Some(*output));
-            (!shown).then(|| GhostPort {
-                port: PortRef::from(*output),
-                name: saved_port.as_ref().map(|saved| saved.name.as_str()),
-                data_type: saved_port.as_ref().map(|saved| saved.data_type),
-                held: None,
-            })
-        });
+        let unknown = wiring
+            .wires_from(node_id)
+            .filter_map(move |(input, ghost)| {
+                let GhostSource::Wire {
+                    output,
+                    saved: saved_port,
+                } = &ghost.source
+                else {
+                    unreachable!("a ghost wire reads an output");
+                };
+                if known(output.port) {
+                    return None;
+                }
+                // The first ghost wire that reads the output shows it.
+                let shown = wiring
+                    .wires_from(node_id)
+                    .take_while(|(earlier, _)| *earlier < input)
+                    .any(|(_, earlier)| earlier.output() == Some(*output));
+                (!shown).then(|| GhostPort {
+                    port: PortRef::from(*output),
+                    name: saved_port.as_ref().map(|saved| saved.name.as_str()),
+                    data_type: saved_port.as_ref().map(|saved| saved.data_type),
+                    held: None,
+                })
+            });
         from_saved.chain(unknown)
     }
 
@@ -314,10 +315,9 @@ impl<'a> NodeCtx<'a> {
         // Only the `Outputs` node lists triggers, so every other node walks no ghost wiring.
         let rows = matches!(triggers, NodeTriggers::PerEvent(_));
         let to_node = move || {
-            rows.then(|| wiring.subscriptions())
+            rows.then(|| wiring.subscriptions_to(node_id))
                 .into_iter()
                 .flatten()
-                .filter(move |(subscription, _)| subscription.trigger.node_id == node_id)
         };
         to_node()
             .enumerate()
@@ -353,7 +353,7 @@ impl<'a> NodeCtx<'a> {
         matches!(self.triggers(), NodeTriggers::None)
             && self
                 .ghost_wiring()
-                .subscriptions()
+                .subscriptions_to(self.node_id)
                 .any(|(subscription, _)| subscription.trigger == own)
     }
 
@@ -507,10 +507,7 @@ impl<'a> NodeCtx<'a> {
         let graphs = &self.graph_ctx.document().graphs;
         let graph = graphs.graph_at(failed.path())?;
         let node = graphs.graph(graph).find(failed.node_id())?;
-        Some(document::title(
-            node,
-            graphs.scope(self.graph_ctx.library(), graph),
-        ))
+        Some(graphs.scope(self.graph_ctx.library(), graph).title(node))
     }
 
     /// RAM this node's cached output currently holds (system vs GPU).

@@ -17,7 +17,6 @@ use palantir::{
 };
 use scenarium::{CompoundId, GraphId, Library};
 
-use crate::core::document;
 use crate::core::document::Document;
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::pane_kind::PaneKind;
@@ -79,7 +78,7 @@ pub(crate) fn tab_label<'a>(
                 .expect("a held inspector closes with its node");
             TabLabel::Held {
                 pane: PaneKind::Inspector,
-                name: format::node_name(document::title(node, graphs.scope(library, addr.graph))),
+                name: format::node_name(graphs.scope(library, addr.graph).title(node)),
             }
         }
     }
@@ -287,7 +286,7 @@ mod tests {
         let id = CompoundId::from_u128(1);
         let mut compound = Compound::new("Denoise", Interface::default());
         let mut preview = Node::from(&preview_sink::func(Arc::default()));
-        preview.name = "Shown".to_string();
+        preview.name = Some("Shown".to_owned());
         let shown = compound.graph.add(preview);
         insert_compound(&mut fixture.document, id, compound);
         let instance = fixture.add_instance(id);

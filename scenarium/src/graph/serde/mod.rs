@@ -15,7 +15,8 @@ use crate::graph::binding::Binding;
 use crate::graph::compound::Compound;
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{GhostBinding, GhostSubscription};
-use crate::graph::identity::{CompoundId, FuncId, InputPort, NodeId};
+use crate::graph::identity::{CompoundId, FuncId, GraphId, InputPort, NodeId};
+use crate::graph::interface_change::WiringChange;
 use crate::graph::node::Node;
 use crate::graph::saved_decl::SavedDecl;
 use crate::graph::subscription::Subscription;
@@ -63,6 +64,13 @@ pub(super) fn deserialize_ghost_subscriptions<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<BTreeMap<Subscription, GhostSubscription>, D::Error> {
     unique_pairs(deserializer, "ghost of")
+}
+
+/// An interface change's graphs, refusing a graph given twice.
+pub(super) fn deserialize_wiring_changes<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<GraphId, WiringChange>, D::Error> {
+    unique_pairs(deserializer, "wiring change of graph")
 }
 
 /// The node table, decoded as a map like the derive would, but refusing a repeated id: two

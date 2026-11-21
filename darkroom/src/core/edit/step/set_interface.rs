@@ -1,7 +1,5 @@
 //! [`SetInterface`]: an edit of a compound's interface, with what it takes out of every view.
 
-use std::collections::BTreeMap;
-
 use scenarium::Interface;
 use scenarium::{Binding, ChangeSide, CompoundId, GraphId, InterfaceChange, Library, RefusedFate};
 use serde::{Deserialize, Serialize};
@@ -44,38 +42,27 @@ impl SetInterface {
         fate: RefusedFate,
     ) -> Self {
         let change = document.graphs.plan_interface(id, to, library, fate);
-        let mut drafts: BTreeMap<GraphId, TiesDraft<'_>> = BTreeMap::new();
-        let dropped = change
-            .refused()
-            .iter()
-            .filter(|_| fate == RefusedFate::Drop);
-        for dropped in dropped {
-            if let Binding::Wire(output) = dropped.binding() {
-                drafts
-                    .entry(dropped.graph)
-                    .or_insert_with(|| TiesDraft::new(document.view(dropped.graph)))
-                    .release([WireKey::Data(DataWire {
-                        output,
-                        input: dropped.port,
-                    })]);
-            }
-        }
+        let mut views = Vec::new();
         if fate == RefusedFate::Drop {
-            for dropped in change.refused_subscriptions() {
-                drafts
-                    .entry(dropped.graph)
-                    .or_insert_with(|| TiesDraft::new(document.view(dropped.graph)))
-                    .release([WireKey::Event(dropped.subscription)]);
+            for (graph, wiring) in change.graphs() {
+                let refused = wiring.refused();
+                let mut draft = TiesDraft::new(document.view(graph));
+                draft.release(
+                    refused
+                        .wires()
+                        .map(|(input, output)| WireKey::Data(DataWire { output, input })),
+                );
+                draft.release(
+                    refused
+                        .subscriptions()
+                        .map(|(subscription, _)| WireKey::Event(subscription)),
+                );
+                let ties = draft.finish();
+                if !ties.is_noop() {
+                    views.push(ViewTies { graph, ties });
+                }
             }
         }
-        let views = drafts
-            .into_iter()
-            .map(|(graph, draft)| ViewTies {
-                graph,
-                ties: draft.finish(),
-            })
-            .filter(|view| !view.ties.is_noop())
-            .collect();
         Self { change, views }
     }
 
@@ -98,17 +85,21 @@ impl SetInterface {
     /// The ports of every instance and both boundary nodes change, in every graph that places
     /// one, and a refused constant takes its editor with it.
     pub(super) fn facts(&self) -> EditFacts {
-        let refused = self.change.refused();
-        let count = refused.len() + self.change.refused_subscriptions().len();
+        let refused = || self.change.graphs().map(|(_, wiring)| wiring.refused());
+        let count = refused()
+            .map(|refused| refused.bindings().len() + refused.subscriptions().len())
+            .sum();
         let (dropped, ghosted) = match self.change.fate() {
             RefusedFate::Drop => (count, 0),
             RefusedFate::Ghost => (0, count),
         };
         EditFacts {
             ports: true,
-            binding_kind: refused
-                .iter()
-                .any(|refused| matches!(refused.binding(), Binding::Const(_))),
+            binding_kind: refused().any(|refused| {
+                refused
+                    .bindings()
+                    .any(|(_, ghost)| matches!(ghost.binding(), Binding::Const(_)))
+            }),
             dropped,
             ghosted,
             touched: Touched::Several,

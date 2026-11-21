@@ -7,10 +7,9 @@ use crate::data::const_value::ConstValue;
 use crate::data::data_type::file_kind::FileKindId;
 use crate::data::data_type::{DataType, FileMode};
 use crate::graph::binding::Binding;
-use crate::graph::binding_entry::BindingEntry;
 use crate::graph::detached::{DetachedNode, DetachedNodeParts};
 use crate::graph::error::{
-    BindingRejection, DetachReason, DetachedNodeError, GhostRejection, GhostSubscriptionRejection,
+    BindRejection, BindingRejection, DetachReason, DetachedNodeError, GhostSubscriptionRejection,
     GraphValidationError, SubscriptionRejection, Unresolved,
 };
 use crate::graph::func::Func;
@@ -20,13 +19,14 @@ use crate::graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
 };
 use crate::graph::graph_set::GraphSet;
-use crate::graph::identity::{EventPort, FuncId, PortId};
+use crate::graph::identity::{EventPort, FuncId, GraphId, PortId};
 use crate::graph::manifest::Manifest;
 use crate::graph::node::{BodySource, CacheMode, Keep, Node, NodeKind};
 use crate::graph::ports::{InputDecl, Numbered};
-use crate::graph::reconciled::{Reconciled, Repair};
-use crate::graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort};
+use crate::graph::reconciled::Repair;
+use crate::graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 use crate::graph::subscription::Subscription;
+use crate::graph::wiring::Wiring;
 use crate::graph::{Detaching, Graph, InputPort, NodeId, OutputPort};
 use crate::internals;
 use crate::internals::test_graph::TestGraph;
@@ -90,7 +90,7 @@ fn cache_mode_round_trips() {
             let bytes = format.serialize(&g.graph()).unwrap();
             let back: Graph = format.deserialize(&bytes).unwrap();
             assert_eq!(
-                back.find_by_name("src").unwrap().cache(),
+                back.find(g.id("src")).unwrap().cache(),
                 Some(mode),
                 "{mode:?} via {format:?}"
             );
@@ -139,19 +139,15 @@ fn a_new_node_takes_what_its_declaration_says() {
 
     assert_eq!(
         Node::from(&hot).name,
-        "hot",
-        "and the func's name, so a placed node is labelled without a second lookup"
+        None,
+        "and no name of its own: it reads its func's"
     );
 
-    // A special node's declaration is hardcoded, so `From<SpecialNode>` reaches
-    // it and takes both halves — no caller has to name the node afterwards.
+    // A special node's declaration is hardcoded, so `From<SpecialNode>` reaches it for the cache
+    // mode.
     let special = SpecialNode::RunSinks;
     let node = Node::from(special);
-    assert_eq!(node.name, special.func().name());
-    assert!(
-        !node.name.is_empty(),
-        "a hardcoded declaration always names it"
-    );
+    assert_eq!(node.name, None);
     assert_eq!(node.cache(), Some(special.func().default_cache_mode()));
 
     // Resolving a `Func` kind takes a library this constructor does not have, so it starts
@@ -159,7 +155,7 @@ fn a_new_node_takes_what_its_declaration_says() {
     // resolved.
     let unresolved = internals::unresolved_node(FuncId::unique());
     assert_eq!(unresolved.cache(), Some(CacheMode::AUTO));
-    assert!(unresolved.name.is_empty());
+    assert_eq!(unresolved.name, None);
 }
 
 #[test]
@@ -261,16 +257,22 @@ fn removing_a_node_drops_it_and_every_edge_touching_it() {
     let mut g = TestGraph::sample();
     let sum = g.id("sum");
 
+    // `get_a → sum.0`, `get_b → sum.1` and `sum → mult.0` touch it; `get_b → mult.1` and
+    // `mult → Print` do not.
+    let mut survivors = vec![
+        (g.input("mult", 1), g.output("get_b", 0)),
+        (g.input("Print", 0), g.output("mult", 0)),
+    ];
+    survivors.sort_unstable();
     g.remove("sum");
 
-    assert!(g.graph().find_by_name("sum").is_none());
+    assert!(g.graph().find(sum).is_none());
     assert_eq!(g.graph().len(), 4);
-
-    // No surviving edge references the removed node (as consumer or producer).
-    for (dst, src) in g.graph().wires() {
-        assert_ne!(dst.node_id, sum);
-        assert_ne!(src.node_id, sum);
-    }
+    assert_eq!(
+        g.graph().wiring().wires().collect::<Vec<_>>(),
+        survivors,
+        "exactly the wires that touched it go"
+    );
 }
 
 /// The rule the editor applies before it lets a wire land: a back-edge closes
@@ -359,19 +361,19 @@ fn input_bindings_are_sparse_and_none_removes_an_entry() {
     let second = InputPort::new(g.id("sum"), PortId::new(2));
     let absent = InputPort::new(g.id("sum"), PortId::new(3));
     assert_eq!(
-        g.graph().bindings.get(&first),
+        g.graph().wiring().binding(first),
         Some(&Binding::wire(g.id("get_a"), PortId::new(1)))
     );
     assert_eq!(
-        g.graph().bindings.get(&second),
+        g.graph().wiring().binding(second),
         Some(&Binding::wire(g.id("get_b"), PortId::new(1)))
     );
-    assert!(!g.graph().bindings.contains_key(&absent));
+    assert!(g.graph().wiring().binding(absent).is_none());
 
-    let binding_count = g.graph().bindings.len();
+    let binding_count = g.graph().wiring().bindings().len();
     g.unbind("sum", 0);
-    assert!(!g.graph().bindings.contains_key(&first));
-    assert_eq!(g.graph().bindings.len(), binding_count - 1);
+    assert!(g.graph().wiring().binding(first).is_none());
+    assert_eq!(g.graph().wiring().bindings().len(), binding_count - 1);
 }
 
 #[test]
@@ -379,27 +381,27 @@ fn subscribe_unsubscribe_is_subscribed() {
     let mut g = TestGraph::sample();
     let (emitter, sub) = (g.id("get_a"), g.id("sum"));
 
-    assert!(
-        !g.graph()
-            .is_subscribed(EventPort::new(emitter, PortId::new(1)), sub)
-    );
+    assert!(!g.graph().wiring().is_subscribed(Subscription::new(
+        EventPort::new(emitter, PortId::new(1)),
+        sub
+    )));
     g.graph_mut()
         .subscribe(EventPort::new(emitter, PortId::new(1)), sub);
-    assert!(
-        g.graph()
-            .is_subscribed(EventPort::new(emitter, PortId::new(1)), sub)
-    );
+    assert!(g.graph().wiring().is_subscribed(Subscription::new(
+        EventPort::new(emitter, PortId::new(1)),
+        sub
+    )));
 
     // Distinct event_idx is a distinct edge.
-    assert!(
-        !g.graph()
-            .is_subscribed(EventPort::new(emitter, PortId::new(2)), sub)
-    );
+    assert!(!g.graph().wiring().is_subscribed(Subscription::new(
+        EventPort::new(emitter, PortId::new(2)),
+        sub
+    )));
 
     // Re-subscribing is idempotent (BTreeSet dedups).
     g.graph_mut()
         .subscribe(EventPort::new(emitter, PortId::new(1)), sub);
-    assert_eq!(g.graph().subscriptions().count(), 1);
+    assert_eq!(g.graph().wiring().subscriptions().count(), 1);
 
     // One event carries several subscribers, and a second event off the same
     // emitter is its own edge — so the three coexist rather than overwriting.
@@ -408,22 +410,22 @@ fn subscribe_unsubscribe_is_subscribed() {
         .subscribe(EventPort::new(emitter, PortId::new(1)), sub2);
     g.graph_mut()
         .subscribe(EventPort::new(emitter, PortId::new(2)), other);
-    assert!(
-        g.graph()
-            .is_subscribed(EventPort::new(emitter, PortId::new(1)), sub)
-    );
-    assert!(
-        g.graph()
-            .is_subscribed(EventPort::new(emitter, PortId::new(1)), sub2)
-    );
-    assert!(
-        g.graph()
-            .is_subscribed(EventPort::new(emitter, PortId::new(2)), other)
-    );
-    assert!(
-        !g.graph()
-            .is_subscribed(EventPort::new(emitter, PortId::new(2)), sub)
-    );
+    assert!(g.graph().wiring().is_subscribed(Subscription::new(
+        EventPort::new(emitter, PortId::new(1)),
+        sub
+    )));
+    assert!(g.graph().wiring().is_subscribed(Subscription::new(
+        EventPort::new(emitter, PortId::new(1)),
+        sub2
+    )));
+    assert!(g.graph().wiring().is_subscribed(Subscription::new(
+        EventPort::new(emitter, PortId::new(2)),
+        other
+    )));
+    assert!(!g.graph().wiring().is_subscribed(Subscription::new(
+        EventPort::new(emitter, PortId::new(2)),
+        sub
+    )));
 
     // `subscriptions` yields them in (event, subscriber) order, whatever
     // order they were authored in — the determinism a compile's subscriber
@@ -434,29 +436,32 @@ fn subscribe_unsubscribe_is_subscribed() {
         Subscription::new(EventPort::new(emitter, PortId::new(2)), other),
     ];
     expected.sort();
-    assert_eq!(g.graph().subscriptions().collect::<Vec<_>>(), expected);
+    assert_eq!(
+        g.graph().wiring().subscriptions().collect::<Vec<_>>(),
+        expected
+    );
 
     // Dropping one edge leaves its siblings alone.
     g.graph_mut()
         .unsubscribe(EventPort::new(emitter, PortId::new(1)), sub);
-    assert!(
-        !g.graph()
-            .is_subscribed(EventPort::new(emitter, PortId::new(1)), sub)
-    );
-    assert!(
-        g.graph()
-            .is_subscribed(EventPort::new(emitter, PortId::new(1)), sub2)
-    );
-    assert!(
-        g.graph()
-            .is_subscribed(EventPort::new(emitter, PortId::new(2)), other)
-    );
+    assert!(!g.graph().wiring().is_subscribed(Subscription::new(
+        EventPort::new(emitter, PortId::new(1)),
+        sub
+    )));
+    assert!(g.graph().wiring().is_subscribed(Subscription::new(
+        EventPort::new(emitter, PortId::new(1)),
+        sub2
+    )));
+    assert!(g.graph().wiring().is_subscribed(Subscription::new(
+        EventPort::new(emitter, PortId::new(2)),
+        other
+    )));
 
     g.graph_mut()
         .unsubscribe(EventPort::new(emitter, PortId::new(1)), sub2);
     g.graph_mut()
         .unsubscribe(EventPort::new(emitter, PortId::new(2)), other);
-    assert_eq!(g.graph().subscriptions().count(), 0);
+    assert_eq!(g.graph().wiring().subscriptions().count(), 0);
 }
 
 /// A detached node carries exactly the wiring that touched it, and attaching it
@@ -478,7 +483,8 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
     // Its own two inputs, in port-id order; the binding that reads it is not one.
     assert_eq!(
         g.graph()
-            .input_bindings(sum)
+            .wiring()
+            .bindings_on(sum)
             .map(|(port, _)| port)
             .collect::<Vec<_>>(),
         [
@@ -488,89 +494,78 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
     );
 
     let before = g.graph().clone();
-    let edges_before = g.graph().wires().count();
+    let edges_before = g.graph().wiring().wires().count();
     let detached = g.remove("sum");
-    assert_eq!(g.graph().wires().count(), edges_before - 3);
-    assert!(
-        !g.graph()
-            .is_subscribed(EventPort::new(get_a, PortId::new(1)), sum)
-    );
-    assert_eq!(detached.bindings().len(), 3);
-    assert_eq!(detached.subscriptions().len(), 1);
+    assert_eq!(g.graph().wiring().wires().count(), edges_before - 3);
+    assert!(!g.graph().wiring().is_subscribed(Subscription::new(
+        EventPort::new(get_a, PortId::new(1)),
+        sum
+    )));
+    assert_eq!(detached.wiring().bindings().len(), 3);
+    assert_eq!(detached.wiring().subscriptions().len(), 1);
 
-    let rebuild_with =
-        |bindings: Vec<BindingEntry>, subscriptions: Vec<Subscription>, ghost_wiring| {
-            DetachedNode::new(DetachedNodeParts {
-                node_id: sum,
-                node: detached.node().clone(),
-                bindings,
-                subscriptions,
-                ghost_wiring,
-            })
-        };
-    let rebuild =
-        |bindings, subscriptions| rebuild_with(bindings, subscriptions, GhostWiring::default());
-    let mut reversed = detached.bindings().to_vec();
-    reversed.reverse();
+    let rebuild_with = |wiring, ghost_wiring| {
+        DetachedNode::new(DetachedNodeParts {
+            node_id: sum,
+            node: detached.node().clone(),
+            wiring,
+            ghost_wiring,
+        })
+    };
+    let rebuild = |wiring| rebuild_with(wiring, GhostWiring::default());
     assert_eq!(
-        rebuild(reversed, detached.subscriptions().to_vec()),
+        rebuild(detached.wiring().clone()),
         Ok(detached.clone()),
-        "a record from outside is put in the graph's order"
+        "a record from outside is taken as it is"
     );
 
     let foreign_port = InputPort::new(mult, PortId::new(2));
-    let foreign = BindingEntry {
-        port: foreign_port,
-        binding: Binding::Const(1i64.into()),
-    };
-    let first = detached.bindings()[0].clone();
+    let mut foreign = Wiring::default();
+    foreign.bind(foreign_port, Binding::Const(1i64.into()));
+    let (first, _) = detached.wiring().bindings().next().unwrap();
+    let mut bound_first = Wiring::default();
+    bound_first.bind(first, Binding::Const(1i64.into()));
     let ghost_on = |port| GhostWiring {
         bindings: [(port, GhostBinding::from(Binding::Const(1i64.into())))].into(),
         ..GhostWiring::default()
     };
     let elsewhere = Subscription::new(EventPort::new(get_a, PortId::new(1)), mult);
-    let own = detached.subscriptions()[0];
+    let mut subscribed_elsewhere = Wiring::default();
+    subscribed_elsewhere.subscribe(elsewhere);
+    let own = detached.wiring().subscriptions().next().unwrap();
+    let mut subscribed_own = Wiring::default();
+    subscribed_own.subscribe(own);
     let refusals = [
         (
             DetachedNode::new(DetachedNodeParts {
                 node_id: NodeId::nil(),
                 node: detached.node().clone(),
-                bindings: Vec::new(),
-                subscriptions: Vec::new(),
+                wiring: Wiring::default(),
                 ghost_wiring: GhostWiring::default(),
             }),
             DetachedNodeError::NilNodeId,
         ),
         (
-            rebuild(vec![foreign], Vec::new()),
+            rebuild(foreign),
             DetachedNodeError::ForeignBinding { port: foreign_port },
         ),
         (
-            rebuild(vec![first.clone(), first.clone()], Vec::new()),
-            DetachedNodeError::DuplicateBinding { port: first.port },
-        ),
-        (
-            rebuild(Vec::new(), vec![elsewhere]),
+            rebuild(subscribed_elsewhere),
             DetachedNodeError::ForeignSubscription {
                 subscription: elsewhere,
             },
         ),
         (
-            rebuild(Vec::new(), vec![own, own]),
-            DetachedNodeError::DuplicateSubscription { subscription: own },
-        ),
-        (
-            rebuild_with(Vec::new(), Vec::new(), ghost_on(foreign_port)),
+            rebuild_with(Wiring::default(), ghost_on(foreign_port)),
             DetachedNodeError::ForeignGhost,
         ),
         (
-            rebuild_with(vec![first.clone()], Vec::new(), ghost_on(first.port)),
-            DetachedNodeError::GhostOnBoundInput { port: first.port },
+            rebuild_with(bound_first, ghost_on(first)),
+            DetachedNodeError::GhostOnBoundInput { port: first },
         ),
         (
             rebuild_with(
-                Vec::new(),
-                vec![own],
+                subscribed_own,
                 GhostWiring {
                     subscriptions: [(own, GhostSubscription::default())].into(),
                     ..GhostWiring::default()
@@ -617,7 +612,7 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
     // the node goes in, where it once left a live binding and a ghost on one input.
     let detached = g.graph_mut().detach_node(sum);
     g.graph_mut().set_input_state(
-        first.port,
+        first,
         InputState::Ghost(GhostBinding::from(Binding::Const(1i64.into()))),
     );
     let ghosted = g.graph().clone();
@@ -653,7 +648,9 @@ fn add_func_node_seeds_only_the_inputs_with_defaults() {
         }
     );
     assert_eq!(
-        g.graph().bindings.get(&InputPort::new(id, PortId::new(1))),
+        g.graph()
+            .wiring()
+            .binding(InputPort::new(id, PortId::new(1))),
         Some(&Binding::Const(7i64.into()))
     );
 
@@ -666,14 +663,16 @@ fn add_func_node_seeds_only_the_inputs_with_defaults() {
     let sum = g.id("sum");
 
     assert!(
-        !g.graph()
-            .bindings
-            .contains_key(&InputPort::new(sum, PortId::new(1)))
+        g.graph()
+            .wiring()
+            .binding(InputPort::new(sum, PortId::new(1)))
+            .is_none()
     );
     assert!(
-        !g.graph()
-            .bindings
-            .contains_key(&InputPort::new(sum, PortId::new(2)))
+        g.graph()
+            .wiring()
+            .binding(InputPort::new(sum, PortId::new(2)))
+            .is_none()
     );
 }
 
@@ -699,10 +698,14 @@ fn loading_rejects_a_corrupt_graph() {
     #[derive(Debug, serde::Serialize, serde::Deserialize)]
     struct WireGraph {
         nodes: Box<RawValue>,
-        bindings: Vec<Box<RawValue>>,
-        subscriptions: Box<RawValue>,
+        wiring: WireWiring,
         ghost_nodes: Box<RawValue>,
         ghost_wiring: WireGhosts,
+    }
+    #[derive(Debug, serde::Serialize, serde::Deserialize)]
+    struct WireWiring {
+        bindings: Vec<Box<RawValue>>,
+        subscriptions: Box<RawValue>,
     }
     #[derive(Debug, serde::Serialize, serde::Deserialize)]
     struct WireGhosts {
@@ -756,7 +759,7 @@ fn loading_rejects_a_corrupt_graph() {
     // caught during decode rather than by validation after it.
     let encoded = ser::to_string(&TestGraph::sample().graph()).unwrap();
     let mut wire: WireGraph = ron::from_str(&encoded).expect("the wire shape still matches");
-    wire.bindings.push(wire.bindings[0].clone());
+    wire.wiring.bindings.push(wire.wiring.bindings[0].clone());
     let bytes = ser::to_string(&wire).unwrap().into_bytes();
     let error = SerdeFormat::Ron
         .deserialize::<Graph>(&bytes)
@@ -804,22 +807,9 @@ fn ghost(g: &mut TestGraph, name: &str, reason: DetachReason) -> NodeId {
             reason,
             saved: None,
         }],
-        &mut Reconciled::default(),
+        &mut Vec::new(),
     );
     node_id
-}
-
-/// The repairs of a load in an order that does not turn on the nodes' random ids: each kind in
-/// the order the load makes it, the bindings of one kind by port.
-fn by_port(mut repairs: Vec<Repair>) -> Vec<Repair> {
-    repairs.sort_by_key(|repair| match repair {
-        Repair::DanglingBinding { port, .. }
-        | Repair::GhostOnBoundInput { port, .. }
-        | Repair::GhostedBinding { port, .. }
-        | Repair::RestoredBinding { port, .. } => Some(*port),
-        _ => None,
-    });
-    repairs
 }
 
 /// A wire between two ghost nodes is kept once among the graph's ghosts, so either of them
@@ -845,8 +835,7 @@ fn a_wire_between_two_ghost_nodes_outlives_either_returning_alone() {
         assert_eq!(
             g.graphs
                 .reconcile(&g.library, &Manifest::default())
-                .main
-                .repairs,
+                .of(GraphId::Main),
             ghosted.map(|node_id| Repair::GhostedNode {
                 node_id,
                 reason: missing
@@ -877,26 +866,25 @@ fn a_wire_between_two_ghost_nodes_outlives_either_returning_alone() {
                 .collect::<Vec<_>>()
         };
         assert_eq!(ghosts(&g), all, "each wire is a ghost once");
-        assert_eq!(g.graph().bindings.len(), 0);
+        assert_eq!(g.graph().wiring().bindings().len(), 0);
         g.graph().validate_with(g.scope()).unwrap();
 
         let mut restore = |g: &mut TestGraph, name: &str, wires: &[(InputPort, Binding)]| {
             let (_, node_id, func) = funcs.iter_mut().find(|(held, ..)| *held == name).unwrap();
             g.library.add(func.take().unwrap());
+            // The node comes back, then each ghost on it in the order the graph keeps them.
+            let mut wires = wires.to_vec();
+            wires.sort_unstable_by_key(|(port, _)| *port);
             let mut restored: Vec<Repair> = wires
-                .iter()
-                .cloned()
+                .into_iter()
                 .map(|(port, binding)| Repair::RestoredBinding { port, binding })
                 .collect();
             restored.insert(0, Repair::Reattached { node_id: *node_id });
             assert_eq!(
-                by_port(
-                    g.graphs
-                        .reconcile(&g.library, &Manifest::default())
-                        .main
-                        .repairs
-                ),
-                by_port(restored),
+                g.graphs
+                    .reconcile(&g.library, &Manifest::default())
+                    .of(GraphId::Main),
+                restored,
                 "{name} returns"
             );
             g.graph().validate_with(g.scope()).unwrap();
@@ -979,16 +967,19 @@ fn a_load_repairs_the_ghosts_a_file_breaks() {
             GhostBinding::from(Binding::wire(get_b, PortId::new(9))),
         );
         graph
-            .bindings
-            .insert(port(print, 1), Binding::wire(absent, PortId::new(1)));
+            .wiring
+            .bind(port(print, 1), Binding::wire(absent, PortId::new(1)));
     }
 
-    let reconciled = g.graphs.reconcile(&g.library, &Manifest::default()).main;
+    let reconciled = g
+        .graphs
+        .reconcile(&g.library, &Manifest::default())
+        .of(GraphId::Main);
 
     let into_ghost = |port, binding| Repair::GhostedBinding {
         port,
         binding,
-        rejection: GhostRejection::GhostNode { node_id: sum },
+        rejection: BindRejection::GhostNode { node_id: sum },
     };
     let mut ghost_repairs = vec![
         Repair::GhostOnBoundInput {
@@ -1033,7 +1024,7 @@ fn a_load_repairs_the_ghosts_a_file_breaks() {
             subscription: stray,
         }])
         .collect();
-    assert_eq!(reconciled.repairs, expected);
+    assert_eq!(reconciled, expected);
     assert!(g.graph().find(get_a).is_some(), "the node keeps its id");
     assert_eq!(
         g.graph()
@@ -1055,7 +1046,7 @@ fn a_load_repairs_the_ghosts_a_file_breaks() {
     assert!(
         g.graphs
             .reconcile(&g.library, &Manifest::default())
-            .main
+            .of(GraphId::Main)
             .is_empty()
     );
 }
@@ -1179,7 +1170,7 @@ fn an_input_holds_one_binding_live_or_ghost() {
     let kept = GhostBinding::from(wire);
     g.graph_mut()
         .set_input_state(port, InputState::Ghost(kept.clone()));
-    assert_eq!(g.graph().bindings.get(&port), None);
+    assert_eq!(g.graph().wiring().binding(port), None);
     assert_eq!(g.graph().ghost_wiring().binding(port), Some(&kept));
     assert_eq!(g.graph().input_state(port), InputState::Ghost(kept));
 
@@ -1192,7 +1183,7 @@ fn an_input_holds_one_binding_live_or_ghost() {
     );
     g.graph_mut().set_input_state(port, InputState::Unbound);
     assert_eq!(g.graph().input_state(port), InputState::Unbound);
-    assert_eq!(g.graph().bindings.get(&port), None);
+    assert_eq!(g.graph().wiring().binding(port), None);
 
     let subscription = Subscription::new(EventPort::new(get_a, PortId::new(1)), sum);
     let state = |g: &TestGraph| g.graph().subscription_state(subscription);
@@ -1201,7 +1192,11 @@ fn an_input_holds_one_binding_live_or_ghost() {
     g.graph_mut()
         .set_subscription_state(subscription, ghost.clone());
     assert_eq!(state(&g), ghost);
-    assert!(!g.graph().is_subscribed(subscription.event, sum));
+    assert!(
+        !g.graph()
+            .wiring()
+            .is_subscribed(Subscription::new(subscription.event, sum))
+    );
     g.graph_mut().subscribe(subscription.event, sum);
     assert_eq!(state(&g), SubscriptionState::Live);
     assert_eq!(g.graph().ghost_wiring().subscriptions().len(), 0);
@@ -1233,23 +1228,22 @@ fn a_ghost_is_held_to_admission_and_the_loop_check() {
     assert_eq!(
         g.graphs
             .reconcile(&g.library, &Manifest::default())
-            .main
-            .repairs,
+            .of(GraphId::Main),
         [Repair::GhostedBinding {
             port: closing,
             binding: from_a.clone(),
-            rejection: GhostRejection::Cycle,
+            rejection: BindRejection::Cycle,
         }],
         "the walk enters `a` first, reads `b`, and `b`'s wire from `a` returns to the path"
     );
     assert_eq!(
         g.graph().admit_ghost(g.scope(), closing),
-        Err(GhostRejection::Cycle)
+        Err(BindRejection::Cycle)
     );
     assert!(
         g.graphs
             .reconcile(&g.library, &Manifest::default())
-            .main
+            .of(GraphId::Main)
             .is_empty()
     );
 
@@ -1258,21 +1252,20 @@ fn a_ghost_is_held_to_admission_and_the_loop_check() {
     assert_eq!(
         g.graphs
             .reconcile(&g.library, &Manifest::default())
-            .main
-            .repairs,
+            .of(GraphId::Main),
         [Repair::RestoredBinding {
             port: closing,
             binding: from_a.clone(),
         }]
     );
-    assert_eq!(g.graph().bindings.get(&closing), Some(&from_a));
+    assert_eq!(g.graph().wiring().binding(closing), Some(&from_a));
 
     let into_sink = InputPort::new(sink, PortId::new(1));
     let tick = Subscription::new(EventPort::new(ticker, PortId::new(1)), sink);
     ghost(&mut g, "ticker", DetachReason::TooLarge);
     assert_eq!(
         g.graph().admit_ghost(g.scope(), into_sink),
-        Err(GhostRejection::GhostNode { node_id: ticker })
+        Err(BindRejection::GhostNode { node_id: ticker })
     );
     assert_eq!(
         g.graph().admit_ghost_subscription(g.scope(), tick),
@@ -1281,8 +1274,7 @@ fn a_ghost_is_held_to_admission_and_the_loop_check() {
     assert_eq!(
         g.graphs
             .reconcile(&g.library, &Manifest::default())
-            .main
-            .repairs,
+            .of(GraphId::Main),
         [
             Repair::Reattached { node_id: ticker },
             Repair::RestoredBinding {
@@ -1294,7 +1286,11 @@ fn a_ghost_is_held_to_admission_and_the_loop_check() {
         "a ghost node that resolves returns with its wiring"
     );
     assert!(g.graph().ghost_wiring().is_empty());
-    assert!(g.graph().is_subscribed(tick.event, sink));
+    assert!(
+        g.graph()
+            .wiring()
+            .is_subscribed(Subscription::new(tick.event, sink))
+    );
 
     // A file that keeps a ghost of a subscription it also makes: the ghost goes.
     g.graph_mut()
@@ -1308,11 +1304,14 @@ fn a_ghost_is_held_to_admission_and_the_loop_check() {
     assert_eq!(
         g.graphs
             .reconcile(&g.library, &Manifest::default())
-            .main
-            .repairs,
+            .of(GraphId::Main),
         [Repair::GhostOfSubscription { subscription: tick }]
     );
-    assert!(g.graph().is_subscribed(tick.event, sink));
+    assert!(
+        g.graph()
+            .wiring()
+            .is_subscribed(Subscription::new(tick.event, sink))
+    );
 }
 
 /// Admission refuses wiring past what a node declares — an input, a
@@ -1392,11 +1391,15 @@ fn a_func_whose_ports_change_keeps_each_binding_its_ports_still_admit() {
         let original = g.graph().clone();
         let before = g.library.by_name("dst").unwrap().clone();
         g.edit_func("dst", edit);
-        let report = g.graphs.reconcile(&g.library, &Manifest::default()).main;
+        let report = g
+            .graphs
+            .reconcile(&g.library, &Manifest::default())
+            .of(GraphId::Main);
         assert!(g.graph().find(g.id("dst")).is_some(), "the node resolves");
         let bindings: Vec<(PortId, Binding)> = g
             .graph()
-            .input_bindings(g.id("dst"))
+            .wiring()
+            .bindings_on(g.id("dst"))
             .map(|(port, binding)| (port.port, binding.clone()))
             .collect();
         let ghosts: Vec<(InputPort, Binding)> = g
@@ -1406,7 +1409,6 @@ fn a_func_whose_ports_change_keeps_each_binding_its_ports_still_admit() {
             .map(|(port, ghost)| (port, ghost.binding()))
             .collect();
         let kept: Vec<(InputPort, Binding)> = report
-            .repairs
             .iter()
             .map(|repair| match repair {
                 Repair::GhostedBinding { port, binding, .. } => (*port, binding.clone()),
@@ -1421,8 +1423,7 @@ fn a_func_whose_ports_change_keeps_each_binding_its_ports_still_admit() {
         let restored = g
             .graphs
             .reconcile(&g.library, &Manifest::default())
-            .main
-            .repairs;
+            .of(GraphId::Main);
         assert_eq!(
             restored,
             kept.into_iter()
@@ -1430,7 +1431,7 @@ fn a_func_whose_ports_change_keeps_each_binding_its_ports_still_admit() {
                 .collect::<Vec<_>>()
         );
         assert_eq!(*g.graph(), original);
-        (bindings, report.repairs)
+        (bindings, report)
     };
     let src = fixture().id("src");
     let all = vec![
@@ -1606,7 +1607,7 @@ fn a_manifest_tells_a_load_what_each_func_declared() {
         rejection: rejection.into(),
     };
     assert_eq!(
-        g.graphs.reconcile(&g.library, &manifest).main.repairs,
+        g.graphs.reconcile(&g.library, &manifest).of(GraphId::Main),
         [
             ghosted(1, from_src.clone(), BindingRejection::UndeclaredOutput),
             ghosted(2, int(2), BindingRejection::UndeclaredInput),
@@ -1672,7 +1673,7 @@ fn a_manifest_tells_a_load_what_each_func_declared() {
                 InputDecl::optional("new", DataType::Int).default(9i64),
             ));
         });
-        let repairs = g.graphs.reconcile(&g.library, manifest).main.repairs;
+        let repairs = g.graphs.reconcile(&g.library, manifest).of(GraphId::Main);
         let states = [2, 3, 4].map(|number| g.graph().input_state(port(number)));
         (repairs, states)
     };
@@ -1723,7 +1724,7 @@ fn a_manifest_tells_a_load_what_each_func_declared() {
     let mut g = fixture();
     let lost = g.library.remove(dst_func).unwrap();
     assert_eq!(
-        g.graphs.reconcile(&g.library, &manifest).main.repairs,
+        g.graphs.reconcile(&g.library, &manifest).of(GraphId::Main),
         [Repair::GhostedNode {
             node_id: dst,
             reason: DetachReason::Unresolved(Unresolved::MissingFunc),
@@ -1744,7 +1745,7 @@ fn a_manifest_tells_a_load_what_each_func_declared() {
     ));
     g.library.add(returned.build());
     assert_eq!(
-        g.graphs.reconcile(&g.library, &without).main.repairs,
+        g.graphs.reconcile(&g.library, &without).of(GraphId::Main),
         [
             Repair::Reattached { node_id: dst },
             Repair::RestoredBinding {
@@ -1786,7 +1787,7 @@ fn a_manifest_tells_a_load_what_each_func_declared() {
     g.graph().validate_with(g.scope()).unwrap();
     let cleared = g.graphs.reconcile(&g.library, &Manifest::default());
     assert_eq!(
-        cleared.main.repairs,
+        cleared.of(GraphId::Main),
         [Repair::RestoredBinding {
             port: port(2),
             binding: int(1),
@@ -1892,7 +1893,10 @@ fn reconcile_keeps_as_ghosts_what_the_library_cannot_hold() {
     let gone_func = g.graph().find(gone).unwrap().func_id().unwrap();
     g.library.remove(gone_func);
 
-    let reconciled = g.graphs.reconcile(&g.library, &Manifest::default()).main;
+    let reconciled = g
+        .graphs
+        .reconcile(&g.library, &Manifest::default())
+        .of(GraphId::Main);
 
     let rejected = |number, binding, rejection: BindingRejection| Repair::GhostedBinding {
         port: dst_port(number),
@@ -1900,7 +1904,7 @@ fn reconcile_keeps_as_ghosts_what_the_library_cannot_hold() {
         rejection: rejection.into(),
     };
     assert_eq!(
-        reconciled.repairs,
+        reconciled,
         [
             Repair::NilNode,
             Repair::NilNode,
@@ -1957,7 +1961,7 @@ fn reconcile_keeps_as_ghosts_what_the_library_cannot_hold() {
             Repair::GhostedBinding {
                 port: InputPort::new(g.id("b"), PortId::new(1)),
                 binding: Binding::wire(g.id("a"), PortId::new(1)),
-                rejection: GhostRejection::Cycle,
+                rejection: BindRejection::Cycle,
             },
         ]
     );
@@ -1992,14 +1996,14 @@ fn reconcile_keeps_as_ghosts_what_the_library_cannot_hold() {
     );
 
     assert_eq!(
-        g.graph().input_bindings(dst).collect::<Vec<_>>(),
+        g.graph().wiring().bindings_on(dst).collect::<Vec<_>>(),
         [(
             InputPort::new(dst, PortId::new(1)),
             &Binding::Const(ConstValue::Null)
         )]
     );
     assert_eq!(
-        g.graph().subscriptions().collect::<Vec<_>>(),
+        g.graph().wiring().subscriptions().collect::<Vec<_>>(),
         [Subscription::new(EventPort::new(src, PortId::new(1)), dst)]
     );
     assert!(g.graph().validate_with(g.scope()).is_ok());
@@ -2008,8 +2012,272 @@ fn reconcile_keeps_as_ghosts_what_the_library_cannot_hold() {
     assert!(
         g.graphs
             .reconcile(&g.library, &Manifest::default())
-            .main
+            .of(GraphId::Main)
             .is_empty(),
         "a reconciled graph needs nothing more"
+    );
+}
+
+/// A graph's wiring answers by node: the bindings on its inputs and the subscriptions from its
+/// events, each a contiguous range; with a set of nodes, every piece that touches any of them,
+/// once, and taking that out leaves the rest. Built from pairs, a port given twice keeps the last.
+#[test]
+fn wiring_answers_by_node_and_takes_out_what_touches_a_set() {
+    let g = TestGraph::sample();
+    let [get_a, get_b, sum, mult, print] =
+        ["get_a", "get_b", "sum", "mult", "Print"].map(|name| g.id(name));
+    let wiring = g.graph().wiring();
+    assert_eq!(
+        wiring
+            .bindings_on(sum)
+            .map(|(port, _)| port)
+            .collect::<Vec<_>>(),
+        [g.input("sum", 0), g.input("sum", 1)]
+    );
+    assert_eq!(
+        wiring.bindings_on(get_a).count(),
+        0,
+        "a source binds nothing"
+    );
+
+    // `sum` and `Print` touch every wire but `get_b → mult.1`.
+    let mut nodes = [sum, print];
+    nodes.sort_unstable();
+    let mut touching = vec![
+        (g.input("sum", 0), g.output("get_a", 0)),
+        (g.input("sum", 1), g.output("get_b", 0)),
+        (g.input("mult", 0), g.output("sum", 0)),
+        (g.input("Print", 0), g.output("mult", 0)),
+    ];
+    touching.sort_unstable();
+    assert_eq!(
+        wiring.touching(&nodes).wires().collect::<Vec<_>>(),
+        touching
+    );
+    let mut rest = wiring.clone();
+    assert_eq!(rest.remove_touching(&nodes), wiring.touching(&nodes));
+    assert_eq!(
+        rest.wires().collect::<Vec<_>>(),
+        [(g.input("mult", 1), g.output("get_b", 0))]
+    );
+
+    let event = |node, number| EventPort::new(node, PortId::new(number));
+    let mut subscribed = Wiring::default();
+    let mut from_a = [
+        Subscription::new(event(get_a, 1), mult),
+        Subscription::new(event(get_a, 2), sum),
+    ];
+    from_a.sort_unstable();
+    for subscription in from_a {
+        assert!(subscribed.subscribe(subscription));
+    }
+    assert!(subscribed.subscribe(Subscription::new(event(get_b, 1), sum)));
+    assert!(!subscribed.subscribe(from_a[0]), "made once");
+    assert_eq!(
+        subscribed.subscriptions_from(get_a).collect::<Vec<_>>(),
+        from_a
+    );
+    assert!(subscribed.is_subscribed(from_a[1]));
+    assert!(!subscribed.is_subscribed(Subscription::new(event(get_b, 2), sum)));
+
+    let port = g.input("sum", 0);
+    let pairs = Wiring::from([
+        (port, Binding::Const(1i64.into())),
+        (port, Binding::Const(2i64.into())),
+    ]);
+    assert_eq!(
+        pairs.bindings().collect::<Vec<_>>(),
+        [(port, &Binding::Const(2i64.into()))]
+    );
+}
+
+/// The ghost wiring answers the two reverse questions the editor asks of a node, the ghost wires
+/// that read it and the ghost subscriptions that land on it, and counts what touches it.
+#[test]
+fn ghost_wiring_answers_what_reads_a_node_and_lands_on_it() {
+    let g = TestGraph::sample();
+    let [get_a, get_b, sum, mult] = ["get_a", "get_b", "sum", "mult"].map(|name| g.id(name));
+    let mut ghosts = GhostWiring::default();
+    let wire = |from: &str| GhostBinding::from(Binding::Wire(g.output(from, 0)));
+    ghosts.bindings.insert(g.input("sum", 0), wire("get_a"));
+    ghosts.bindings.insert(g.input("sum", 1), wire("get_b"));
+    ghosts.bindings.insert(g.input("mult", 1), wire("get_b"));
+    ghosts.bindings.insert(
+        g.input("mult", 0),
+        GhostBinding::from(Binding::Const(3i64.into())),
+    );
+    let to_sum = Subscription::new(EventPort::new(get_a, PortId::new(1)), sum);
+    let to_mult = Subscription::new(EventPort::new(get_b, PortId::new(1)), mult);
+    for subscription in [to_sum, to_mult] {
+        ghosts
+            .subscriptions
+            .insert(subscription, GhostSubscription::default());
+    }
+
+    let mut from_b = vec![g.input("sum", 1), g.input("mult", 1)];
+    from_b.sort_unstable();
+    assert_eq!(
+        ghosts
+            .wires_from(get_b)
+            .map(|(port, _)| port)
+            .collect::<Vec<_>>(),
+        from_b
+    );
+    assert_eq!(
+        ghosts.wires_from(sum).count(),
+        0,
+        "a constant reads nothing"
+    );
+    assert_eq!(
+        ghosts
+            .subscriptions_to(sum)
+            .map(|(subscription, _)| subscription)
+            .collect::<Vec<_>>(),
+        [to_sum]
+    );
+    // `get_b`: two wires and a subscription; `mult`: two bindings and a subscription.
+    assert_eq!(ghosts.count_touching(get_b), 3);
+    assert_eq!(ghosts.count_touching(mult), 3);
+
+    let mut nodes = [get_a, mult];
+    nodes.sort_unstable();
+    let mut rest = ghosts.clone();
+    let taken = rest.remove_touching(&nodes);
+    assert_eq!(taken, ghosts.touching(&nodes));
+    assert_eq!(
+        rest.bindings().map(|(port, _)| port).collect::<Vec<_>>(),
+        [g.input("sum", 1)]
+    );
+    assert!(rest.subscriptions().next().is_none());
+}
+
+/// A bind is admitted where both ends are nodes, the input takes it and it closes no loop; each
+/// refusal names its own cause. What an input is wired to reads alike, live or a ghost.
+#[test]
+fn a_bind_is_held_to_its_nodes_its_input_and_the_loops_it_would_close() {
+    let mut g = TestGraph::sample();
+    let sum_in = g.input("sum", 0);
+    let admit = |g: &TestGraph, binding: Binding| g.graph().admit_bind(g.scope(), sum_in, &binding);
+    assert_eq!(admit(&g, Binding::Wire(g.output("get_b", 0))), Ok(()));
+    assert_eq!(
+        admit(&g, Binding::Wire(g.output("mult", 0))),
+        Err(BindRejection::Cycle),
+        "`sum` feeds `mult`"
+    );
+    assert_eq!(
+        admit(&g, Binding::Const(ConstValue::String("x".to_owned()))),
+        Err(BindRejection::Binding(BindingRejection::ConstMismatch))
+    );
+
+    assert_eq!(
+        g.graph().input_state_wire(sum_in),
+        Some(g.output("get_a", 0))
+    );
+    g.graph_mut()
+        .set_input_binding(sum_in, Binding::Const(1i64.into()));
+    assert_eq!(g.graph().input_state_wire(sum_in), None, "a constant");
+    g.graph_mut().set_input_binding(sum_in, None);
+    assert_eq!(g.graph().input_state_wire(sum_in), None, "nothing");
+
+    // Onto a node an edit is inserting with its bindings, read off its declaration alone.
+    let fresh = NodeId::unique();
+    {
+        let scope = g.scope();
+        let decl = g.graph().find(g.id("sum")).unwrap().decl(scope);
+        let onto = |port: u32, binding: &Binding| {
+            g.graph().admit_onto(
+                scope,
+                decl,
+                InputPort::new(fresh, PortId::new(port)),
+                binding,
+            )
+        };
+        let int = Binding::Const(1i64.into());
+        assert_eq!(onto(1, &int), Ok(()));
+        assert_eq!(onto(1, &Binding::Wire(g.output("get_a", 0))), Ok(()));
+        assert_eq!(onto(9, &int), Err(BindingRejection::UndeclaredInput));
+    }
+
+    let get_b_out = g.output("get_b", 0);
+    let get_b = ghost(&mut g, "get_b", DetachReason::TooLarge);
+    assert_eq!(
+        admit(&g, Binding::Wire(get_b_out)),
+        Err(BindRejection::GhostNode { node_id: get_b })
+    );
+    assert_eq!(
+        g.graph().input_state_wire(g.input("mult", 1)),
+        Some(get_b_out),
+        "a ghost wire reads alike"
+    );
+}
+
+/// What a port shows: its node's declaration, else the port a ghost saved, else its ghost node's
+/// saved declaration; nothing where none knows it. An event likewise, by name.
+#[test]
+fn a_port_shows_what_the_first_declaration_that_knows_it_gives() {
+    let mut g = TestGraph::sample();
+    let sum = g.id("sum");
+    let declared = &g.graph().find(sum).unwrap().decl(g.scope()).inputs()[0];
+    let (declared_name, declared_type) = (declared.name.clone(), declared.data_type);
+    let saved = SavedPort {
+        name: "kept".to_owned(),
+        data_type: DataType::Float,
+    };
+    let lost = InputPort::new(sum, PortId::new(9));
+    {
+        let (graph, scope) = (g.graph(), g.scope());
+        assert_eq!(
+            graph.shown_input(scope, g.input("sum", 0), Some(&saved)),
+            Some(ShownPort {
+                name: &declared_name,
+                data_type: declared_type,
+            }),
+            "the declaration outranks a saved port"
+        );
+        assert_eq!(
+            graph.shown_input(scope, lost, Some(&saved)),
+            Some(ShownPort::from(&saved))
+        );
+        assert_eq!(graph.shown_input(scope, lost, None), None);
+        assert_eq!(
+            graph.shown_output(scope, OutputPort::new(sum, PortId::new(9)), None),
+            None
+        );
+        assert_eq!(
+            graph.shown_event(scope, EventPort::new(sum, PortId::new(9)), None),
+            None
+        );
+    }
+
+    // A ghost node shows its saved declaration's ports and events.
+    let get_a = g.id("get_a");
+    g.graph_mut().detach_into_ghosts(
+        vec![Detaching {
+            node_id: get_a,
+            reason: DetachReason::TooLarge,
+            saved: Some(SavedDecl {
+                outputs: vec![Numbered {
+                    id: PortId::new(1),
+                    port: saved.clone(),
+                }],
+                events: vec![Numbered {
+                    id: PortId::new(2),
+                    port: SavedEvent {
+                        name: "fired".to_owned(),
+                    },
+                }],
+                ..SavedDecl::default()
+            }),
+        }],
+        &mut Vec::new(),
+    );
+    let (graph, scope) = (g.graph(), g.scope());
+    assert_eq!(
+        graph.shown_output(scope, OutputPort::new(get_a, PortId::new(1)), None),
+        Some(ShownPort::from(&saved))
+    );
+    assert_eq!(
+        graph.shown_event(scope, EventPort::new(get_a, PortId::new(2)), None),
+        Some("fired")
     );
 }

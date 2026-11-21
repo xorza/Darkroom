@@ -22,7 +22,10 @@ fn a_named_graph_compiles_to_one_node_per_name() {
     // Every name resolves to a distinct node, and the wiring is real.
     assert_eq!(g.graph().len(), 3);
     assert_eq!(
-        g.graph().bindings[&InputPort::new(g.id("double"), PortId::new(1))],
+        *g.graph()
+            .wiring()
+            .binding(InputPort::new(g.id("double"), PortId::new(1)))
+            .unwrap(),
         Binding::wire(g.id("src"), PortId::new(1))
     );
     // `returns` declared the output its literal implies.
@@ -65,19 +68,19 @@ fn declared_defaults_seed_bindings_that_later_calls_replace() {
     let port = InputPort::new(g.id("n"), PortId::new(1));
 
     assert_eq!(
-        g.graph().bindings[&port],
+        *g.graph().wiring().binding(port).unwrap(),
         Binding::Const(ConstValue::Int(3)),
         "the declaration's default is bound on instantiation"
     );
 
     g.constant("n", 0, 9i64);
     assert_eq!(
-        g.graph().bindings[&port],
+        *g.graph().wiring().binding(port).unwrap(),
         Binding::Const(ConstValue::Int(9))
     );
 
     g.unbind("n", 0);
-    assert!(!g.graph().bindings.contains_key(&port));
+    assert!(g.graph().wiring().binding(port).is_none());
 }
 
 /// The sample fixture wires what its doc claims, and its nodes carry ids
@@ -96,7 +99,10 @@ fn sample_wires_five_nodes_in_declaration_order() {
         ("Print", 0, "mult"),
     ] {
         assert_eq!(
-            g.graph().bindings[&g.input(consumer, input)],
+            *g.graph()
+                .wiring()
+                .binding(g.input(consumer, input))
+                .unwrap(),
             Binding::wire(g.id(producer), PortId::new(1)),
             "{producer} feeds {consumer}[{input}]"
         );

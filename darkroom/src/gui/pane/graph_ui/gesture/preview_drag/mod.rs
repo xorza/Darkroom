@@ -93,7 +93,7 @@ impl PreviewSpawn {
                 pos,
                 node_id,
                 node: func.into(),
-                bindings: func.ports().default_bindings(node_id).collect(),
+                bindings: func.ports().default_bindings(node_id),
             },
             GraphIntent::SetInput {
                 input: InputPort::new(

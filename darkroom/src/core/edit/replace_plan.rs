@@ -2,7 +2,6 @@
 
 use scenarium::{GraphId, Library, Node, NodeId, NodeRemap};
 
-use crate::core::document;
 use crate::core::document::Document;
 use crate::core::edit::graph_intent::GraphIntent;
 
@@ -52,14 +51,11 @@ impl ReplacePlan {
         let held = document.graphs.graph(graph);
         let scope = document.graphs.scope(library, graph);
         let (from_name, before) = if let Some(node) = held.find(node_id) {
-            (
-                document::title(node, scope).to_owned(),
-                node.decl(scope).saved(),
-            )
+            (scope.title(node).to_owned(), node.decl(scope).saved())
         } else {
             let ghost = held.ghost_node(node_id)?;
             (
-                ghost.node.name.clone(),
+                ghost.title().to_owned(),
                 ghost.saved.clone().unwrap_or_default(),
             )
         };
@@ -153,7 +149,10 @@ mod tests {
         fixture.library.add(sharpen.clone());
         let graph = fixture.document.graphs.main_mut();
         let [a, b, c] = ids;
-        graph.bindings.clear();
+        let bound: Vec<InputPort> = graph.wiring().bindings().map(|(port, _)| port).collect();
+        for port in bound {
+            graph.set_input_binding(port, None);
+        }
         graph.set_input_binding(InputPort::new(b, p(1)), Binding::wire(a, p(1)));
         graph.set_input_binding(
             InputPort::new(b, p(2)),
@@ -203,11 +202,11 @@ mod tests {
         let p = PortId::new;
         assert_eq!(graph.find(b).unwrap().func_id(), Some(sharpen.id()));
         assert_eq!(
-            graph.bindings.get(&InputPort::new(b, p(5))),
+            graph.wiring().binding(InputPort::new(b, p(5))),
             Some(&Binding::wire(a, p(1)))
         );
         assert_eq!(
-            graph.bindings.get(&InputPort::new(c, p(1))),
+            graph.wiring().binding(InputPort::new(c, p(1))),
             Some(&Binding::wire(b, p(1)))
         );
         assert_eq!(
@@ -281,7 +280,7 @@ mod tests {
         let graph = document.graphs.main();
         assert!(graph.ghost_node(b).is_none());
         assert_eq!(
-            graph.bindings.get(&InputPort::new(b, p(5))),
+            graph.wiring().binding(InputPort::new(b, p(5))),
             Some(&Binding::wire(a, p(1)))
         );
         document.validate().unwrap();

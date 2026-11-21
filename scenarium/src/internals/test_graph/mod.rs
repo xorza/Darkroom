@@ -122,7 +122,7 @@ impl TestGraph {
     /// than registered.
     pub fn add_special(&mut self, name: &str, special: SpecialNode) -> NodeId {
         let mut node = Node::from(special);
-        name.clone_into(&mut node.name);
+        node.name = Some(name.to_owned());
         let node_id = NodeId::from_u128(self.mint());
         self.graph_mut().insert(node_id, node);
         self.bind_name(name, node_id);
@@ -359,12 +359,8 @@ impl TestGraph {
     /// Place one node of `func` under the next ascending id, seeding its declared const defaults.
     fn place(&mut self, func: &Func) -> NodeId {
         let node_id = NodeId::from_u128(self.mint());
-        self.graph_mut().insert(node_id, Node::from(func));
-        self.graph_mut().bindings.extend(
-            func.ports()
-                .default_bindings(node_id)
-                .map(|entry| (entry.port, entry.binding)),
-        );
+        self.graph_mut()
+            .insert_seeded(node_id, Node::from(func), func.ports());
         node_id
     }
 

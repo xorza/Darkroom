@@ -15,7 +15,7 @@
 //! document the load contract does not hold, which every compile asserts.
 
 use glam::Vec2;
-use scenarium::{Binding, BindingEntry, Graph, Node, NodeDecl, NodeId, Scope};
+use scenarium::{Binding, Graph, Node, NodeDecl, NodeId, Scope, Wiring};
 
 use crate::core::document::tie::TieId;
 use crate::core::edit::error::{MalformedIntent, Role};
@@ -77,13 +77,15 @@ pub(super) fn resolving_node<'a>(
 pub(super) struct Insertion<'a> {
     pub(super) node_id: NodeId,
     pub(super) decl: NodeDecl<'a>,
-    pub(super) bindings: &'a [BindingEntry],
+    pub(super) bindings: &'a Wiring,
 }
 
 /// The bindings riding along with an insertion: each one an input of the new node, read from a
 /// node the graph holds, never from the new node itself, and admitted onto the new node's
-/// declaration. Order and a port bound twice are
-/// [`DetachedNode::new`](scenarium::DetachedNode::new)'s rules.
+/// declaration.
+///
+/// # Panics
+/// If the insertion carries a subscription, which an intent adds apart.
 pub(super) fn seed_bindings(
     graph: &Graph,
     scope: Scope<'_>,
@@ -94,8 +96,12 @@ pub(super) fn seed_bindings(
         decl,
         bindings,
     } = insertion;
-    for BindingEntry { port, binding } in bindings {
-        let port = *port;
+    assert_eq!(
+        bindings.subscriptions().len(),
+        0,
+        "an insertion seeds bindings alone"
+    );
+    for (port, binding) in bindings.bindings() {
         if port.node_id != node_id {
             return Err(MalformedIntent::ForeignSeedBinding { port });
         }

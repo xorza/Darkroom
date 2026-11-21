@@ -111,7 +111,7 @@ fn reading_inputs<'a>(
             continue;
         }
         let scope = document.graphs.scope(library, graph);
-        for (&port, binding) in &held.bindings {
+        for (port, binding) in held.wiring().bindings() {
             let Binding::Const(value) = binding else {
                 continue;
             };

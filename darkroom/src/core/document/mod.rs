@@ -78,7 +78,7 @@ use palantir::{DockDrop, DockOperation, DockState, SplitHalf, SplitSide, SplitSi
 use scenarium::{
     Binding, Compound, CompoundId, ConstValue, DetachedGhost, DetachedNode, Graph as CoreGraph,
     GraphId, GraphSet, InputPort, InstancePath, Library, Manifest, Node, NodeAddr, NodeId,
-    PathForm, ProgramId, Scope,
+    PathForm, ProgramId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -571,7 +571,7 @@ impl Document {
             .graph_at(program_id.path())
             .expect("a stored preview's node is in the set");
         let port = InputPort::new(program_id.node_id(), preview_sink::DISPLAY_PORT);
-        match self.graphs.graph(graph).bindings.get(&port) {
+        match self.graphs.graph(graph).wiring().binding(port) {
             Some(Binding::Const(value)) => value
                 .as_enum()
                 .and_then(|name| name.parse().ok())
@@ -602,27 +602,17 @@ impl Document {
     /// `manifest` is what the document's file says each func declared at the save, which the
     /// graphs' reconcile reads to tell what changed; a document made in memory has an empty one.
     pub(crate) fn reconcile(&mut self, library: &Library, manifest: &Manifest) -> LoadReport {
-        let reconciled = self.graphs.reconcile(library, manifest);
-        let mut repairs: Vec<DocumentRepair> = reconciled
-            .main
+        let mut repairs: Vec<DocumentRepair> = self
+            .graphs
+            .reconcile(library, manifest)
             .repairs
             .into_iter()
-            .map(|repair| DocumentRepair::Graph {
-                graph: GraphId::Main,
-                repair,
+            .flat_map(|(graph, repairs)| {
+                repairs
+                    .into_iter()
+                    .map(move |repair| DocumentRepair::Graph { graph, repair })
             })
             .collect();
-        for (id, reconciled) in reconciled.compounds {
-            repairs.extend(
-                reconciled
-                    .repairs
-                    .into_iter()
-                    .map(|repair| DocumentRepair::Graph {
-                        graph: GraphId::Compound(id),
-                        repair,
-                    }),
-            );
-        }
         let Self {
             graphs,
             main_view,
@@ -776,20 +766,6 @@ impl Document {
             }
         }
     }
-}
-
-/// What a node's title reads: its own name, or for an instance with none the name of the
-/// compound it places, as Blender's group node shows its group's name while its label is empty,
-/// so a renamed compound reads renamed on each instance; empty for any other node with none,
-/// which a surface reads as "Unnamed". `scope` is the one the node's graph resolves against.
-pub(crate) fn title<'a>(node: &'a Node, scope: Scope<'a>) -> &'a str {
-    if node.name.is_empty()
-        && node.compound().is_some()
-        && let Ok(decl) = scope.resolve(node)
-    {
-        return decl.name();
-    }
-    &node.name
 }
 
 /// Drop `node_id`'s placement and selection membership from `view`.

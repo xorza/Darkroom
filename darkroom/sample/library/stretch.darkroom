@@ -51,7 +51,7 @@
                         nodes: {
                             ("47f037e6-4035-43d4-8910-9c1132e7db3d"): (
                                 kind: Boundary(Outputs),
-                                name: "Outputs",
+                                name: Some("Outputs"),
                                 disabled: false,
                             ),
                             ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"): (
@@ -62,36 +62,38 @@
                                         disk: false,
                                     ),
                                 ),
-                                name: "Auto Stretch",
+                                name: Some("Auto Stretch"),
                                 disabled: false,
                             ),
                             ("5d28633c-4b5b-440b-b93c-228402d84609"): (
                                 kind: Boundary(Inputs),
-                                name: "Inputs",
+                                name: Some("Inputs"),
                                 disabled: false,
                             ),
                         },
-                        bindings: [
-                            ((
-                                node_id: ("47f037e6-4035-43d4-8910-9c1132e7db3d"),
-                                port: 838726064,
-                            ), Wire((
-                                node_id: ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"),
-                                port: 1,
-                            ))),
-                            ((
-                                node_id: ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"),
-                                port: 1,
-                            ), Wire((
-                                node_id: ("5d28633c-4b5b-440b-b93c-228402d84609"),
-                                port: 3361973106,
-                            ))),
-                            ((
-                                node_id: ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"),
-                                port: 2,
-                            ), Const(Enum("auto_asinh"))),
-                        ],
-                        subscriptions: [],
+                        wiring: (
+                            bindings: [
+                                ((
+                                    node_id: ("47f037e6-4035-43d4-8910-9c1132e7db3d"),
+                                    port: 838726064,
+                                ), Wire((
+                                    node_id: ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"),
+                                    port: 1,
+                                ))),
+                                ((
+                                    node_id: ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"),
+                                    port: 1,
+                                ), Wire((
+                                    node_id: ("5d28633c-4b5b-440b-b93c-228402d84609"),
+                                    port: 3361973106,
+                                ))),
+                                ((
+                                    node_id: ("5d1f119a-d8a7-4fba-b3f9-1a873dd238bc"),
+                                    port: 2,
+                                ), Const(Enum("auto_asinh"))),
+                            ],
+                            subscriptions: [],
+                        ),
                         ghost_nodes: {},
                         ghost_wiring: (
                             bindings: [],

@@ -23,7 +23,6 @@ use scenarium::LogLevel;
 use scenarium::NodeId;
 use scenarium::{DataType, GraphId};
 
-use crate::core::document;
 use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
@@ -502,7 +501,7 @@ fn input_value(ui: &mut Ui, out: &mut Requests, input: InputCtx<'_>, wid: Widget
             let producer = graphs
                 .graph(input.graph())
                 .find(source.node_id)
-                .map_or("", |node| format::node_name(document::title(node, scope)));
+                .map_or("", |node| format::node_name(scope.title(node)));
             Text::new(fmt!(ui, "\u{2190} {producer}"))
                 .id(wid)
                 .style(&muted)

@@ -1512,10 +1512,10 @@ mod tests {
             .document()
             .graphs
             .main()
-            .bindings
-            .iter()
+            .wiring()
+            .bindings()
             .filter_map(|(input, binding)| match binding {
-                Binding::Wire(output) => Some((*input, *output)),
+                Binding::Wire(output) => Some((input, *output)),
                 Binding::Const(_) => None,
             })
             .filter(|&(input, output)| {
@@ -1577,7 +1577,7 @@ mod tests {
             .graphs
             .main()
             .iter()
-            .find(|node| node.name == NODE)
+            .find(|node| node.name.as_deref() == Some(NODE))
             .expect("the sample holds the node")
             .node_id;
         let moved_from = document.main_view.node_placements[&node].pos;
@@ -1937,7 +1937,7 @@ mod tests {
             .graphs
             .main()
             .iter()
-            .find(|node| node.name == NODE)
+            .find(|node| node.name.as_deref() == Some(NODE))
             .expect("the sample holds the node")
             .node_id;
         let title = |ui: &Harness| {
@@ -1958,7 +1958,13 @@ mod tests {
             }
             assert!(title(ui).is_none(), "deleted");
             let document = counted.app.session.open.document();
-            assert!(document.graphs.main().iter().all(|node| node.name != NODE));
+            assert!(
+                document
+                    .graphs
+                    .main()
+                    .iter()
+                    .all(|node| node.name.as_deref() != Some(NODE))
+            );
         };
 
         delete(&mut ui, &mut counted);
@@ -2055,7 +2061,17 @@ mod tests {
             .join("scene.darkroom-resources")
             .join(blake3::hash(b"tiff bytes").to_hex().as_str())
             .join("pic.tiff");
-        let bound = |app: &App| app.session.open.document().graphs.main().bindings[&port].clone();
+        let bound = |app: &App| {
+            app.session
+                .open
+                .document()
+                .graphs
+                .main()
+                .wiring()
+                .binding(port)
+                .unwrap()
+                .clone()
+        };
         assert_eq!(
             bound(&app),
             Binding::Const(ConstValue::FsPath(copy.to_str().unwrap().to_owned()))

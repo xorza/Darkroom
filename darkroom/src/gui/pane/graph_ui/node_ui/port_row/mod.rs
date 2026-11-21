@@ -808,8 +808,8 @@ impl GhostRow<'_> {
 }
 
 /// The inputs of `node` that would take what `ghost` held, a wire or a constant: each declared
-/// input that holds nothing and that the edit gate's admission passes, a wire also closing no
-/// loop and reading a node, not a ghost node. What a ghost port's menu offers to move it to.
+/// input that holds nothing and that the edit gate's admission passes. What a ghost port's menu
+/// offers to move it to.
 fn rehome_targets<'a>(
     node: NodeCtx<'a>,
     ghost: &'a GhostBinding,
@@ -817,18 +817,10 @@ fn rehome_targets<'a>(
     let graph_ctx = node.graph_ctx;
     let (body, scope) = (graph_ctx.body(), graph_ctx.scope());
     let binding = ghost.binding();
-    // A wire from a ghost node goes nowhere until the node is back.
-    let producer_held = ghost
-        .output()
-        .is_none_or(|output| body.find(output.node_id).is_some());
     node.inputs().filter(move |target| {
         let port = target.port();
-        producer_held
-            && body.input_state(port) == InputState::Unbound
-            && body.admit(scope, port, &binding).is_ok()
-            && !ghost
-                .output()
-                .is_some_and(|output| body.produces_cycle(output.node_id, port.node_id))
+        body.input_state(port) == InputState::Unbound
+            && body.admit_bind(scope, port, &binding).is_ok()
     })
 }
 

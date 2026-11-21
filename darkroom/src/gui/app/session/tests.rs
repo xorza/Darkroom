@@ -518,8 +518,8 @@ fn a_wire_dropped_on_the_outputs_node_adds_an_interface_output() {
         document
             .graphs
             .graph(graph)
-            .bindings
-            .get(&InputPort::new(outputs, port)),
+            .wiring()
+            .binding(InputPort::new(outputs, port)),
         Some(&Binding::Wire(OutputPort::new(inside, PortId::new(1))))
     );
     assert!(test.undo());

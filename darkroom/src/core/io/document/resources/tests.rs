@@ -37,13 +37,12 @@ fn reading(path: &str) -> (Document, InputPort) {
         .document
         .graphs
         .main_mut()
-        .bindings
-        .insert(port, Binding::Const(ConstValue::FsPath(path.to_string())));
+        .set_input_binding(port, Binding::Const(ConstValue::FsPath(path.to_string())));
     (fixture.document, port)
 }
 
 fn path_of(document: &Document, port: InputPort) -> String {
-    match document.graphs.main().bindings.get(&port) {
+    match document.graphs.main().wiring().binding(port) {
         Some(Binding::Const(ConstValue::FsPath(path))) => path.clone(),
         other => panic!("{other:?} is no path"),
     }

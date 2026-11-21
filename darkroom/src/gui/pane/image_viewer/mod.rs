@@ -37,7 +37,6 @@ use palantir::{
     Sense, Shape, SizeSpec, Spacing, Ui, WidgetId, fmt,
 };
 
-use crate::core::document;
 use crate::core::document::Document;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::document::view_target::ViewTarget;
@@ -677,7 +676,7 @@ pub(crate) fn node_label<'a>(
         .graph(graph)
         .find(program_id.node_id())
         .expect("a viewer tab's node is in its graph");
-    format::node_name(document::title(node, document.graphs.scope(library, graph)))
+    format::node_name(document.graphs.scope(library, graph).title(node))
 }
 
 /// A texture's 1:1 logical footprint on the current display (one texel per physical pixel),

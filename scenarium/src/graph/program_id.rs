@@ -16,14 +16,11 @@
 //!   and viewer tabs carry it with no allocation. It sits with the authored addresses, so the
 //!   authoring model imports nothing of the execution side.
 
-use std::cmp::Ordering;
-use std::fmt;
-use std::hash::{Hash, Hasher};
-
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::graph::identity::NodeId;
+use crate::graph::inline_ids::InlineIds;
 use crate::graph::instance_path::InstancePath;
 
 /// The id of a program node: its path, the instances from the main graph down and then the node
@@ -37,13 +34,9 @@ use crate::graph::instance_path::InstancePath;
 /// hash of the path, as Blender's compute context hash, which the program would hold beside the
 /// path it still needs to name a failed node. In a file, its list of ids, read through
 /// [`Self::checked`].
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "Vec<NodeId>", into = "Vec<NodeId>")]
-pub struct ProgramId {
-    len: u8,
-    /// The path in `..len`; the tail is nil, so no two equal paths differ in memory.
-    ids: [NodeId; Self::MAX_LEN],
-}
+pub struct ProgramId(InlineIds<{ Self::MAX_LEN }>);
 
 /// Why a sequence of node ids is no [`ProgramId`].
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -84,37 +77,36 @@ impl ProgramId {
         if ids.iter().any(|id| id.is_nil()) {
             return Err(ProgramIdError::Nil);
         }
-        let mut program_id = Self {
-            len: ids.len() as u8,
-            ids: [NodeId::nil(); Self::MAX_LEN],
-        };
-        program_id.ids[..ids.len()].copy_from_slice(ids);
-        Ok(program_id)
+        Ok(Self(InlineIds::new(ids)))
     }
 
     /// The path, outermost instance first, the node last.
     pub fn ids(&self) -> &[NodeId] {
-        &self.ids[..usize::from(self.len)]
+        self.0.ids()
     }
 
     /// The authored node this program node is, in the graph of its innermost instance.
     pub fn node_id(&self) -> NodeId {
-        self.ids()[usize::from(self.len) - 1]
+        *self.ids().last().expect("a program id names its node")
     }
 
     /// The instances the node lies inside, outermost first: the main graph's path for a node of
     /// the main graph.
     pub fn path(&self) -> InstancePath {
-        InstancePath::new(&self.ids()[..usize::from(self.len) - 1])
+        let (_, instances) = self
+            .ids()
+            .split_last()
+            .expect("a program id names its node");
+        InstancePath::new(instances)
     }
 
     /// The path as bytes of a fixed length: the count of ids, then [`Self::MAX_LEN`] ids of 16
     /// bytes each, the unused ones nil. What a disk blob holds to check it is the node's.
     pub(crate) fn to_bytes(self) -> [u8; Self::BYTES_LEN] {
         let mut bytes = [0; Self::BYTES_LEN];
-        bytes[0] = self.len;
+        bytes[0] = u8::try_from(self.ids().len()).expect("a program id's length fits u8");
         let (chunks, _) = bytes[1..].as_chunks_mut::<16>();
-        for (chunk, id) in chunks.iter_mut().zip(self.ids) {
+        for (chunk, id) in chunks.iter_mut().zip(self.ids()) {
             chunk.copy_from_slice(&id.as_u128().to_le_bytes());
         }
         bytes
@@ -145,40 +137,6 @@ impl From<NodeId> for ProgramId {
     /// If `node_id` is nil.
     fn from(node_id: NodeId) -> Self {
         Self::new(&[node_id])
-    }
-}
-
-impl PartialEq for ProgramId {
-    fn eq(&self, other: &Self) -> bool {
-        self.ids() == other.ids()
-    }
-}
-
-impl Eq for ProgramId {}
-
-impl PartialOrd for ProgramId {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for ProgramId {
-    /// Element by element, a path before every longer path it begins: so the nodes inside one
-    /// instance sort together.
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.ids().cmp(other.ids())
-    }
-}
-
-impl Hash for ProgramId {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.ids().hash(state);
-    }
-}
-
-impl fmt::Debug for ProgramId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ProgramId").field(&self.ids()).finish()
     }
 }
 

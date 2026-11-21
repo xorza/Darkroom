@@ -238,11 +238,12 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
 
     let mut h = Harness::sample();
     let named = |h: &Harness, name: &str| {
+        let scope = h.document.graphs.scope(&h.library, GraphId::Main);
         h.document
             .graphs
             .main()
             .iter()
-            .find(|node| node.name == name)
+            .find(|node| scope.title(node) == name)
             .expect("the sample holds the node")
             .node_id
     };
@@ -267,8 +268,8 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
         .document
         .graphs
         .main()
-        .bindings
-        .get(&InputPort::new(b, PortId::new(1)))
+        .wiring()
+        .binding(InputPort::new(b, PortId::new(1)))
     {
         Some(Binding::Wire(src)) => assert_eq!(*src, OutputPort::new(a, PortId::new(1))),
         other => panic!("expected restored a->b edge, got {other:?}"),

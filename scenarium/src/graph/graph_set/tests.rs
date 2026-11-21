@@ -27,8 +27,8 @@ use crate::graph::manifest::Manifest;
 use crate::graph::node::{Boundary, CacheMode, Node};
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::ports::{InputDecl, Numbered, OutputDecl, PortList, Ports};
-use crate::graph::reconciled::{Reconciled, Repair};
-use crate::graph::saved_decl::SavedPort;
+use crate::graph::reconciled::Repair;
+use crate::graph::saved_decl::{SavedDecl, SavedPort};
 use crate::graph::subscription::Subscription;
 use crate::graph::type_names::TypeRef;
 use crate::graph::{Detaching, Graph};
@@ -41,6 +41,51 @@ use crate::library::Library;
 /// A compound with no ports.
 fn empty(name: &str) -> Compound {
     Compound::new(name, Interface::default())
+}
+
+/// A node with no name of its own reads its declaration's, a ghost node its saved one's: a func
+/// renamed in the library and a renamed compound each read renamed on an unnamed node, and a node
+/// named keeps its name.
+#[test]
+fn an_unnamed_node_reads_its_declarations_name() {
+    let library = library();
+    let mut set = GraphSet::default();
+    set.insert_compound(s(1), empty("first"));
+    set.main_mut().insert(n(1), node(&library, SRC));
+    place(&mut set, GraphId::Main, n(2), s(1));
+    let mut named = node(&library, SRC);
+    named.name = Some("mine".to_owned());
+    set.main_mut().insert(n(3), named);
+    let titles = |set: &GraphSet, library: &Library| {
+        let scope = set.scope(library, GraphId::Main);
+        [n(1), n(2), n(3)].map(|node_id| scope.title(set.main().find(node_id).unwrap()).to_owned())
+    };
+    assert_eq!(titles(&set, &library), ["src", "first", "mine"]);
+
+    let mut renamed = Library::default();
+    renamed.add(
+        internals::stub_func(SRC, "source")
+            .pure()
+            .output(1, OutputDecl::new("value", DataType::Int))
+            .build(),
+    );
+    set.rename_compound(s(1), "second".to_owned());
+    assert_eq!(titles(&set, &renamed), ["source", "second", "mine"]);
+
+    let ghost = |name: Option<&str>, saved: Option<&str>| GhostNode {
+        node: Node {
+            name: name.map(str::to_owned),
+            ..node(&library, SRC)
+        },
+        reason: DetachReason::Recursive,
+        saved: saved.map(|name| SavedDecl {
+            name: name.to_owned(),
+            ..SavedDecl::default()
+        }),
+    };
+    assert_eq!(ghost(Some("mine"), Some("src")).title(), "mine");
+    assert_eq!(ghost(None, Some("src")).title(), "src");
+    assert_eq!(ghost(None, None).title(), "");
 }
 
 /// Put an instance of `placed` into `graph` under `node_id`.
@@ -119,10 +164,13 @@ fn a_loop_is_refused_and_a_load_breaks_it_at_one_instance() {
     ));
 
     let report = set.reconcile(&library, &Manifest::default());
-    assert!(report.main.is_empty());
-    assert_eq!(report.compounds.keys().copied().collect::<Vec<_>>(), [s(2)]);
+    assert!(report.of(GraphId::Main).is_empty());
     assert_eq!(
-        report.compounds[&s(2)].repairs,
+        report.repairs.keys().copied().collect::<Vec<_>>(),
+        [GraphId::Compound(s(2))]
+    );
+    assert_eq!(
+        report.of(GraphId::Compound(s(2))),
         [Repair::GhostedNode {
             node_id: n(21),
             reason: DetachReason::Recursive,
@@ -222,15 +270,18 @@ fn a_ninth_level_is_refused_and_detached() {
     assert_eq!(error.graph, GraphId::Main);
     assert!(matches!(
         error.error,
-        GraphValidationError::TooDeep { levels: 9 }
+        GraphValidationError::Placement(PlacementRejection::TooDeep {
+            graph: GraphId::Main,
+            levels: 9
+        })
     ));
 
     let report = set.reconcile(&library, &Manifest::default());
     assert_eq!(
-        ghosted(&report.main.repairs),
+        ghosted(&report.of(GraphId::Main)),
         [(n(2), DetachReason::TooDeep)]
     );
-    assert!(report.compounds.is_empty());
+    assert!(report.repairs.keys().all(|&graph| graph == GraphId::Main));
     assert_eq!(set.main().len(), 1);
     set.validate_with(&library).unwrap();
 }
@@ -257,12 +308,15 @@ fn a_program_past_the_node_bound_is_refused_and_detached() {
     assert_eq!(error.graph, GraphId::Main);
     assert!(matches!(
         error.error,
-        GraphValidationError::TooLarge { node_count } if node_count == ProgramShape::MAX_NODES + 1
+        GraphValidationError::Placement(PlacementRejection::TooLarge {
+            graph: GraphId::Main,
+            node_count,
+        }) if node_count == ProgramShape::MAX_NODES + 1
     ));
 
     let report = set.reconcile(&library, &Manifest::default());
     assert_eq!(
-        ghosted(&report.main.repairs),
+        ghosted(&report.of(GraphId::Main)),
         [(n(2), DetachReason::TooLarge)]
     );
     assert!(set.main().find(n(1)).is_some());
@@ -300,6 +354,40 @@ fn an_add_inside_a_compound_is_held_to_the_bound_of_each_graph_that_places_it() 
             node_count: ProgramShape::MAX_NODES + 1
         })
     );
+    // Two more in `leaves` pass the bound in both graphs that place it: `rows` expands into
+    // 256 × 257 = 65 792 nodes and the main graph into 255 more. The main graph, first in id
+    // order, is the one named.
+    assert_eq!(
+        set.admit_nodes(GraphId::Compound(s(1)), [&src, &src]),
+        Err(PlacementRejection::TooLarge {
+            graph: GraphId::Main,
+            node_count: 256 * 257 + 255
+        })
+    );
+}
+
+/// A compound put under an id comes in beside the others, or in place of the one held there,
+/// handing back what it replaced; a replacement keeps the interface, or panics with the set as it
+/// was.
+#[test]
+fn a_compound_is_put_beside_or_in_place_of_one_held() {
+    let mut set = GraphSet::default();
+    assert_eq!(set.put_compound(s(1), empty("first")), None);
+    assert_eq!(
+        set.put_compound(s(1), empty("second"))
+            .map(|held| held.name),
+        Some("first".to_owned())
+    );
+    assert_eq!(set.replace_compound(s(1), empty("third")).name, "second");
+    assert_eq!(set.compound(s(1)).unwrap().name, "third");
+
+    let before = set.clone();
+    let retyped = Compound::new("fourth", adder_interface(DataType::Int, DataType::Int));
+    let refused = panic::catch_unwind(AssertUnwindSafe(|| {
+        set.replace_compound(s(1), retyped);
+    }));
+    assert!(refused.is_err(), "another interface is no replacement");
+    assert_eq!(set, before);
 }
 
 /// A compound's graph holds one `Outputs` node and one or more `Inputs` nodes. A load keeps both
@@ -351,7 +439,7 @@ fn a_load_keeps_every_inputs_node_and_one_outputs_node() {
 
     let report = set.reconcile(&library, &Manifest::default());
     assert_eq!(
-        report.main.repairs,
+        report.of(GraphId::Main),
         [Repair::GhostedNode {
             node_id: n(5),
             reason: DetachReason::Unresolved(Unresolved::NoInterface),
@@ -364,7 +452,7 @@ fn a_load_keeps_every_inputs_node_and_one_outputs_node() {
     assert_eq!(two.inputs_node(), n(1));
     assert_eq!(two.outputs_node(), n(3));
     assert_eq!(
-        report.compounds[&s(1)].repairs,
+        report.of(GraphId::Compound(s(1))),
         [Repair::GhostedNode {
             node_id: n(4),
             reason: DetachReason::ExtraOutputs,
@@ -372,7 +460,7 @@ fn a_load_keeps_every_inputs_node_and_one_outputs_node() {
     );
     let added = set.compound(s(2)).unwrap().inputs_node();
     assert_eq!(
-        report.compounds[&s(2)].repairs,
+        report.of(GraphId::Compound(s(2))),
         [Repair::BoundaryAdded {
             boundary: Boundary::Inputs,
             node_id: added,
@@ -403,7 +491,7 @@ fn a_load_attaches_each_ghost_node_that_resolves_again_with_its_wiring() {
             reason: DetachReason::Unresolved(Unresolved::MissingFunc),
             saved: None,
         }],
-        &mut Reconciled::default(),
+        &mut Vec::new(),
     );
     let mut set = GraphSet::default();
     set.insert_compound(s(1), compound);
@@ -420,12 +508,12 @@ fn a_load_attaches_each_ghost_node_that_resolves_again_with_its_wiring() {
 
     let report = set.reconcile(&library, &Manifest::default());
     assert_eq!(
-        report.main.repairs,
+        report.of(GraphId::Main),
         [Repair::DuplicateGhostNode { node_id: n(4) }]
     );
     assert_eq!(*set.main(), duplicate);
     assert_eq!(
-        report.compounds[&s(1)].repairs,
+        report.of(GraphId::Compound(s(1))),
         [
             Repair::Reattached { node_id: n(3) },
             Repair::RestoredBinding {
@@ -474,7 +562,7 @@ fn an_instance_resolves_to_its_interface_as_it_is() {
     assert_eq!(name(&set), Ok("renamed".to_owned()));
 
     let mut lacking = GraphSet::from(set.main().clone());
-    lacking.main_mut().find_mut(n(1)).unwrap().name = "orphan".to_owned();
+    lacking.main_mut().find_mut(n(1)).unwrap().name = Some("orphan".to_owned());
     assert_eq!(
         lacking
             .scope(&library, GraphId::Main)
@@ -587,7 +675,7 @@ fn a_new_instance_takes_its_interface_defaults() {
     let mut graph = Graph::default();
     let node_id = graph.add_instance(s(1), &compound);
     assert_eq!(
-        graph.input_bindings(node_id).collect::<Vec<_>>(),
+        graph.wiring().bindings_on(node_id).collect::<Vec<_>>(),
         [(
             InputPort::new(node_id, PortId::new(1)),
             &Binding::Const(2.0.into())
@@ -595,9 +683,9 @@ fn a_new_instance_takes_its_interface_defaults() {
     );
     let node = graph.find(node_id).unwrap();
     assert_eq!(node.compound(), Some(s(1)));
-    assert!(
-        node.name.is_empty(),
-        "an instance has no name of its own: a host shows its compound's"
+    assert_eq!(
+        node.name, None,
+        "an instance has no name of its own: it reads its compound's"
     );
     assert_eq!(
         node.cache(),
@@ -695,7 +783,7 @@ fn paths_and_uses_read_the_instances_of_every_graph() {
             reason: DetachReason::TooLarge,
             saved: None,
         }],
-        &mut Reconciled::default(),
+        &mut Vec::new(),
     );
 
     let path = |ids: &[u128]| InstancePath::new(&ids.iter().copied().map(n).collect::<Vec<_>>());
@@ -927,7 +1015,7 @@ fn an_interface_reorder_and_rename_drop_nothing() {
             .to_vec(),
     });
     let change = set.plan_interface(s(1), reordered.clone(), &library, RefusedFate::Drop);
-    assert!(change.refused().is_empty());
+    assert!(change.refused_bindings().is_empty());
     set.write_interface(&change, ChangeSide::After);
     assert_eq!(set.compound(s(1)).unwrap().interface, reordered);
     for (graph, held) in before.graphs() {
@@ -983,9 +1071,9 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
     expected.sort_by_key(|(graph, port, _)| (*graph, *port));
     let refused = |change: &InterfaceChange| {
         change
-            .refused()
+            .refused_bindings()
             .iter()
-            .map(|refused| (refused.graph, refused.port, refused.binding()))
+            .map(|refused| (refused.graph, refused.port, refused.ghost.binding()))
             .collect::<Vec<_>>()
     };
     assert_eq!(refused(&change), expected);
@@ -993,7 +1081,12 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
     assert_eq!(change.after(), &without);
 
     set.write_interface(&change, ChangeSide::After);
-    assert!(!set.main().bindings.contains_key(&InputPort::new(n(2), A)));
+    assert!(
+        set.main()
+            .wiring()
+            .binding(InputPort::new(n(2), A))
+            .is_none()
+    );
     assert!(
         set.main().ghost_wiring().is_empty(),
         "a person's edit drops"
@@ -1042,7 +1135,7 @@ fn an_interface_port_removed_drops_its_wires_in_every_graph_and_undo_restores_th
         &library,
         RefusedFate::Ghost,
     );
-    assert!(back.refused().is_empty());
+    assert!(back.refused_bindings().is_empty());
     set.write_interface(&back, ChangeSide::After);
     set.validate_with(&library).unwrap();
     assert_eq!(set.main().ghost_wiring().bindings().len(), 2);
@@ -1065,12 +1158,12 @@ fn an_interface_port_retyped_drops_only_what_the_new_type_refuses() {
     );
     assert_eq!(
         change
-            .refused()
+            .refused_bindings()
             .iter()
             .map(|refused| (
                 refused.graph,
                 refused.port,
-                refused.binding(),
+                refused.ghost.binding(),
                 refused.ghost.input.clone()
             ))
             .collect::<Vec<_>>(),
@@ -1104,7 +1197,10 @@ fn a_ghost_node_of_a_missing_func_stays_one_until_the_library_holds_it() {
     set.main_mut()
         .insert(n(1), internals::unresolved_node(missing));
     assert_eq!(
-        ghosted(&set.reconcile(&library, &Manifest::default()).main.repairs),
+        ghosted(
+            &set.reconcile(&library, &Manifest::default())
+                .of(GraphId::Main)
+        ),
         [(n(1), DetachReason::Unresolved(Unresolved::MissingFunc))]
     );
     assert!(
@@ -1114,7 +1210,8 @@ fn a_ghost_node_of_a_missing_func_stays_one_until_the_library_holds_it() {
 
     library.add(internals::stub_func(missing, "found").build());
     assert_eq!(
-        set.reconcile(&library, &Manifest::default()).main.repairs,
+        set.reconcile(&library, &Manifest::default())
+            .of(GraphId::Main),
         [Repair::Reattached { node_id: n(1) }]
     );
     assert!(set.main().find(n(1)).is_some());
@@ -1175,7 +1272,7 @@ fn a_digest_names_the_definition_and_not_its_ids() {
         .graph_mut(GraphId::Compound(s(1)))
         .find_mut(n(10))
         .unwrap()
-        .name = "renamed".to_string();
+        .name = Some("renamed".to_string());
     assert_ne!(
         renamed.digest(s(1)),
         one.digest(s(1)),
@@ -1200,7 +1297,7 @@ fn a_digest_names_the_definition_and_not_its_ids() {
                 reason: DetachReason::TooLarge,
                 saved: None,
             }],
-            &mut Reconciled::default(),
+            &mut Vec::new(),
         );
     assert_ne!(ghosted.digest(s(1)), one.digest(s(1)));
     let mut kept = build(s(1), s(2), false, "inner");
@@ -1320,7 +1417,7 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
     set.validate_with(&library).unwrap();
     // A load under an interface that has a trigger again brings the ghost back live.
     let regained = set.plan_interface(s(1), interface, &library, RefusedFate::Ghost);
-    assert_eq!(regained.refused_subscriptions(), []);
+    assert!(regained.refused_subscriptions().is_empty());
     set.write_interface(&regained, ChangeSide::After);
     assert!(!set.reconcile(&library, &Manifest::default()).is_empty());
     assert_eq!(
@@ -1374,6 +1471,36 @@ fn a_subscription_lands_on_a_declared_trigger_and_an_interface_edit_refuses_it()
     set.validate_with(&library).unwrap();
     set.write_interface(&kept, ChangeSide::Before);
     assert_eq!(set, before);
+
+    // A ghost on a trigger the interface shows again, of an event its emitter does not declare,
+    // stays a ghost: a load takes the trigger's saved name off it, as the declaration names the
+    // trigger now, and leaves the event's.
+    let stray = Subscription::new(
+        EventPort::new(passed.event.node_id, PortId::new(9)),
+        passed.trigger,
+    );
+    let saved = |name: &str| {
+        Some(SavedEvent {
+            name: name.to_owned(),
+        })
+    };
+    set.graph_mut(GraphId::Compound(s(1)))
+        .set_subscription_state(
+            stray,
+            SubscriptionState::Ghost(GhostSubscription {
+                event: saved("gone"),
+                trigger: saved("out"),
+            }),
+        );
+    // Naming a ghost's end is no repair a load reports.
+    assert!(set.reconcile(&library, &Manifest::default()).is_empty());
+    assert_eq!(
+        set.graph(GraphId::Compound(s(1))).subscription_state(stray),
+        SubscriptionState::Ghost(GhostSubscription {
+            event: saved("gone"),
+            trigger: None,
+        })
+    );
 }
 
 /// An interface edit that removes a port an existing ghost names saves the port's name and type on
@@ -1463,7 +1590,10 @@ fn an_interface_edit_names_the_ports_it_removes_on_existing_ghosts() {
     let before = set.clone();
 
     let change = set.plan_interface(s(1), Interface::default(), &library, RefusedFate::Drop);
-    assert_eq!(change.refused(), [], "no live wiring touches the instance");
+    assert!(
+        change.refused_bindings().is_empty(),
+        "no live wiring touches the instance"
+    );
     set.write_interface(&change, ChangeSide::After);
     assert_eq!(
         set.main().input_state(wired),

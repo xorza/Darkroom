@@ -77,9 +77,10 @@
 //! - **A repair reads, then writes.** Each step of a load asks a graph what to change under a
 //!   scope, drops the scope, and changes it. Refused: taking a graph out of its set for the call,
 //!   which leaves the set wrong while a scope reads it.
-//! - **The invariant is the host's contract, not a type.** `bindings` is a
-//!   public field and a graph holds no library, so no type can enforce
-//!   admission; the host's edit gate is the only way an edit lands.
+//! - **The invariant is the host's contract, not a type.** A graph holds no library, so no type
+//!   can enforce admission; the host's edit gate, [`Graph::admit_bind`] and its kin, is the only
+//!   way an edit lands. Each table is written through the graph's own methods, which keep the live
+//!   wiring and the ghost wiring apart.
 //! - **Broken structure is repaired, not refused.** A node under the nil id
 //!   goes, as no lookup can address it; wiring that names a missing node goes;
 //!   a nil func id is a node that does not resolve. Refused: refusing the
@@ -99,19 +100,18 @@
 //!   touch or refuses the edit until you remove them by hand. Reroute nodes
 //!   need a new design.
 
+use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, BTreeSet};
 
 use ::serde::{Deserialize, Serialize};
 use hashbrown::HashMap;
 
 use crate::data::const_value::ConstValue;
 use crate::graph::binding::Binding;
-use crate::graph::binding_entry::BindingEntry;
 use crate::graph::compound::Compound;
 use crate::graph::detached::{DetachedGhost, DetachedNode};
 use crate::graph::error::{
-    BindingRejection, DetachReason, GhostRejection, GhostSubscriptionRejection,
+    BindRejection, BindingRejection, DetachReason, GhostSubscriptionRejection,
     GraphValidationError, SubscriptionRejection, ValidationResult,
 };
 use crate::graph::func::Func;
@@ -119,20 +119,19 @@ use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{
     GhostBinding, GhostSource, GhostSubscription, GhostWiring, InputState, SubscriptionState,
 };
-use crate::graph::identity::{
-    CompoundId, EventPort, InputPort, NodeId, OutputPort, PortId, TriggerPort,
-};
+use crate::graph::identity::{CompoundId, EventPort, InputPort, NodeId, OutputPort, TriggerPort};
 use crate::graph::manifest::Manifest;
 use crate::graph::node::{Boundary, Node, NodeKind};
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::node_ref::NodeRef;
-use crate::graph::reconciled::{Reconciled, Repair};
+use crate::graph::ports::Ports;
+use crate::graph::reconciled::Repair;
 use crate::graph::saved_decl::{SavedDecl, SavedEvent, SavedInput, SavedPort, ShownPort};
 use crate::graph::scope::Scope;
 use crate::graph::subscription::Subscription;
+use crate::graph::wiring::Wiring;
 
 pub(crate) mod binding;
-pub(crate) mod binding_entry;
 pub(crate) mod compound;
 pub(crate) mod detached;
 mod dfs;
@@ -142,6 +141,7 @@ pub(crate) mod ghost_node;
 pub(crate) mod ghost_wiring;
 pub(crate) mod graph_set;
 pub(crate) mod identity;
+mod inline_ids;
 pub(crate) mod instance_path;
 pub(crate) mod interface;
 pub(crate) mod interface_change;
@@ -159,13 +159,14 @@ mod serde;
 pub(crate) mod subscription;
 pub(crate) mod type_names;
 pub(crate) mod value_domain;
+pub(crate) mod wiring;
 
 /// `Clone` keeps every node id as it is, so a copy is sound only where it never lives beside its
 /// original in one document, as the copy a save rewrites and writes; an editor's duplicate mints
 /// fresh ids instead.
 ///
-/// `bindings` is a plain map a caller keys into directly, so it is public;
-/// `nodes`, `subscriptions` and the ghosts are reached only through the methods below.
+/// Every table is reached through the methods below, which keep the live wiring and the ghost
+/// wiring apart: an input holds one binding, live or ghost.
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     /// Every node, keyed by id, so an id is unique by construction:
@@ -178,21 +179,9 @@ pub struct Graph {
     #[serde(deserialize_with = "crate::graph::serde::deserialize_nodes")]
     nodes: BTreeMap<NodeId, Node>,
 
-    /// Data wiring, keyed by consumer input port; absence means unbound. A `BTreeMap` keeps
-    /// serialization deterministic and a node's ports contiguous. Serialized as `(port, binding)`
-    /// pairs decoded entry by entry, so a document that repeats a port is refused rather than
-    /// loaded with only the last binding.
-    #[serde(
-        default,
-        serialize_with = "crate::graph::serde::serialize_pairs",
-        deserialize_with = "crate::graph::serde::deserialize_bindings"
-    )]
-    pub bindings: BTreeMap<InputPort, Binding>,
-
-    /// Event wiring: every (emitter event → subscriber) edge, flat. A `BTreeSet` dedups and keeps
-    /// serialization and compile order deterministic.
+    /// The bindings and subscriptions, each end a node of this graph.
     #[serde(default)]
-    subscriptions: BTreeSet<Subscription>,
+    wiring: Wiring,
 
     /// The nodes this graph cannot hold, by id, their ids disjoint from `nodes`'. Decoded entry
     /// by entry, so a document that repeats an id is refused.
@@ -254,6 +243,7 @@ struct BindingNote {
 struct SubscriptionNote {
     subscription: Subscription,
     event: Option<SavedEvent>,
+    trigger: Option<SavedEvent>,
 }
 
 /// The ghosts a scope admits: what a read of a graph under its scope answers, which the write
@@ -319,6 +309,11 @@ impl Graph {
         self.ghost_nodes.iter().map(|(id, ghost)| (*id, ghost))
     }
 
+    /// The bindings and subscriptions this graph holds.
+    pub const fn wiring(&self) -> &Wiring {
+        &self.wiring
+    }
+
     /// The bindings and subscriptions this graph keeps and cannot hold.
     pub const fn ghost_wiring(&self) -> &GhostWiring {
         &self.ghost_wiring
@@ -352,7 +347,7 @@ impl Graph {
         Some(DetachedGhost {
             node_id,
             ghost: self.ghost_nodes.get(&node_id)?.clone(),
-            wiring: self.ghost_wiring.touching(node_id),
+            wiring: self.ghost_wiring.touching(&[node_id]),
         })
     }
 
@@ -361,12 +356,15 @@ impl Graph {
     /// # Panics
     /// If this graph keeps no such ghost node.
     pub fn detach_ghost_node(&mut self, node_id: NodeId) -> DetachedGhost {
-        let detached = self
-            .snapshot_ghost_node(node_id)
+        let ghost = self
+            .ghost_nodes
+            .remove(&node_id)
             .expect("cannot detach a ghost node that is not in the graph");
-        self.ghost_nodes.remove(&node_id);
-        self.ghost_wiring.remove_touching(node_id);
-        detached
+        DetachedGhost {
+            node_id,
+            ghost,
+            wiring: self.ghost_wiring.remove_touching(&[node_id]),
+        }
     }
 
     /// Put back what [`Self::detach_ghost_node`] took out.
@@ -381,8 +379,7 @@ impl Graph {
         } = detached;
         self.assert_ghost_wiring_fits(&wiring);
         self.insert_ghost_node(node_id, ghost);
-        self.ghost_wiring.bindings.extend(wiring.bindings);
-        self.ghost_wiring.subscriptions.extend(wiring.subscriptions);
+        self.ghost_wiring.extend(wiring);
     }
 
     /// Assert each ghost of `wiring` has its key free here, live and ghost: what a record taken
@@ -395,7 +392,7 @@ impl Graph {
     fn assert_ghost_wiring_fits(&self, wiring: &GhostWiring) {
         for port in wiring.bindings.keys() {
             assert!(
-                !self.bindings.contains_key(port),
+                !self.wiring.bindings.contains_key(port),
                 "a ghost goes back on an unbound input"
             );
             assert!(
@@ -405,7 +402,7 @@ impl Graph {
         }
         for subscription in wiring.subscriptions.keys() {
             assert!(
-                !self.subscriptions.contains(subscription),
+                !self.wiring.subscriptions.contains(subscription),
                 "a ghost goes back of a subscription not made"
             );
             assert!(
@@ -418,6 +415,7 @@ impl Graph {
     /// Each constant a binding holds, live or ghost, with the input it is bound to.
     pub fn constants(&self) -> impl Iterator<Item = (InputPort, &ConstValue)> {
         let live = self
+            .wiring
             .bindings
             .iter()
             .filter_map(|(port, binding)| match binding {
@@ -438,6 +436,7 @@ impl Graph {
     /// [`Self::constants`] for writing.
     pub fn constants_mut(&mut self) -> impl Iterator<Item = &mut ConstValue> {
         let live = self
+            .wiring
             .bindings
             .values_mut()
             .filter_map(|binding| match binding {
@@ -458,7 +457,7 @@ impl Graph {
     /// What `port` holds: a binding, a ghost, or nothing.
     pub fn input_state(&self, port: InputPort) -> InputState {
         match (
-            self.bindings.get(&port),
+            self.wiring.bindings.get(&port),
             self.ghost_wiring.bindings.get(&port),
         ) {
             (Some(binding), _) => InputState::Live(binding.clone()),
@@ -470,7 +469,7 @@ impl Graph {
     /// The output `port` is wired to, live or as a ghost, or `None` for an input that holds a
     /// constant or nothing: [`Self::input_state`] for a reader that asks of a wire alone.
     pub fn input_state_wire(&self, port: InputPort) -> Option<OutputPort> {
-        match self.bindings.get(&port) {
+        match self.wiring.bindings.get(&port) {
             Some(Binding::Wire(output)) => Some(*output),
             Some(Binding::Const(_)) => None,
             None => self.ghost_wiring.binding(port)?.output(),
@@ -479,12 +478,12 @@ impl Graph {
 
     /// Make `port` hold `state`, in place of what it held, live or ghost.
     pub fn set_input_state(&mut self, port: InputPort, state: InputState) {
-        self.bindings.remove(&port);
+        self.wiring.bindings.remove(&port);
         self.ghost_wiring.bindings.remove(&port);
         match state {
             InputState::Unbound => {}
             InputState::Live(binding) => {
-                self.bindings.insert(port, binding);
+                self.wiring.bindings.insert(port, binding);
             }
             InputState::Ghost(ghost) => {
                 self.ghost_wiring.bindings.insert(port, ghost);
@@ -494,7 +493,7 @@ impl Graph {
 
     /// Whether `subscription` is made, kept as a ghost, or neither.
     pub fn subscription_state(&self, subscription: Subscription) -> SubscriptionState {
-        if self.subscriptions.contains(&subscription) {
+        if self.wiring.subscriptions.contains(&subscription) {
             SubscriptionState::Live
         } else {
             self.ghost_wiring
@@ -508,12 +507,12 @@ impl Graph {
 
     /// Make `subscription` what `state` says, in place of what it was.
     pub fn set_subscription_state(&mut self, subscription: Subscription, state: SubscriptionState) {
-        self.subscriptions.remove(&subscription);
+        self.wiring.subscriptions.remove(&subscription);
         self.ghost_wiring.subscriptions.remove(&subscription);
         match state {
             SubscriptionState::Absent => {}
             SubscriptionState::Live => {
-                self.subscriptions.insert(subscription);
+                self.wiring.subscriptions.insert(subscription);
             }
             SubscriptionState::Ghost(ghost) => {
                 self.ghost_wiring.subscriptions.insert(subscription, ghost);
@@ -521,34 +520,44 @@ impl Graph {
         }
     }
 
-    /// Whether this graph can hold the ghost on `port` now: both of its nodes are nodes, not
-    /// ghost nodes, [`Self::admit`] passes, and a wire closes no data cycle. The rule a load and
-    /// a host's Restore hold a ghost to.
+    /// Whether this graph may hold `binding` on `port`: both of its nodes are nodes, not ghost
+    /// nodes, [`Self::admit`] passes, and a wire closes no data cycle. The rule an edit, a wire
+    /// drag, a load and a host's Restore hold a binding to.
+    pub fn admit_bind(
+        &self,
+        scope: Scope<'_>,
+        port: InputPort,
+        binding: &Binding,
+    ) -> Result<(), BindRejection> {
+        self.admit_kept(scope, port, binding)?;
+        match binding {
+            Binding::Wire(output) if self.produces_cycle(output.node_id, port.node_id) => {
+                Err(BindRejection::Cycle)
+            }
+            Binding::Wire(_) | Binding::Const(_) => Ok(()),
+        }
+    }
+
+    /// [`Self::admit_bind`] for the ghost on `port`: whether this graph can hold it now.
     ///
     /// # Panics
     /// If `port` holds no ghost.
-    pub fn admit_ghost(&self, scope: Scope<'_>, port: InputPort) -> Result<(), GhostRejection> {
+    pub fn admit_ghost(&self, scope: Scope<'_>, port: InputPort) -> Result<(), BindRejection> {
         let ghost = self
             .ghost_wiring
             .binding(port)
             .expect("an admitted ghost is kept on its input");
-        self.admit_kept(scope, port, &ghost.binding())?;
-        match ghost.output() {
-            Some(output) if self.produces_cycle(output.node_id, port.node_id) => {
-                Err(GhostRejection::Cycle)
-            }
-            _ => Ok(()),
-        }
+        self.admit_bind(scope, port, &ghost.binding())
     }
 
-    /// [`Self::admit_ghost`] without the loop check, which reads the graph alone: whether both
+    /// [`Self::admit_bind`] without the loop check, which reads the graph alone: whether both
     /// nodes of `binding` on `port` are nodes and the scope admits it.
     fn admit_kept(
         &self,
         scope: Scope<'_>,
         port: InputPort,
         binding: &Binding,
-    ) -> Result<(), GhostRejection> {
+    ) -> Result<(), BindRejection> {
         let mut ends = [Some(port.node_id), None];
         if let Binding::Wire(source) = binding {
             ends[1] = Some(source.node_id);
@@ -558,7 +567,7 @@ impl Graph {
             .flatten()
             .find(|node_id| !self.nodes.contains_key(node_id))
         {
-            return Err(GhostRejection::GhostNode { node_id });
+            return Err(BindRejection::GhostNode { node_id });
         }
         Ok(self.admit(scope, port, binding)?)
     }
@@ -586,14 +595,6 @@ impl Graph {
         Ok(self.admit_subscription(scope, subscription)?)
     }
 
-    /// The bindings on `node_id`'s own inputs, in port-id order: one contiguous
-    /// range, as `InputPort` orders by node before port.
-    pub fn input_bindings(&self, node_id: NodeId) -> impl Iterator<Item = (InputPort, &Binding)> {
-        self.bindings
-            .range(InputPort::new(node_id, PortId::MIN)..)
-            .take_while(move |(port, _)| port.node_id == node_id)
-            .map(|(port, binding)| (*port, binding))
-    }
     /// Whether this graph may hold `binding` on `port`: the input is one its
     /// node declares, a constant is one the input accepts, and a wire reads an
     /// output its producer declares, of a type the input accepts, into an
@@ -694,7 +695,7 @@ impl Graph {
     /// Take out each ghost subscription no library can let this graph hold
     /// ([`Self::impossible`]), and report each: a file can hold one, and no ghost of it ever
     /// comes back.
-    pub(crate) fn drop_impossible_ghosts(&mut self, reconciled: &mut Reconciled) {
+    pub(crate) fn drop_impossible_ghosts(&mut self, repairs: &mut Vec<Repair>) {
         let impossible: Vec<_> = self
             .ghost_wiring
             .subscriptions()
@@ -705,7 +706,7 @@ impl Graph {
             .collect();
         for (subscription, rejection) in impossible {
             self.ghost_wiring.subscriptions.remove(&subscription);
-            reconciled.repairs.push(Repair::RejectedSubscription {
+            repairs.push(Repair::RejectedSubscription {
                 subscription,
                 rejection,
             });
@@ -743,16 +744,6 @@ impl Graph {
             Err(SubscriptionRejection::UndeclaredEvent)
         }
     }
-    /// Every wire as (consumer input ← producer output). Const bindings
-    /// are not edges and are skipped.
-    pub fn wires(&self) -> impl Iterator<Item = (InputPort, OutputPort)> + '_ {
-        self.bindings
-            .iter()
-            .filter_map(|(dst, binding)| match binding {
-                Binding::Wire(src) => Some((*dst, *src)),
-                Binding::Const(_) => None,
-            })
-    }
     /// Whether binding an output of `producer` into an input on `consumer`
     /// would close a directed data cycle. A node wired to itself counts.
     ///
@@ -762,55 +753,23 @@ impl Graph {
     ///
     /// Walks *backward* from `producer` over what already feeds it; reaching `consumer` means
     /// the edge closes the loop. Backward because [`InputPort`] orders by node before port, so
-    /// "what feeds this node" is one range of `bindings`; the other way needs a reversed index
+    /// "what feeds this node" is one range of the bindings; the other way needs a reversed index
     /// over every binding.
     pub fn produces_cycle(&self, producer: NodeId, consumer: NodeId) -> bool {
         dfs::reaches(producer, consumer, |node_id, next| {
             next.extend(self.wires_into(node_id).map(|(_, source)| source));
         })
     }
+    /// The node `node_id` with the wiring, live and ghost, that touches it, or `None` if this
+    /// graph holds no such node: what [`Self::detach_node`] would take out, left in.
     pub fn snapshot_node(&self, node_id: NodeId) -> Option<DetachedNode> {
         let node = self.find(node_id)?.clone();
         Some(DetachedNode {
             node_id,
             node,
-            bindings: self.bindings_touching(node_id),
-            subscriptions: self
-                .subscriptions
-                .iter()
-                .copied()
-                .filter(|subscription| subscription.touches(node_id))
-                .collect(),
-            ghost_wiring: self.ghost_wiring.touching(node_id),
+            wiring: self.wiring.touching(&[node_id]),
+            ghost_wiring: self.ghost_wiring.touching(&[node_id]),
         })
-    }
-    pub fn is_subscribed(&self, event: EventPort, subscriber: NodeId) -> bool {
-        self.subscriptions
-            .contains(&Subscription::new(event, subscriber))
-    }
-    fn bindings_touching(&self, node_id: NodeId) -> Vec<BindingEntry> {
-        self.bindings
-            .iter()
-            .filter(|(port, binding)| binding.touches(**port, node_id))
-            .map(|(port, binding)| BindingEntry {
-                port: *port,
-                binding: binding.clone(),
-            })
-            .collect()
-    }
-    pub fn subscriptions(&self) -> impl ExactSizeIterator<Item = Subscription> + '_ {
-        self.subscriptions.iter().copied()
-    }
-    /// The subscriptions to `emitter`'s events, by event, then subscriber: one contiguous range,
-    /// as a subscription orders by its event's node first.
-    pub(crate) fn subscriptions_of(
-        &self,
-        emitter: NodeId,
-    ) -> impl Iterator<Item = Subscription> + '_ {
-        self.subscriptions
-            .range(Subscription::new(EventPort::new(emitter, PortId::MIN), NodeId::nil())..)
-            .take_while(move |subscription| subscription.event.node_id == emitter)
-            .copied()
     }
 
     pub fn add(&mut self, node: Node) -> NodeId {
@@ -843,44 +802,47 @@ impl Graph {
         self.nodes.get_mut(&id)
     }
 
-    /// Add a func instance and seed its inputs' default const bindings.
-    /// Returns the new node id.
+    /// Insert `node` under `node_id` with each default its declaration's `ports` state, as
+    /// [`Self::insert`] does a node alone.
+    ///
+    /// # Panics
+    /// As [`Self::insert`].
+    pub fn insert_seeded(&mut self, node_id: NodeId, node: Node, ports: &Ports) {
+        self.insert(node_id, node);
+        self.wiring.extend(ports.default_bindings(node_id));
+    }
+
+    /// Add a node of `func` with its inputs' defaults, under a fresh id.
     pub fn add_func_node(&mut self, func: &Func) -> NodeId {
-        let node_id = self.add(Node::from(func));
-        self.bindings.extend(
-            func.ports()
-                .default_bindings(node_id)
-                .map(|entry| (entry.port, entry.binding)),
-        );
+        let node_id = NodeId::unique();
+        self.insert_seeded(node_id, Node::from(func), func.ports());
         node_id
     }
 
-    /// Add an instance of `compound`, held under `id`, and seed its inputs' default const
-    /// bindings. Returns the new node id.
+    /// Add an instance of `compound`, held under `id`, with its inputs' defaults, under a fresh id.
     pub fn add_instance(&mut self, id: CompoundId, compound: &Compound) -> NodeId {
-        let node_id = self.add(Node::instance(id));
-        self.bindings.extend(
-            compound
-                .interface
-                .ports()
-                .default_bindings(node_id)
-                .map(|entry| (entry.port, entry.binding)),
-        );
+        let node_id = NodeId::unique();
+        self.insert_seeded(node_id, Node::instance(id), compound.interface.ports());
         node_id
     }
 
+    /// Take the node `node_id` out with the wiring, live and ghost, that touches it.
+    ///
+    /// # Panics
+    /// If this graph holds no such node.
     pub fn detach_node(&mut self, node_id: NodeId) -> DetachedNode {
-        let detached = self
-            .snapshot_node(node_id)
+        let node = self
+            .nodes
+            .remove(&node_id)
             .expect("cannot detach a node that is not in the graph");
-        self.nodes.remove(&node_id);
-        self.bindings
-            .retain(|port, binding| !binding.touches(*port, node_id));
-        self.subscriptions
-            .retain(|subscription| !subscription.touches(node_id));
-        self.ghost_wiring.remove_touching(node_id);
-        detached
+        DetachedNode {
+            node_id,
+            node,
+            wiring: self.wiring.remove_touching(&[node_id]),
+            ghost_wiring: self.ghost_wiring.remove_touching(&[node_id]),
+        }
     }
+
     /// Put back what [`Self::detach_node`] took out.
     ///
     /// # Panics
@@ -893,16 +855,16 @@ impl Graph {
             "cannot attach a node that is already in the graph"
         );
         assert!(
-            detached.bindings.iter().all(|entry| {
-                !self.bindings.contains_key(&entry.port)
-                    && !self.ghost_wiring.bindings.contains_key(&entry.port)
+            detached.wiring.bindings().all(|(port, _)| {
+                !self.wiring.bindings.contains_key(&port)
+                    && !self.ghost_wiring.bindings.contains_key(&port)
             }),
             "cannot attach over bindings created after detachment"
         );
         assert!(
-            detached.subscriptions.iter().all(|subscription| {
-                !self.subscriptions.contains(subscription)
-                    && !self.ghost_wiring.subscriptions.contains_key(subscription)
+            detached.wiring.subscriptions().all(|subscription| {
+                !self.wiring.subscriptions.contains(&subscription)
+                    && !self.ghost_wiring.subscriptions.contains_key(&subscription)
             }),
             "cannot attach over subscriptions created after detachment"
         );
@@ -911,21 +873,12 @@ impl Graph {
         let DetachedNode {
             node_id,
             node,
-            bindings,
-            subscriptions,
+            wiring,
             ghost_wiring,
         } = detached;
         self.insert(node_id, node);
-        self.bindings.extend(
-            bindings
-                .into_iter()
-                .map(|entry| (entry.port, entry.binding)),
-        );
-        self.subscriptions.extend(subscriptions);
-        self.ghost_wiring.bindings.extend(ghost_wiring.bindings);
-        self.ghost_wiring
-            .subscriptions
-            .extend(ghost_wiring.subscriptions);
+        self.wiring.extend(wiring);
+        self.ghost_wiring.extend(ghost_wiring);
     }
 
     /// Bind `port` to `binding`, or unbind it, in place of what it held, a ghost included:
@@ -970,7 +923,7 @@ impl Graph {
             if let Some(node_id) = ends.into_iter().flatten().find(|id| !self.holds(*id)) {
                 return Err(GraphValidationError::GhostMissingNode { node_id });
             }
-            if self.bindings.contains_key(&port) {
+            if self.wiring.bindings.contains_key(&port) {
                 return Err(GraphValidationError::GhostOnBoundInput { port });
             }
         }
@@ -979,12 +932,12 @@ impl Graph {
             if let Some(node_id) = ends.into_iter().find(|id| !self.holds(*id)) {
                 return Err(GraphValidationError::GhostMissingNode { node_id });
             }
-            if self.subscriptions.contains(&subscription) {
+            if self.wiring.subscriptions.contains(&subscription) {
                 return Err(GraphValidationError::GhostOfSubscription { subscription });
             }
         }
 
-        for (destination, binding) in &self.bindings {
+        for (destination, binding) in &self.wiring.bindings {
             if !self.nodes.contains_key(&destination.node_id) {
                 return Err(GraphValidationError::BindingMissingNode {
                     node_id: destination.node_id,
@@ -1000,7 +953,7 @@ impl Graph {
             }
         }
 
-        for subscription in &self.subscriptions {
+        for subscription in &self.wiring.subscriptions {
             if !self.nodes.contains_key(&subscription.event.node_id) {
                 return Err(GraphValidationError::MissingSubscriptionEmitter {
                     event: subscription.event,
@@ -1045,7 +998,7 @@ impl Graph {
                 return Err(GraphValidationError::OutputsCount { count: outputs });
             }
         }
-        for (port, binding) in &self.bindings {
+        for (port, binding) in &self.wiring.bindings {
             self.admit(scope, *port, binding).map_err(|rejection| {
                 GraphValidationError::RejectedBinding {
                     port: *port,
@@ -1053,7 +1006,7 @@ impl Graph {
                 }
             })?;
         }
-        for subscription in self.subscriptions() {
+        for subscription in self.wiring.subscriptions() {
             self.admit_subscription(scope, subscription)
                 .map_err(|rejection| GraphValidationError::RejectedSubscription {
                     subscription,
@@ -1074,8 +1027,7 @@ impl Graph {
     /// Live wiring first, so a ghost is weighed against the live wiring that stays: a live
     /// binding that names a missing node goes, and a ghost on the same input stays, as a load
     /// drops no wiring whose two nodes the graph keeps.
-    pub(crate) fn repair_structure(&mut self, reconciled: &mut Reconciled) {
-        let repairs = &mut reconciled.repairs;
+    pub(crate) fn repair_structure(&mut self, repairs: &mut Vec<Repair>) {
         if self.nodes.remove(&NodeId::nil()).is_some() {
             repairs.push(Repair::NilNode);
         }
@@ -1095,7 +1047,7 @@ impl Graph {
             |node_id: NodeId| nodes.contains_key(&node_id) || ghost_nodes.contains_key(&node_id);
 
         let ghost_wiring = &mut self.ghost_wiring;
-        self.bindings.retain(|port, binding| {
+        self.wiring.bindings.retain(|port, binding| {
             let ends = [
                 Some(port.node_id),
                 match binding {
@@ -1129,7 +1081,7 @@ impl Graph {
                 repairs.push(Repair::GhostedBinding {
                     port: *port,
                     binding: binding.clone(),
-                    rejection: GhostRejection::GhostNode { node_id: off },
+                    rejection: BindRejection::GhostNode { node_id: off },
                 });
             } else {
                 repairs.push(Repair::DanglingBinding {
@@ -1139,7 +1091,7 @@ impl Graph {
             }
             false
         });
-        self.subscriptions.retain(|subscription| {
+        self.wiring.subscriptions.retain(|subscription| {
             let ends = [subscription.event.node_id, subscription.trigger.node_id];
             let Some(off) = ends
                 .into_iter()
@@ -1162,7 +1114,7 @@ impl Graph {
             false
         });
 
-        let bindings = &self.bindings;
+        let bindings = &self.wiring.bindings;
         self.ghost_wiring.bindings.retain(|port, ghost| {
             let ends_held =
                 held(port.node_id) && ghost.output().is_none_or(|output| held(output.node_id));
@@ -1179,7 +1131,7 @@ impl Graph {
             }
             ends_held && !bindings.contains_key(port)
         });
-        let subscriptions = &self.subscriptions;
+        let subscriptions = &self.wiring.subscriptions;
         self.ghost_wiring.subscriptions.retain(|subscription, _| {
             let ends_held = held(subscription.event.node_id) && held(subscription.trigger.node_id);
             if !ends_held {
@@ -1211,7 +1163,7 @@ impl Graph {
     pub(crate) fn reattach(
         &mut self,
         ghosts: &[NodeId],
-        reconciled: &mut Reconciled,
+        repairs: &mut Vec<Repair>,
     ) -> Vec<GhostNode> {
         ghosts
             .iter()
@@ -1221,20 +1173,18 @@ impl Graph {
                     .remove(&node_id)
                     .expect("a ghost node to attach is in the graph");
                 self.insert(node_id, ghost.node.clone());
-                reconciled.repairs.push(Repair::Reattached { node_id });
+                repairs.push(Repair::Reattached { node_id });
                 ghost
             })
             .collect()
     }
 
     /// Add the boundary node a compound's graph lacks on each side, under a fresh id.
-    pub(crate) fn add_missing_boundaries(&mut self, reconciled: &mut Reconciled) {
+    pub(crate) fn add_missing_boundaries(&mut self, repairs: &mut Vec<Repair>) {
         for boundary in [Boundary::Inputs, Boundary::Outputs] {
             if self.boundary_nodes(boundary).next().is_none() {
                 let node_id = self.add(Node::from(boundary));
-                reconciled
-                    .repairs
-                    .push(Repair::BoundaryAdded { boundary, node_id });
+                repairs.push(Repair::BoundaryAdded { boundary, node_id });
             }
         }
     }
@@ -1291,13 +1241,31 @@ impl Graph {
     }
 
     /// Make a ghost node of each node of `refused`, which keeps its reason and what it declared,
-    /// in the order given, and a ghost of each binding and subscription that touched it; report
-    /// each node.
+    /// in the order given, and a ghost of each binding and subscription that touched any of them,
+    /// taken in one pass of each table; report each node.
     pub(crate) fn detach_into_ghosts(
         &mut self,
         refused: Vec<Detaching>,
-        reconciled: &mut Reconciled,
+        repairs: &mut Vec<Repair>,
     ) {
+        let mut node_ids: Vec<NodeId> = refused.iter().map(|detaching| detaching.node_id).collect();
+        node_ids.sort_unstable();
+        node_ids.dedup();
+        assert_eq!(node_ids.len(), refused.len(), "a node is refused once");
+        let Wiring {
+            bindings,
+            subscriptions,
+        } = self.wiring.remove_touching(&node_ids);
+        for (port, binding) in bindings {
+            self.ghost_wiring
+                .bindings
+                .insert(port, GhostBinding::from(binding));
+        }
+        for subscription in subscriptions {
+            self.ghost_wiring
+                .subscriptions
+                .insert(subscription, GhostSubscription::default());
+        }
         for Detaching {
             node_id,
             reason,
@@ -1308,30 +1276,6 @@ impl Graph {
                 .nodes
                 .remove(&node_id)
                 .expect("a node to detach is in the graph");
-            let bindings: Vec<InputPort> = self
-                .bindings
-                .iter()
-                .filter(|(port, binding)| binding.touches(**port, node_id))
-                .map(|(port, _)| *port)
-                .collect();
-            for port in bindings {
-                let binding = self.bindings.remove(&port).expect("listed above");
-                self.ghost_wiring
-                    .bindings
-                    .insert(port, GhostBinding::from(binding));
-            }
-            let subscriptions: Vec<Subscription> = self
-                .subscriptions
-                .iter()
-                .copied()
-                .filter(|subscription| subscription.touches(node_id))
-                .collect();
-            for subscription in subscriptions {
-                self.subscriptions.remove(&subscription);
-                self.ghost_wiring
-                    .subscriptions
-                    .insert(subscription, GhostSubscription::default());
-            }
             self.ghost_nodes.insert(
                 node_id,
                 GhostNode {
@@ -1340,16 +1284,14 @@ impl Graph {
                     saved,
                 },
             );
-            reconciled
-                .repairs
-                .push(Repair::GhostedNode { node_id, reason });
+            repairs.push(Repair::GhostedNode { node_id, reason });
         }
     }
 
     /// Each binding and subscription `scope` refuses, the bindings first, each in the order the
     /// graph keeps it: what [`Self::ghost_refused`] makes ghosts of.
     pub(crate) fn refused_wiring(&self, scope: Scope<'_>) -> Vec<RefusedWiring> {
-        let bindings = self.bindings.iter().filter_map(|(port, binding)| {
+        let bindings = self.wiring.bindings.iter().filter_map(|(port, binding)| {
             self.admit(scope, *port, binding)
                 .err()
                 .map(|rejection| RefusedWiring::Binding {
@@ -1357,7 +1299,7 @@ impl Graph {
                     rejection,
                 })
         });
-        let subscriptions = self.subscriptions().filter_map(|subscription| {
+        let subscriptions = self.wiring.subscriptions().filter_map(|subscription| {
             self.admit_subscription(scope, subscription)
                 .err()
                 .map(|rejection| RefusedWiring::Subscription {
@@ -1370,18 +1312,18 @@ impl Graph {
 
     /// Make a ghost of each piece of `refused`, then of each wire that closes a data cycle, and
     /// report each. A subscription no library can bring back ([`Self::impossible`]) is removed.
-    pub(crate) fn ghost_refused(&mut self, refused: &[RefusedWiring], reconciled: &mut Reconciled) {
+    pub(crate) fn ghost_refused(&mut self, refused: &[RefusedWiring], repairs: &mut Vec<Repair>) {
         for &refusal in refused {
             match refusal {
                 RefusedWiring::Binding { port, rejection } => {
-                    self.ghost_binding(port, GhostRejection::Binding(rejection), reconciled);
+                    self.ghost_binding(port, BindRejection::Binding(rejection), repairs);
                 }
                 RefusedWiring::Subscription {
                     subscription,
                     rejection,
                 } => {
-                    self.subscriptions.remove(&subscription);
-                    reconciled.repairs.push(match rejection {
+                    self.wiring.subscriptions.remove(&subscription);
+                    repairs.push(match rejection {
                         // A declaration that loses the event or the trigger may regain it.
                         SubscriptionRejection::UndeclaredEvent
                         | SubscriptionRejection::UndeclaredTrigger => {
@@ -1405,7 +1347,7 @@ impl Graph {
             }
         }
         for port in self.closing_wires() {
-            self.ghost_binding(port, GhostRejection::Cycle, reconciled);
+            self.ghost_binding(port, BindRejection::Cycle, repairs);
         }
     }
 
@@ -1413,17 +1355,18 @@ impl Graph {
     fn ghost_binding(
         &mut self,
         port: InputPort,
-        rejection: GhostRejection,
-        reconciled: &mut Reconciled,
+        rejection: BindRejection,
+        repairs: &mut Vec<Repair>,
     ) {
         let binding = self
+            .wiring
             .bindings
             .remove(&port)
             .expect("a binding to ghost is in the graph");
         self.ghost_wiring
             .bindings
             .insert(port, GhostBinding::from(binding.clone()));
-        reconciled.repairs.push(Repair::GhostedBinding {
+        repairs.push(Repair::GhostedBinding {
             port,
             binding,
             rejection,
@@ -1453,7 +1396,7 @@ impl Graph {
 
     /// Make each ghost of `admitted` live, a wire only while it closes no data cycle among the
     /// wires live before it, and report each.
-    pub(crate) fn restore(&mut self, admitted: &AdmittedGhosts, reconciled: &mut Reconciled) {
+    pub(crate) fn restore(&mut self, admitted: &AdmittedGhosts, repairs: &mut Vec<Repair>) {
         for &port in &admitted.bindings {
             let ghost = &self.ghost_wiring.bindings[&port];
             if ghost
@@ -1464,15 +1407,11 @@ impl Graph {
             }
             let binding = ghost.binding();
             self.set_input_state(port, InputState::Live(binding.clone()));
-            reconciled
-                .repairs
-                .push(Repair::RestoredBinding { port, binding });
+            repairs.push(Repair::RestoredBinding { port, binding });
         }
         for &subscription in &admitted.subscriptions {
             self.set_subscription_state(subscription, SubscriptionState::Live);
-            reconciled
-                .repairs
-                .push(Repair::RestoredSubscription { subscription });
+            repairs.push(Repair::RestoredSubscription { subscription });
         }
     }
 
@@ -1522,6 +1461,25 @@ impl Graph {
         })
     }
 
+    /// [`Self::shown_input`] for an event: its name.
+    pub fn shown_event<'a>(
+        &'a self,
+        scope: Scope<'a>,
+        port: EventPort,
+        saved: Option<&'a SavedEvent>,
+    ) -> Option<&'a str> {
+        let declared = self
+            .find(port.node_id)
+            .and_then(|node| Some(node.decl(scope).event(port.event)?.name));
+        declared
+            .or_else(|| saved.map(|saved| saved.name.as_str()))
+            .or_else(|| {
+                self.ghost_saved(port.node_id)?
+                    .event(port.event)
+                    .map(|event| event.name.as_str())
+            })
+    }
+
     /// What a load changes of the ghosts this graph still keeps, read under `scope` against
     /// what each node declared `before`: a constant on an input of a node of the graph that is
     /// the default the input declared goes, as nobody set it; each other ghost holds the saved
@@ -1540,7 +1498,7 @@ impl Graph {
                 notes.defaults.push(port);
                 continue;
             }
-            let input = if self.reads_input(scope, port) {
+            let input = if self.shown_input(scope, port, None).is_some() {
                 None
             } else {
                 ghost
@@ -1551,7 +1509,7 @@ impl Graph {
             let output = match &ghost.source {
                 GhostSource::Const(_) => None,
                 GhostSource::Wire { output, saved } => {
-                    if self.reads_output(scope, *output) {
+                    if self.shown_output(scope, *output, None).is_some() {
                         None
                     } else {
                         saved.clone().or_else(|| {
@@ -1578,7 +1536,7 @@ impl Graph {
         }
         for (subscription, ghost) in self.ghost_wiring.subscriptions() {
             let event_port = subscription.event;
-            let event = if self.reads_event(scope, event_port) {
+            let event = if self.shown_event(scope, event_port, None).is_some() {
                 None
             } else {
                 ghost.event.clone().or_else(|| {
@@ -1589,45 +1547,28 @@ impl Graph {
                         .cloned()
                 })
             };
-            if event != ghost.event {
+            // A trigger's saved name is the interface event it passed out, which no file's
+            // declaration knows: it goes once the node shows the trigger again.
+            let trigger = self
+                .nodes
+                .get(&subscription.trigger.node_id)
+                .is_none_or(|node| {
+                    !node
+                        .decl(scope)
+                        .triggers()
+                        .contains(subscription.trigger.trigger)
+                })
+                .then(|| ghost.trigger.clone())
+                .flatten();
+            if event != ghost.event || trigger != ghost.trigger {
                 notes.subscriptions.push(SubscriptionNote {
                     subscription,
                     event,
+                    trigger,
                 });
             }
         }
         notes
-    }
-
-    /// Whether a declaration this graph can read gives the input `port`: its node's, under
-    /// `scope`, or its ghost node's saved one.
-    fn reads_input(&self, scope: Scope<'_>, port: InputPort) -> bool {
-        match self.nodes.get(&port.node_id) {
-            Some(node) => node.decl(scope).ports().input(port.port).is_some(),
-            None => self
-                .ghost_saved(port.node_id)
-                .is_some_and(|saved| saved.input(port.port).is_some()),
-        }
-    }
-
-    /// [`Self::reads_input`] for an output.
-    fn reads_output(&self, scope: Scope<'_>, port: OutputPort) -> bool {
-        match self.nodes.get(&port.node_id) {
-            Some(node) => node.decl(scope).ports().output(port.port).is_some(),
-            None => self
-                .ghost_saved(port.node_id)
-                .is_some_and(|saved| saved.output(port.port).is_some()),
-        }
-    }
-
-    /// [`Self::reads_input`] for an event.
-    fn reads_event(&self, scope: Scope<'_>, port: EventPort) -> bool {
-        match self.nodes.get(&port.node_id) {
-            Some(node) => node.decl(scope).event(port.event).is_some(),
-            None => self
-                .ghost_saved(port.node_id)
-                .is_some_and(|saved| saved.event(port.event).is_some()),
-        }
     }
 
     /// What the ghost node `node_id` declared, if the graph keeps one that knows.
@@ -1637,7 +1578,7 @@ impl Graph {
 
     /// Write `notes`: remove each ghost constant that was its port's default and report it, and
     /// give each remaining ghost the saved ports noted.
-    pub(crate) fn note_ghosts(&mut self, notes: &GhostNotes, reconciled: &mut Reconciled) {
+    pub(crate) fn note_ghosts(&mut self, notes: &GhostNotes, repairs: &mut Vec<Repair>) {
         for &port in &notes.defaults {
             let ghost = self
                 .ghost_wiring
@@ -1647,9 +1588,7 @@ impl Graph {
             let GhostSource::Const(value) = ghost.source else {
                 unreachable!("a default is a constant");
             };
-            reconciled
-                .repairs
-                .push(Repair::DefaultDropped { port, value });
+            repairs.push(Repair::DefaultDropped { port, value });
         }
         for note in &notes.bindings {
             let ghost = self
@@ -1663,12 +1602,13 @@ impl Graph {
             }
         }
         for note in &notes.subscriptions {
-            self.ghost_wiring
+            let ghost = self
+                .ghost_wiring
                 .subscriptions
                 .get_mut(&note.subscription)
-                .expect("a noted ghost is kept")
-                .event
-                .clone_from(&note.event);
+                .expect("a noted ghost is kept");
+            ghost.event.clone_from(&note.event);
+            ghost.trigger.clone_from(&note.trigger);
         }
     }
 
@@ -1681,8 +1621,8 @@ impl Graph {
         scope: Scope<'_>,
         before: Before<'_>,
         notes: &GhostNotes,
-    ) -> Vec<BindingEntry> {
-        let mut seeds = Vec::new();
+    ) -> Wiring {
+        let mut seeds = Wiring::default();
         for node in self.iter() {
             let Some(declared_before) = before.of(node.node_id, &node) else {
                 continue;
@@ -1694,10 +1634,7 @@ impl Graph {
                     && self.input_state(port) == InputState::Unbound
                     && let Some(default) = &input.default_value
                 {
-                    seeds.push(BindingEntry {
-                        port,
-                        binding: Binding::Const(default.clone()),
-                    });
+                    seeds.bind(port, Binding::Const(default.clone()));
                 }
             }
         }
@@ -1705,9 +1642,9 @@ impl Graph {
     }
 
     /// Bind each input of `seeds` to its default, and report each.
-    pub(crate) fn seed_defaults(&mut self, seeds: Vec<BindingEntry>, reconciled: &mut Reconciled) {
-        for BindingEntry { port, binding } in seeds {
-            reconciled.repairs.push(Repair::DefaultSeeded {
+    pub(crate) fn seed_defaults(&mut self, seeds: Wiring, repairs: &mut Vec<Repair>) {
+        for (port, binding) in seeds.bindings {
+            repairs.push(Repair::DefaultSeeded {
                 port,
                 binding: binding.clone(),
             });
@@ -1728,7 +1665,8 @@ impl Graph {
 
     /// Each wire into `node_id`'s inputs, as the input it lands on and the node it reads.
     fn wires_into(&self, node_id: NodeId) -> impl Iterator<Item = (InputPort, NodeId)> + '_ {
-        self.input_bindings(node_id)
+        self.wiring
+            .bindings_on(node_id)
             .filter_map(|(port, binding)| match binding {
                 Binding::Wire(source) => Some((port, source.node_id)),
                 Binding::Const(_) => None,
@@ -1746,29 +1684,6 @@ impl Graph {
         self.iter()
             .filter(move |node| node.boundary() == Some(side))
             .map(|node| node.node_id)
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::graph::Graph;
-    use crate::graph::node_ref::NodeRef;
-
-    impl Graph {
-        /// A node named `name`, or `None` if this graph holds none. Names are
-        /// not unique, so this returns an arbitrary match.
-        ///
-        /// Test-only: a fixture knows its nodes by the names its library gave
-        /// them, while production carries the `NodeId` it minted. A host
-        /// searching by name would be searching for something the model does
-        /// not promise is there or unique.
-        pub(crate) fn find_by_name(&self, name: &str) -> Option<NodeRef<'_>> {
-            assert!(!name.is_empty());
-            self.nodes
-                .iter()
-                .find(|(_, node)| node.name == name)
-                .map(|(id, node)| NodeRef { node_id: *id, node })
-        }
     }
 }
 

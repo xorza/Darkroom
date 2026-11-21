@@ -19,7 +19,6 @@ use thiserror::Error;
 
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
-use crate::graph::binding_entry::BindingEntry;
 use crate::graph::detached::{DetachedGhost, DetachedNode, DetachedNodeParts};
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::{GhostBinding, GhostSource, GhostSubscription, GhostWiring};
@@ -28,10 +27,11 @@ use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort, PortId};
 use crate::graph::manifest::Manifest;
 use crate::graph::node::Node;
 use crate::graph::node_decl::NodeDecl;
-use crate::graph::reconciled::{Reconciled, Repair};
+use crate::graph::reconciled::Repair;
 use crate::graph::saved_decl::{SavedDecl, SavedInput};
 use crate::graph::scope::Scope;
 use crate::graph::subscription::Subscription;
+use crate::graph::wiring::Wiring;
 use crate::library::Library;
 use crate::library::func_redirect::FuncRedirect;
 
@@ -272,36 +272,30 @@ struct Sides {
 }
 
 impl Sides {
-    /// The sides of `node_id`'s ports that `bindings`, `subscriptions` and `ghosts` name, placed
-    /// through `remap` against `after`.
+    /// The sides of `node_id`'s ports that `wiring` and `ghosts` name, placed through `remap`
+    /// against `after`.
     fn of(
         node_id: NodeId,
         remap: &NodeRemap,
         after: &SavedDecl,
-        bindings: &[BindingEntry],
-        subscriptions: &[Subscription],
+        wiring: &Wiring,
         ghosts: &GhostWiring,
     ) -> Self {
-        let ids = |ports: &mut dyn Iterator<Item = PortId>| ports.collect::<Vec<_>>();
-        let declared_inputs = ids(&mut after.inputs.iter().map(|input| input.id));
-        let declared_outputs = ids(&mut after.outputs.iter().map(|output| output.id));
-        let declared_events = ids(&mut after.events.iter().map(|event| event.id));
-        let live_inputs = bindings
-            .iter()
-            .filter(|entry| entry.port.node_id == node_id)
-            .map(|entry| entry.port.port);
+        let declared_inputs: Vec<PortId> = after.inputs.iter().map(|input| input.id).collect();
+        let declared_outputs: Vec<PortId> = after.outputs.iter().map(|output| output.id).collect();
+        let declared_events: Vec<PortId> = after.events.iter().map(|event| event.id).collect();
+        let live_inputs = wiring.bindings_on(node_id).map(|(port, _)| port.port);
         let ghost_inputs = ghosts.bindings_on(node_id).map(|(port, _)| port.port);
-        let live_outputs = bindings.iter().filter_map(|entry| match entry.binding {
-            Binding::Wire(output) if output.node_id == node_id => Some(output.port),
-            Binding::Wire(_) | Binding::Const(_) => None,
-        });
+        let live_outputs = wiring
+            .wires()
+            .filter(|(_, output)| output.node_id == node_id)
+            .map(|(_, output)| output.port);
         let ghost_outputs = ghosts
             .wires()
             .filter(|(_, output)| output.node_id == node_id)
             .map(|(_, output)| output.port);
-        let live_events = subscriptions
-            .iter()
-            .filter(|subscription| subscription.event.node_id == node_id)
+        let live_events = wiring
+            .subscriptions_from(node_id)
             .map(|subscription| subscription.event.event);
         let ghost_events = ghosts
             .subscriptions_from(node_id)
@@ -330,8 +324,7 @@ impl Sides {
 /// ghosts.
 #[derive(Debug, Default)]
 struct Remapped {
-    bindings: Vec<BindingEntry>,
-    subscriptions: Vec<Subscription>,
+    wiring: Wiring,
     ghosts: GhostWiring,
 }
 
@@ -341,8 +334,7 @@ impl Remapped {
         node_id: NodeId,
         sides: &Sides,
         before: &SavedDecl,
-        bindings: Vec<BindingEntry>,
-        subscriptions: Vec<Subscription>,
+        wiring: Wiring,
         ghosts: GhostWiring,
     ) -> Self {
         let mut out = Self::default();
@@ -370,7 +362,7 @@ impl Remapped {
                 .then(|| before.output(old.port).cloned())
                 .flatten()
         };
-        for BindingEntry { port, binding } in bindings {
+        for (port, binding) in wiring.bindings {
             let (input, input_landing) = input_port(port);
             let ghost_input = matches!(input_landing, Some(Landing::Ghost(_)));
             match binding {
@@ -383,10 +375,9 @@ impl Remapped {
                         },
                     );
                 }
-                Binding::Const(value) => out.bindings.push(BindingEntry {
-                    port: input,
-                    binding: Binding::Const(value),
-                }),
+                Binding::Const(value) => {
+                    out.wiring.bind(input, Binding::Const(value));
+                }
                 Binding::Wire(output) => {
                     let (source, output_landing) = output_port(output);
                     let ghost_output = matches!(output_landing, Some(Landing::Ghost(_)));
@@ -406,10 +397,7 @@ impl Remapped {
                             },
                         );
                     } else {
-                        out.bindings.push(BindingEntry {
-                            port: input,
-                            binding: Binding::Wire(source),
-                        });
+                        out.wiring.bind(input, Binding::Wire(source));
                     }
                 }
             }
@@ -453,7 +441,7 @@ impl Remapped {
             )
         };
         let saved_event = |old: Subscription| before.event(old.event.event).cloned();
-        for subscription in subscriptions {
+        for subscription in wiring.subscriptions {
             match event_of(subscription) {
                 (moved, Some(Landing::Ghost(_))) => {
                     out.ghosts.subscriptions.insert(
@@ -464,7 +452,9 @@ impl Remapped {
                         },
                     );
                 }
-                (moved, _) => out.subscriptions.push(moved),
+                (moved, _) => {
+                    out.wiring.subscribe(moved);
+                }
             }
         }
         for (subscription, ghost) in ghosts.subscriptions {
@@ -497,31 +487,15 @@ impl DetachedNode {
         let Self {
             node_id,
             node: _,
-            bindings,
-            subscriptions,
+            wiring,
             ghost_wiring,
         } = self;
-        let sides = Sides::of(
-            node_id,
-            remap,
-            after,
-            &bindings,
-            &subscriptions,
-            &ghost_wiring,
-        );
-        let out = Remapped::of(
-            node_id,
-            &sides,
-            before,
-            bindings,
-            subscriptions,
-            ghost_wiring,
-        );
+        let sides = Sides::of(node_id, remap, after, &wiring, &ghost_wiring);
+        let out = Remapped::of(node_id, &sides, before, wiring, ghost_wiring);
         Self::new(DetachedNodeParts {
             node_id,
             node,
-            bindings: out.bindings,
-            subscriptions: out.subscriptions,
+            wiring: out.wiring,
             ghost_wiring: out.ghosts,
         })
         .expect("a remap moves a well-formed record's wiring to distinct ports of its node")
@@ -541,8 +515,8 @@ impl DetachedGhost {
         let Self {
             node_id, wiring, ..
         } = self;
-        let sides = Sides::of(node_id, remap, after, &[], &[], &wiring);
-        let out = Remapped::of(node_id, &sides, before, Vec::new(), Vec::new(), wiring);
+        let sides = Sides::of(node_id, remap, after, &Wiring::default(), &wiring);
+        let out = Remapped::of(node_id, &sides, before, Wiring::default(), wiring);
         Self {
             node_id,
             ghost,
@@ -589,7 +563,7 @@ impl Graph {
         &mut self,
         library: &Library,
         manifest: &Manifest,
-        reconciled: &mut Reconciled,
+        repairs: &mut Vec<Repair>,
     ) {
         let nodes = self.iter().map(|node| (node.node_id, node.func_id()));
         let ghosts = self
@@ -615,7 +589,7 @@ impl Graph {
             )
             .saved();
             self.redirect(node_id, redirect.to, &redirect.remap, &before, &after);
-            reconciled.repairs.push(Repair::Redirected {
+            repairs.push(Repair::Redirected {
                 node_id,
                 from: redirect.from,
                 to: redirect.to,
@@ -655,15 +629,14 @@ impl Graph {
             DetachedNode::new(DetachedNodeParts {
                 node_id,
                 node: with.clone(),
-                bindings: Vec::new(),
-                subscriptions: Vec::new(),
+                wiring: Wiring::default(),
                 ghost_wiring: ghost.wiring().clone(),
             })
             .expect("a ghost node's ghosts all touch it")
             .remapped(with, remap, &before, &after)
         };
         trial.attach_node(record);
-        let mut scratch = Reconciled::default();
+        let mut scratch = Vec::new();
         let refused = trial.refused_wiring(scope);
         trial.ghost_refused(&refused, &mut scratch);
         let mut admitted = trial.admitted_ghosts(scope);

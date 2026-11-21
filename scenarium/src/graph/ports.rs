@@ -29,12 +29,12 @@ use crate::data::const_value::ConstValue;
 use crate::data::data_type::enum_type::EnumId;
 use crate::data::data_type::{DataType, Strictness};
 use crate::graph::binding::Binding;
-use crate::graph::binding_entry::BindingEntry;
 use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::{InputPort, NodeId, PortId};
 use crate::graph::value_domain::ValueDomain;
 use crate::graph::value_domain::float_span::FloatSpan;
 use crate::graph::value_domain::int_span::IntSpan;
+use crate::graph::wiring::Wiring;
 
 /// A port's declaration under its id: the item a declaration's lists of ports hold.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -293,15 +293,19 @@ impl Ports {
         self.outputs.iter().position(|output| output.id == id)
     }
 
-    /// The const bindings a fresh node of these ports starts with: one per input that declares a
-    /// default, on that input.
-    pub fn default_bindings(&self, node_id: NodeId) -> impl Iterator<Item = BindingEntry> {
-        self.inputs.iter().filter_map(move |input| {
-            Some(BindingEntry {
-                port: InputPort::new(node_id, input.id),
-                binding: Binding::Const(input.default_value.clone()?),
-            })
-        })
+    /// The const bindings a fresh node `node_id` of these ports starts with: one per input that
+    /// declares a default, on that input.
+    pub fn default_bindings(&self, node_id: NodeId) -> Wiring {
+        let mut wiring = Wiring::default();
+        for input in &self.inputs {
+            if let Some(default) = &input.default_value {
+                wiring.bind(
+                    InputPort::new(node_id, input.id),
+                    Binding::Const(default.clone()),
+                );
+            }
+        }
+        wiring
     }
 }
 

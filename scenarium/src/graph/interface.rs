@@ -13,6 +13,8 @@
 //!   triggers, each a row on the instance, which draws an instance's triggers apart from every
 //!   other node's.
 
+use std::borrow::Cow;
+
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -60,11 +62,11 @@ impl EventPorts {
     }
 }
 
-/// An interface as a file holds it.
+/// An interface as a file holds it: borrowed to write, owned once read.
 #[derive(Serialize, Deserialize)]
-struct InterfaceRepr {
-    ports: Ports,
-    event_ports: EventPorts,
+struct InterfaceRepr<'a> {
+    ports: Cow<'a, Ports>,
+    event_ports: Cow<'a, EventPorts>,
 }
 
 impl Interface {
@@ -201,8 +203,8 @@ impl Eq for Interface {}
 impl Serialize for Interface {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         InterfaceRepr {
-            ports: self.ports.clone(),
-            event_ports: self.event_ports.clone(),
+            ports: Cow::Borrowed(&self.ports),
+            event_ports: Cow::Borrowed(&self.event_ports),
         }
         .serialize(serializer)
     }
@@ -213,8 +215,8 @@ impl<'de> Deserialize<'de> for Interface {
     /// cannot give two ports one id.
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let InterfaceRepr { ports, event_ports } = InterfaceRepr::deserialize(deserializer)?;
-        Self::checked(ports)
-            .and_then(|interface| interface.with_event_ports(event_ports))
+        Self::checked(ports.into_owned())
+            .and_then(|interface| interface.with_event_ports(event_ports.into_owned()))
             .map_err(D::Error::custom)
     }
 }

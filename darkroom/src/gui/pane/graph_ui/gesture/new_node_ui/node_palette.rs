@@ -387,7 +387,7 @@ impl NodePalette<'_> {
                 pos: self.pos,
                 node_id,
                 node,
-                bindings: entry.ports().default_bindings(node_id).collect(),
+                bindings: entry.ports().default_bindings(node_id),
             },
             wire: landing
                 .zip(self.dropped)

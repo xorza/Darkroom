@@ -2,7 +2,6 @@ use std::collections::BTreeSet;
 
 use scenarium::{Binding, Compiler, GraphId, InputPort, Library, OutputPort, PortId};
 
-use crate::core::document;
 use crate::core::document::Document;
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
@@ -21,7 +20,7 @@ fn chain() -> DocumentFixture {
             .main_mut()
             .find_mut(*id)
             .unwrap()
-            .name = name.to_string();
+            .name = Some(name.to_string());
     }
     for (from, to) in [(0, 1), (1, 2)] {
         fixture.wire(
@@ -40,12 +39,12 @@ fn wiring(document: &Document, library: &Library) -> Vec<String> {
     let name = |id| {
         graph
             .find(id)
-            .map_or("?", |node| document::title(node, scope))
+            .map_or("?", |node| scope.title(node))
             .to_string()
     };
     let mut wires: Vec<String> = graph
-        .bindings
-        .iter()
+        .wiring()
+        .bindings()
         .map(|(input, binding)| match binding {
             Binding::Wire(source) => format!(
                 "{}.{:?} -> {}.{:?}",

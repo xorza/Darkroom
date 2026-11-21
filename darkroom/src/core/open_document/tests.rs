@@ -251,7 +251,7 @@ fn a_node_whose_ports_changed_keeps_the_wiring_they_admit() {
     let document = &loaded.open.document;
     assert!(document.graphs.main().find(chain.mid_id).is_some());
     assert!(document.graphs.main().ghost_node(chain.mid_id).is_none());
-    assert!(document.graphs.main().bindings.is_empty());
+    assert_eq!(document.graphs.main().wiring().bindings().len(), 0);
     assert_eq!(
         document
             .graphs
@@ -397,11 +397,11 @@ fn a_node_whose_func_is_missing_loads_as_a_ghost_node_and_attaches_again() {
     assert!(document.graphs.main().ghost_node(mid_id).is_none());
     assert!(document.graphs.main().ghost_wiring().is_empty());
     assert_eq!(
-        document.graphs.main().bindings.get(&into_mid),
+        document.graphs.main().wiring().binding(into_mid),
         Some(&Binding::wire(src_id, PortId::new(1)))
     );
     assert_eq!(
-        document.graphs.main().bindings.get(&into_dst),
+        document.graphs.main().wiring().binding(into_dst),
         Some(&Binding::wire(src_id, PortId::new(1))),
         "the input bound while `mid` was a ghost node keeps its binding"
     );
@@ -751,8 +751,21 @@ fn wiring_the_library_refuses_is_removed_at_load() {
 
     let refused = |loaded: &Loaded| {
         assert!(loaded.open.dirty);
-        assert!(loaded.open.document.graphs.main().bindings.is_empty());
-        assert_eq!(loaded.open.document.graphs.main().subscriptions().len(), 0);
+        assert_eq!(
+            loaded.open.document.graphs.main().wiring().bindings().len(),
+            0
+        );
+        assert_eq!(
+            loaded
+                .open
+                .document
+                .graphs
+                .main()
+                .wiring()
+                .subscriptions()
+                .len(),
+            0
+        );
         let [
             DocumentRepair::Graph {
                 graph: GraphId::Main,
@@ -864,6 +877,13 @@ fn the_sample_project_opens_clean() {
     let library = RuntimeLibrary::new(&MlModelPaths::default());
     let Loaded { open, report } = OpenDocument::load(sample.clone(), library.cur()).unwrap();
     assert!(report.is_empty(), "{report:?}");
+    // Each compound it last shared with a library it holds as it shared it: a change to what a
+    // digest reads is saved into the sample with it.
+    for (&id, side) in &open.document.sides {
+        if let Some(synced) = side.synced {
+            assert_eq!(open.document.graphs.digest(id), synced, "{id:?}");
+        }
+    }
     let mut paths = Vec::new();
     open.document
         .for_each_path(|_, path| paths.push(PathBuf::from(path)));
@@ -890,7 +910,7 @@ fn a_path_of_another_system_is_reported_and_leaves_the_document_clean() {
     ];
     let mut document = fixture.document;
     for (node_id, value) in bound {
-        document.graphs.main_mut().bindings.insert(
+        document.graphs.main_mut().set_input_binding(
             InputPort::new(node_id, PortId::new(1)),
             Binding::Const(ConstValue::FsPath(value.to_string())),
         );
@@ -1005,7 +1025,7 @@ fn a_compounds_unknown_type_is_reported_and_its_repairs_name_the_compound() {
     );
     let instance = fixture.add_instance(id);
     let mut document = fixture.document;
-    document.graphs.main_mut().bindings.insert(
+    document.graphs.main_mut().set_input_binding(
         InputPort::new(instance, choice),
         Binding::Const(ConstValue::Enum("Bicubic".to_string())),
     );

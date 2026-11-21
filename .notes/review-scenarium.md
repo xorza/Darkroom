@@ -115,113 +115,11 @@ impl DataType { pub(crate) fn holds(self, value: &DynamicValue) -> bool; }
 #### Document — `graph/`
 
 ```rust
-// graph/wiring.rs — new
-/// The bindings and subscriptions a graph holds; `GhostWiring`'s live counterpart, with its
-/// method names.
-#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Wiring {
-    bindings: BTreeMap<InputPort, Binding>,
-    subscriptions: BTreeSet<Subscription>,
-}
-impl Wiring {
-    pub fn is_empty(&self) -> bool;
-    pub fn binding(&self, port: InputPort) -> Option<&Binding>;
-    pub fn bindings(&self) -> impl ExactSizeIterator<Item = (InputPort, &Binding)>;
-    pub fn bindings_on(&self, node_id: NodeId) -> impl Iterator<Item = (InputPort, &Binding)>;
-    pub fn wires(&self) -> impl Iterator<Item = (InputPort, OutputPort)> + '_;
-    pub fn subscriptions(&self) -> impl ExactSizeIterator<Item = Subscription> + '_;
-    pub fn subscriptions_from(&self, emitter: NodeId) -> impl Iterator<Item = Subscription> + '_;
-    /// The wiring that touches any of `nodes`, ascending and each once: one node is `&[id]`.
-    pub fn touching(&self, nodes: &[NodeId]) -> Self;
-    pub(crate) fn remove_touching(&mut self, nodes: &[NodeId]) -> Self;
-}
-
-// graph/ghost_wiring.rs — the same names, plus the two reverse queries the editor scans for
-impl GhostWiring {
-    pub fn wires_from(&self, producer: NodeId) -> impl Iterator<Item = (InputPort, &GhostBinding)>;
-    pub fn subscriptions_to(&self, subscriber: NodeId) -> impl Iterator<Item = (Subscription, &GhostSubscription)>;
-    pub fn touching(&self, nodes: &[NodeId]) -> Self;
-    pub(crate) fn remove_touching(&mut self, nodes: &[NodeId]) -> Self;
-}
-
-// graph/mod.rs
-pub struct Graph {
-    nodes: BTreeMap<NodeId, Node>,
-    wiring: Wiring,
-    ghost_nodes: BTreeMap<NodeId, GhostNode>,
-    ghost_wiring: GhostWiring,
-}
-impl Graph {
-    pub const fn wiring(&self) -> &Wiring;
-    /// Whether this graph may hold `binding` on `port`: both nodes live, the scope admits it, and
-    /// it closes no loop. The rule the edit gate, a wire drag and a ghost's restore share.
-    pub fn admit_bind(&self, scope: Scope<'_>, port: InputPort, binding: &Binding) -> Result<(), BindRejection>;
-    pub fn placed(&self) -> impl Iterator<Item = (NodeId, CompoundId)> + '_;
-    pub fn boundary_nodes(&self, side: Boundary) -> impl Iterator<Item = NodeId> + '_;
-    /// Take `nodes` out, ascending and each once, with the wiring that touches each: one pass of
-    /// each table. A wire between two of them goes with the lower id.
-    pub fn detach_nodes(&mut self, nodes: &[NodeId]) -> Vec<DetachedNode>;
-    /// Add `node` with each default its declaration's `ports` state; `add_func_node` and
-    /// `add_instance` are sugar over it.
-    pub fn add_seeded(&mut self, node: Node, ports: &Ports) -> NodeId;
-}
-
-// graph/error.rs — `GhostRejection` renamed, its cases unchanged: it answers a new bind too
-pub enum BindRejection { GhostNode { node_id: NodeId }, Binding(#[from] BindingRejection), Cycle }
-
-// graph/detached.rs
-pub struct DetachedNode { node_id: NodeId, node: Node, wiring: Wiring, ghost_wiring: GhostWiring }
-
-// graph/inline_ids.rs — new, private to `graph`
-#[derive(Clone, Copy)]
-pub(crate) struct InlineIds<const N: usize> { len: u8, ids: [NodeId; N] }
-// graph/instance_path.rs:  pub struct InstancePath(InlineIds<7>);
-// graph/program_id.rs:     pub struct ProgramId(InlineIds<8>);   // at least one id
-
-// graph/interface_change.rs
-pub struct InterfaceChange {
-    pub id: CompoundId,
-    pub before: Interface,
-    pub after: Interface,
-    pub fate: RefusedFate,
-    pub graphs: BTreeMap<GraphId, WiringChange>,
-}
-pub struct WiringChange { pub refused: GhostWiring, pub named_before: GhostWiring, pub named_after: GhostWiring }
-
-// graph/reconciled.rs
-pub struct GraphSetReconciled { pub repairs: BTreeMap<GraphId, Vec<Repair>> }
-
-// graph/node/mod.rs
-pub struct Node {
-    pub(crate) kind: NodeKind,
-    /// `None` shows the declaration's name.
-    pub name: Option<String>,
-    pub disabled: bool,
-}
 // graph/scope.rs
 impl<'a> Scope<'a> {
     pub fn decl(self, node: &Node) -> NodeDecl<'a>;        // was `Node::decl`
-    /// The node's own name, else its declaration's.
-    pub fn title(self, node: &'a Node) -> &'a str;
-}
-// graph/ghost_node.rs
-impl GhostNode {
-    /// The node's own name, else the name its saved declaration holds, else empty.
-    pub fn title(&self) -> &str;
 }
 ```
-
-- **A node with no name of its own shows its declaration's**, a func node as an instance:
-  `add_func_node` and `add_instance` both leave `name` `None`, and a rename to the empty string
-  stores `None`. The empty-string sentinel and darkroom's `title` (`core/document/mod.rs:780-794`)
-  go.
-
-- **`Wiring`** — a port is bound once by construction, so `DetachedNode::new` loses its sort,
-  its duplicate scan and two error variants; `bindings` is no longer a public field, so
-  `set_input_state` is the one write and the live and ghost keys stay disjoint by it.
-- **Gone:** `BindingEntry` (a `(InputPort, Binding)` pair of a `Wiring`), `RefusedBinding`,
-  `RefusedSubscription`, `NamedGhost`, `RefusedWiring` (it takes `AdmittedGhosts`' two-list shape),
-  `ExactChain`, `Graph::is_subscribed`, `reads_input` / `reads_output`.
 
 Batch 9 alone:
 
@@ -537,7 +435,7 @@ Compiler::compile(&mut self, &GraphSet, &Library) -> CompiledGraph      exec/com
 GraphSet::reconcile(&mut self, &Library, &Manifest) -> GraphSetReconciled   graph/graph_set
 ├─ Graph::repair_structure(&mut self, &mut Vec<Repair>)
 ├─ dfs::back_edges(compounds, placed) -> BackEdges<CompoundId, NodeAddr>
-├─ Graph::detach_nodes(&mut self, &[NodeId]) -> Vec<DetachedNode>
+├─ Graph::detach_into_ghosts(&mut self, Vec<Detaching>, &mut Vec<Repair>)   one pass of each table
 └─ per graph: the read-then-write steps as today (one `GraphLoad` pass after batch 9)
 
 GraphSet::digest(&self, CompoundId) -> CompoundDigest                   graph/graph_set/digest.rs
@@ -598,8 +496,8 @@ against the layering:
   `value_domain`; `Ports::default_bindings` moves to the graph side.
 - `node ⇄ scope` — `Node::decl(scope)` becomes `Scope::decl(&Node)`.
 - `scope ⇄ graph_set` — `Scope` holds the compound table, not the set.
-- `graph (mod) ⇄ compound` — `add_func_node` and `add_instance` become one
-  `Graph::add_seeded(node, &Ports)`.
+- `graph (mod) ⇄ compound` — `add_func_node` and `add_instance`, sugar over
+  `Graph::insert_seeded(node_id, node, &Ports)`, leave the graph.
 - `error ⇄ graph_set` — `ProgramShape` moves to `graph_set/program_shape.rs`.
 - `instance_path ⇄ program_id` — both sit on `InlineIds`.
 - inside `data` — `EnumVariants` moves to `enum_type.rs`; `TypeRef` to `data_type/type_ref.rs`.
@@ -661,13 +559,17 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
 - **`Numbered<T>` keeps its `Deref`.** "Only smart pointers implement `Deref` and `DerefMut`"
   ([C-DEREF](https://rust-lang.github.io/api-guidelines/predictability.html)); the departure is
   that a numbered port reads as its port at every site, and the alternative is `.port.` at each.
-- **`InstancePath` and `ProgramId` share an in-crate `InlineIds`.** Refused: `arrayvec`, a new
-  dependency for this crate and a `u32` length, 132 bytes for `ProgramId`'s 129.
-- **A node with no name of its own shows its declaration's, whatever its kind.** A func renamed
-  in the library then reads renamed on each node nobody named, as a renamed compound already does
-  on its instances, the rule darkroom's `title` gives Blender's group node as its source. Refused:
-  `Option<String>` with a func node still given its func's name at creation, which removes the
-  sentinel and keeps two policies; the empty string as "the compound's".
+- **Not taken: a batch detach for edits and redirects (`detach_nodes`).** A redirect's remap
+  moves one node's ends, so a wire between two redirected nodes needs the first move before the
+  second, which a batch splits across records; an edit removes one node a step. The load's
+  ghosting of every refused node, the many-node case, takes the wiring in one pass of each table.
+- **Not taken: a per-revision cache of a node's ghost ends in the editor.** The ghost tables are
+  empty on a healthy document, so the scan costs nothing there; `GhostWiring::wires_from` and
+  `subscriptions_to` name the two reverse queries a cache would keep.
+- **Not taken: `RefusedWiring` in `AdmittedGhosts`' two-list shape.** Each refusal carries its
+  rejection, which the enum keeps beside its key; two lists of pairs would only move the match.
+- **Not taken: a caller's scratch for the loop check.** A wire drag asks it for the one or two
+  ports under the pointer a frame, and each answer is a walk of the wires into one node.
 - **Not taken: the probe's header kept for the load (`RuntimeCache.probed`).** The load reads
   the header again inside its one blocking closure: a small read the page cache serves, no hop of
   its own, and it holds the file as it is at the load, where a kept header would meet a blob
@@ -695,57 +597,6 @@ cache passes it; no borrow in the call graph outlives `ExecEngine::execute`.
 # Part 2 — Plan
 
 Each batch leaves the build and the tests green. Whoever addresses an item deletes it.
-
-## Batch 6 — the wiring type and what repeats around it
-
-Files: `graph/wiring.rs` (new), `graph/mod.rs`, `graph/detached.rs`, `graph/ghost_wiring.rs`,
-`graph/port_map/`, `graph/interface_change.rs`, `graph/reconciled.rs`, `graph/inline_ids.rs` (new),
-`graph/instance_path.rs`, `graph/program_id.rs`, `graph/node_decl.rs`, `graph/interface.rs`,
-`graph/error.rs`, the `darkroom` callers, `darkroom/sample/`. After batch 4. The document's shape
-changes; the sample is saved again.
-
-- [ ] `graph/mod.rs:189-207`, `detached.rs:28-78`, `port_map/mod.rs:332-336` — the live tables as
-  loose fields and as `Vec`s with a hand sort. Target: `Wiring`; `bindings` private.
-- [ ] `darkroom/src/core/edit/bring_in.rs:168,203-204`, `core/io/export.rs:164` — writes to
-  `graph.bindings` past `set_input_state`. Target: the setter.
-- [ ] `graph/mod.rs:520-554`; `darkroom/src/core/edit/graph_intent/mod.rs:443-460`,
-  `gui/pane/graph_ui/gesture/wire_ui/mod.rs:179-193`,
-  `gui/pane/graph_ui/node_ui/port_row/mod.rs:815-832` — "both nodes live, admitted, no loop" by
-  hand three times. Target: `Graph::admit_bind`; `admit_ghost` sugar over it.
-- [ ] `graph/mod.rs:778-889,1287-1338`, `port_map/mod.rs:562-624` — a detach is four passes of
-  every table per node: a redirect on 2000 nodes of 6000 bindings is about 50 M checks at load.
-  Target: `detach_nodes`.
-- [ ] `darkroom/src/gui/graph_ctx/node_ctx.rs:233-270,352-367` — the ghost tables scanned per node
-  per frame, zero on a healthy document and up to about a millisecond at 400 ghosts. Target:
-  `GhostWiring::wires_from` and `subscriptions_to`, cached per content revision by the caller.
-- [ ] `interface_change.rs:45-92`, `graph/mod.rs:258-287`, `reconciled.rs:19-37` — four parallel
-  vectors and three carrier types; two shapes for "keys a scope answered about"; a report built as
-  a map, converted, and flattened back by `darkroom/src/core/document/mod.rs:606-623`. Target:
-  `InterfaceChange.graphs`, `WiringChange`, `GraphSetReconciled.repairs`.
-- [ ] `instance_path.rs:25-177`, `program_id.rs:40-183` — 110 lines twice. Target: `InlineIds`.
-- [ ] `graph/mod.rs:581,793,812,1595-1612` — `input_bindings` beside `bindings_on`,
-  `subscriptions_of` beside `subscriptions_from`, `is_subscribed` beside `subscription_state`,
-  `reads_*` beside `shown_*`. Target: `Wiring`'s names; `shown_event` added; the rest deleted.
-- [ ] `graph/mod.rs:1521-1590` — `ghost_notes` refreshes a ghost subscription's event name and not
-  its trigger's. Target: both.
-- [ ] `graph_set/mod.rs:487-497,103-117` — `validate_with` re-implements
-  `ProgramShape::rejection`. Target: `GraphValidationError::Placement(PlacementRejection)`.
-- [ ] `node_decl.rs:204-222`, `port_map/mod.rs:285`, `interface.rs:201-209` — a hand-rolled
-  exact-size chain, a `&mut dyn Iterator` to share three collects, a serialize that clones the
-  ports. Target: a mapped range, three collects, a borrowed repr.
-- [ ] `graph/node/mod.rs:147-156,296-305` — an empty `name` meaning "the compound's", read in
-  another crate, and a func node that copies its func's name at creation. Target:
-  `Option<String>`, `Scope::title`, `GhostNode::title`. Test: a func renamed in the library and a
-  renamed compound each read renamed on an unnamed node, and a named node keeps its name.
-- [ ] `graph/mod.rs:761-762` — `produces_cycle` allocates a `Vec` and a set per hovered port.
-  Target: a scratch the caller passes to `reaches`.
-- [ ] `graph_set/mod.rs:507-516` — the manifest builds a `SavedDecl` per node and keeps one per
-  func. Target: per func.
-- [ ] `graph/tests.rs:254-268,780-791` — a removal checked by a count; `by_port` sorting away the
-  documented repair order. Target: which wires survive; the order as written.
-- [ ] Untested: `input_state_wire`, `shown_input` / `shown_output`, `count_touching`,
-  `subscriptions_from`, `replace_compound`, `put_compound`, `rename_compound`, `admit_onto`, the
-  first graph named when two pass a bound. Target: a case each.
 
 ## Batch 7 — declarations and the leaf types
 
@@ -836,7 +687,7 @@ Moves only; `lib.rs` keeps every published name.
   under *Module layout*.
 - [ ] `node/mod.rs:18-19` ⇄ `scope.rs:6`; `scope.rs:5` ⇄ `graph_set`; `graph/mod.rs:111` ⇄
   `compound.rs:34`; `error.rs:9` ⇄ `graph_set/mod.rs:36`. Target: `Scope::decl`, the compound
-  table in `Scope`, `Graph::add_seeded`, `graph_set/program_shape.rs`.
+  table in `Scope`, `Graph::insert_seeded` alone, `graph_set/program_shape.rs`.
 - [ ] `data/data_type/` — `custom_type → codec → dynamic_value → custom_type`, `data_type ⇄
   enum_type`. Target: `EnumVariants` in `enum_type.rs`, `TypeRef` in `type_ref.rs`.
 - [ ] `graph/func/{lambda,event,signature}.rs`, `ports.rs` — files not named for their type;

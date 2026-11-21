@@ -142,15 +142,15 @@ fn active(state: State) -> GraphSummary {
         .expect("one graph is active")
 }
 
+/// The node of the main graph whose title is `name`.
 fn node_id(driver: &Driver, name: &str) -> NodeId {
-    driver
-        .app()
-        .open_document()
-        .document()
-        .graphs
+    let app = driver.app();
+    let graphs = &app.open_document().document().graphs;
+    let scope = graphs.scope(app.library(), GraphId::Main);
+    graphs
         .main()
         .iter()
-        .find(|node| node.name == name)
+        .find(|node| scope.title(node) == name)
         .unwrap()
         .node_id
 }
@@ -529,7 +529,7 @@ fn a_folder_a_copy_would_break_is_refused() {
     let path = fixture::project(dir.path(), &["Load Image"]);
     let mut document = io_document::load(&path).unwrap().document;
     let node_id = document.graphs.main().iter().next().unwrap().node_id;
-    document.graphs.main_mut().bindings.insert(
+    document.graphs.main_mut().set_input_binding(
         InputPort::new(node_id, PortId::new(1)),
         Binding::Const(ConstValue::FsPath("../x.tiff".to_string())),
     );
@@ -1001,10 +1001,11 @@ fn a_preview_inside_nested_compounds_publishes_under_its_path() {
     assert_eq!(outers.len(), 2);
     let outer_graph = GraphId::Compound(graphs.main().find(outers[0]).unwrap().compound().unwrap());
     let (inner, inner_graph) = instance_in(outer_graph);
+    let scope = graphs.scope(app.library(), inner_graph);
     let preview = graphs
         .graph(inner_graph)
         .iter()
-        .find(|node| node.name == "Preview")
+        .find(|node| scope.title(node) == "Preview")
         .unwrap()
         .node_id;
     for outer in outers {

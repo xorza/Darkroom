@@ -1,5 +1,5 @@
-//! [`Reconciled`]: what [`GraphSet::reconcile`](crate::GraphSet::reconcile) changed in each
-//! decoded graph so that it holds only what its scope can run.
+//! [`GraphSetReconciled`]: what [`GraphSet::reconcile`](crate::GraphSet::reconcile) changed in
+//! each decoded graph so that it holds only what its scope can run.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -8,38 +8,25 @@ use std::fmt::{Display, Formatter};
 use crate::data::const_value::ConstValue;
 use crate::graph::binding::Binding;
 use crate::graph::error::{
-    DetachReason, GhostRejection, GhostSubscriptionRejection, SubscriptionRejection,
+    BindRejection, DetachReason, GhostSubscriptionRejection, SubscriptionRejection,
 };
-use crate::graph::identity::{CompoundId, FuncId, InputPort, NodeId};
+use crate::graph::identity::{FuncId, GraphId, InputPort, NodeId};
 use crate::graph::node::Boundary;
 use crate::graph::subscription::Subscription;
 
-/// Every change a reconcile made to one graph, in the order it made them.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Reconciled {
-    pub repairs: Vec<Repair>,
-}
-
-impl Reconciled {
-    /// Whether the graph was already one the library can run.
-    pub const fn is_empty(&self) -> bool {
-        self.repairs.is_empty()
-    }
-}
-
-/// Every change a load made to a set of graphs, graph by graph: what
+/// Every change a load made to a set of graphs: what
 /// [`GraphSet::reconcile`](crate::GraphSet::reconcile) reports.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct GraphSetReconciled {
-    pub main: Reconciled,
-    /// Only the compounds a load changed.
-    pub compounds: BTreeMap<CompoundId, Reconciled>,
+    /// Each graph the load changed, the main graph first, with its changes in the order the load
+    /// made them; a graph it left as it was has no entry.
+    pub repairs: BTreeMap<GraphId, Vec<Repair>>,
 }
 
 impl GraphSetReconciled {
     /// Whether the set was already one the library can run.
     pub fn is_empty(&self) -> bool {
-        self.main.is_empty() && self.compounds.is_empty()
+        self.repairs.is_empty()
     }
 }
 
@@ -77,7 +64,7 @@ pub enum Repair {
     GhostedBinding {
         port: InputPort,
         binding: Binding,
-        rejection: GhostRejection,
+        rejection: BindRejection,
     },
     /// A subscription the graph cannot hold, kept as a ghost.
     GhostedSubscription {
@@ -186,6 +173,19 @@ impl Display for Repair {
             Self::BoundaryAdded { boundary, node_id } => {
                 write!(f, "added the missing {boundary:?} node as {node_id:?}")
             }
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::graph::identity::GraphId;
+    use crate::graph::reconciled::{GraphSetReconciled, Repair};
+
+    impl GraphSetReconciled {
+        /// What the load changed in `graph`, none for a graph it left as it was.
+        pub(crate) fn of(&self, graph: GraphId) -> Vec<Repair> {
+            self.repairs.get(&graph).cloned().unwrap_or_default()
         }
     }
 }

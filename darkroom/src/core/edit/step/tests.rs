@@ -78,7 +78,7 @@ fn interface_port_removal() -> UndoStep {
     let mut fixture = DocumentFixture::default();
     insert_compound(&mut fixture.document, id, Compound::new("inner", interface));
     let instance = fixture.add_instance(id);
-    fixture.document.graphs.main_mut().bindings.insert(
+    fixture.document.graphs.main_mut().set_input_binding(
         InputPort::new(instance, port),
         Binding::Const(ConstValue::Int(3)),
     );
@@ -99,8 +99,8 @@ fn renamed(node_id: NodeId, from: &str, to: &str) -> UndoStep {
     main(GraphStep::NodeName(SetNodeName {
         node_id,
         name: Change {
-            from: from.into(),
-            to: to.into(),
+            from: Some(from.into()),
+            to: Some(to.into()),
         },
     }))
 }

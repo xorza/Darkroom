@@ -49,7 +49,7 @@ pub(crate) fn export_paths(
     let mut paths: Vec<ExportPath> = Vec::new();
     for placed in document.graphs.placed_first(id) {
         let graph = document.graphs.graph(GraphId::Compound(placed));
-        for (&port, binding) in &graph.bindings {
+        for (port, binding) in graph.wiring().bindings() {
             let Binding::Const(value) = binding else {
                 continue;
             };
@@ -145,24 +145,23 @@ fn strip(graph: &mut Graph, library: &Library, bundled: &BTreeSet<String>) {
     for port in ghost_paths {
         graph.set_input_state(port, InputState::Unbound);
     }
-    let ports: Vec<_> = graph.bindings.keys().copied().collect();
+    let ports: Vec<_> = graph.wiring().bindings().map(|(port, _)| port).collect();
     for port in ports {
         let output = writes(graph.find(port.node_id), port.port, library);
         let kept = |path: &String| !output && bundled.contains(path);
-        let Some(Binding::Const(value)) = graph.bindings.get_mut(&port) else {
+        let Some(Binding::Const(value)) = graph.wiring().binding(port) else {
             continue;
         };
-        let gone = match value {
-            ConstValue::FsPath(path) => !path.is_empty() && !kept(path),
-            ConstValue::FsPaths(paths) => {
-                paths.retain(kept);
-                paths.is_empty()
+        // Only a constant that loses a path is written.
+        let kept_value = match value {
+            ConstValue::FsPath(path) if !path.is_empty() && !kept(path) => None,
+            ConstValue::FsPaths(paths) if paths.is_empty() || !paths.iter().all(kept) => {
+                let paths: Vec<String> = paths.iter().filter(|path| kept(path)).cloned().collect();
+                (!paths.is_empty()).then_some(ConstValue::FsPaths(paths))
             }
-            _ => false,
+            _ => continue,
         };
-        if gone {
-            graph.bindings.remove(&port);
-        }
+        graph.set_input_binding(port, kept_value.map(Binding::Const));
     }
 }
 
@@ -212,8 +211,7 @@ mod tests {
         ] {
             compound
                 .graph
-                .bindings
-                .insert(port(n), Binding::Const(ConstValue::FsPath(value)));
+                .set_input_binding(port(n), Binding::Const(ConstValue::FsPath(value)));
         }
         let ghost = |value| InputState::Ghost(GhostBinding::from(Binding::Const(value)));
         compound.graph.set_input_state(
@@ -250,13 +248,17 @@ mod tests {
         );
         let bundled = BTreeSet::from([path(&kept), "/out/x.fits".to_string()]);
         let written = exported(&document, id, &library, &bundled);
-        let bindings = &written.graphs.graph(GraphId::Compound(id)).bindings;
+        let bindings = written.graphs.graph(GraphId::Compound(id)).wiring();
         assert_eq!(
-            bindings.get(&port(1)),
+            bindings.binding(port(1)),
             Some(&Binding::Const(ConstValue::FsPath(path(&kept))))
         );
-        assert_eq!(bindings.get(&port(2)), None, "unbundled, stripped");
-        assert_eq!(bindings.get(&port(3)), None, "an output is always stripped");
+        assert_eq!(bindings.binding(port(2)), None, "unbundled, stripped");
+        assert_eq!(
+            bindings.binding(port(3)),
+            None,
+            "an output is always stripped"
+        );
         let written_graph = written.graphs.graph(GraphId::Compound(id));
         assert_eq!(
             written_graph.input_state(port(4)),

@@ -12,7 +12,7 @@ use crate::core::edit::step::reversible::Reversible;
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetNodeName {
     pub(crate) node_id: NodeId,
-    pub(crate) name: Change<String>,
+    pub(crate) name: Change<Option<String>>,
 }
 
 impl Reversible for SetNodeName {

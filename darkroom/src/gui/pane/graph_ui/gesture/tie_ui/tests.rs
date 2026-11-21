@@ -385,15 +385,15 @@ fn the_tie_menu_releases_pins_and_removes() {
             .map(|widget| widget.text.clone())
             .unwrap()
     };
-    let names: Vec<String> = h
-        .document()
-        .graphs
-        .main()
-        .iter()
-        .map(|node| node.name.clone())
-        .collect();
-    assert_eq!(names[0], names[1], "both plain nodes share the func's name");
-    let name = &names[0];
+    assert!(
+        h.document()
+            .graphs
+            .main()
+            .iter()
+            .all(|node| node.name.is_none()),
+        "both plain nodes read the func's name"
+    );
+    let name = "plain";
     assert_eq!(
         [rows[0], rows[1], rows[2], rows[3]].map(text),
         [

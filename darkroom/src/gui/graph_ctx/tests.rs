@@ -61,7 +61,7 @@ fn a_missing_func_reads_as_a_deletable_ghost_node() {
     known.disabled = true;
     let mut ghost =
         internals::unresolved_node(FuncId::literal("7a0265e1-9631-45bd-8ecd-1e923b67a58c"));
-    ghost.name = "astro_to_image".into();
+    ghost.name = Some("astro_to_image".to_owned());
     let known_id = graph.add(known);
     let mut fixture = DocumentFixture::with_library(graph, library);
     let ghost_id = fixture.add_ghost_node(ghost);
@@ -546,17 +546,10 @@ fn run_results_read_through_the_instance_a_pane_shows() {
         failing.exec_status(),
         ExecStatus::Errored(Some(_))
     ));
-    let name = &fixture
-        .open
-        .document()
-        .graphs
-        .graph(graph)
-        .find(inside)
-        .unwrap()
-        .name;
+    let inside_ctx = fixture.graph_ctx_of(graph, Display::default());
     assert_eq!(
         failing.failed_inside(),
-        Some(name.as_str()),
+        Some(inside_ctx.node(inside).unwrap().name()),
         "the footer names it"
     );
     assert_eq!(main.node(i1).unwrap().failed_inside(), None);

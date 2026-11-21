@@ -21,12 +21,8 @@ pub enum DetachedNodeError {
     NilNodeId,
     #[error("binding on {port:?} does not touch the detached node")]
     ForeignBinding { port: InputPort },
-    #[error("input {port:?} is bound twice")]
-    DuplicateBinding { port: InputPort },
     #[error("subscription {subscription:?} does not touch the detached node")]
     ForeignSubscription { subscription: Subscription },
-    #[error("subscription {subscription:?} appears twice")]
-    DuplicateSubscription { subscription: Subscription },
     #[error("a ghost in the record does not touch the detached node")]
     ForeignGhost,
     #[error("input {port:?} holds a binding and a ghost")]
@@ -80,11 +76,11 @@ pub enum BindingRejection {
     WireMismatch,
 }
 
-/// Why a graph cannot hold a ghost binding now: what
-/// [`Graph::admit_ghost`](crate::Graph::admit_ghost) answers. Asked again at each load and for
-/// each Restore, never stored.
+/// Why a graph cannot hold a binding now: what [`Graph::admit_bind`](crate::Graph::admit_bind)
+/// answers, for a new binding and a ghost's alike. Asked again at each load and for each Restore,
+/// never stored.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-pub enum GhostRejection {
+pub enum BindRejection {
     #[error("{node_id:?} is a ghost node")]
     GhostNode { node_id: NodeId },
     #[error(transparent)]
@@ -175,13 +171,9 @@ pub enum GraphValidationError {
     OutputsCount { count: usize },
     #[error("instance {node_id:?} places a compound inside itself")]
     Recursive { node_id: NodeId },
-    #[error("the graph nests {levels} levels, past {max}", max = ProgramId::MAX_LEN)]
-    TooDeep { levels: usize },
-    #[error(
-        "the graph expands into {node_count} program nodes, past {max}",
-        max = ProgramShape::MAX_NODES
-    )]
-    TooLarge { node_count: usize },
+    /// The graph is past a bound of the program it expands into, as an edit refuses to make it.
+    #[error(transparent)]
+    Placement(#[from] PlacementRejection),
 }
 
 /// A set of graphs that is not one a host may compile: one of its graphs breaks the load

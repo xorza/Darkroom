@@ -271,14 +271,18 @@ impl Compiler {
             // appended, so it is whole on entering the pool.
             let node_inputs = compiled
                 .inputs
-                .append(func.inputs().iter().map(|func_input| ExecInput {
-                    required: func_input.required,
-                    fs_path: func_input.data_type.is_path(),
-                    binding: self.lower(
-                        source,
-                        level,
-                        graph.bindings.get(&InputPort::new(node_id, func_input.id)),
-                    ),
+                .append(func.inputs().iter().map(|func_input| {
+                    ExecInput {
+                        required: func_input.required,
+                        fs_path: func_input.data_type.is_path(),
+                        binding: self.lower(
+                            source,
+                            level,
+                            graph
+                                .wiring()
+                                .binding(InputPort::new(node_id, func_input.id)),
+                        ),
+                    }
                 }));
 
             let output_count =
@@ -305,7 +309,8 @@ impl Compiler {
             let node_events = compiled.events.append(node_events);
             debug_assert!(
                 graph
-                    .subscriptions_of(node_id)
+                    .wiring()
+                    .subscriptions_from(node_id)
                     .all(|sub| func.event(sub.event.event).is_some()),
                 "every subscription names an event its emitter declares"
             );
@@ -378,7 +383,8 @@ impl Compiler {
                         totals.inputs += decl.inputs().len();
                         totals.outputs += decl.outputs().len();
                         totals.events += decl.events().len();
-                        totals.subscribers += graph.subscriptions_of(node.node_id).count();
+                        totals.subscribers +=
+                            graph.wiring().subscriptions_from(node.node_id).count();
                         placed.push(PendingNode {
                             program_id: frame.level.program_id(node.node_id),
                             graph: frame.level.graph,
@@ -433,7 +439,7 @@ impl Compiler {
         for instance in &self.cached_instances {
             let outputs = self.outputs_nodes[&instance.compound];
             let graph = source.graphs.graph(instance.inside.graph);
-            for (_, binding) in graph.input_bindings(outputs) {
+            for (_, binding) in graph.wiring().bindings_on(outputs) {
                 if let ExecBinding::Wire(addr) = self.lower(source, instance.inside, Some(binding))
                     && self.placed[addr.node_idx.idx()]
                         .program_id
@@ -471,7 +477,8 @@ impl Compiler {
             }
             let graph = source.graphs.graph(level.graph);
             for subscription in graph
-                .subscriptions_of(event.node_id)
+                .wiring()
+                .subscriptions_from(event.node_id)
                 .filter(|subscription| subscription.event.event == event.event)
             {
                 let trigger = subscription.trigger;
@@ -585,8 +592,8 @@ impl Compiler {
                     source
                         .graphs
                         .graph(level.graph)
-                        .bindings
-                        .get(&InputPort::new(outputs, source_port.port))
+                        .wiring()
+                        .binding(InputPort::new(outputs, source_port.port))
                 }
                 NodeKind::Boundary(Boundary::Inputs) => {
                     let instance = level
@@ -602,8 +609,8 @@ impl Compiler {
                     source
                         .graphs
                         .graph(graph)
-                        .bindings
-                        .get(&InputPort::new(instance, source_port.port))
+                        .wiring()
+                        .binding(InputPort::new(instance, source_port.port))
                 }
                 NodeKind::Boundary(Boundary::Outputs) => {
                     unreachable!("the `Outputs` node declares no outputs")

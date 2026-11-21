@@ -27,9 +27,9 @@ use std::rc::Rc;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, Boundary, DetachedNode, DetachedNodeParts, GhostWiring,
+    BindRejection, Binding, Boundary, DetachedNode, DetachedNodeParts, GhostWiring,
     Graph as CoreGraph, GraphId, InputPort, InputState, Library, Node, NodeId, NodeRemap,
-    Subscription, SubscriptionState,
+    Subscription, SubscriptionState, Wiring,
 };
 
 use crate::core::document::Document;
@@ -84,8 +84,8 @@ pub(crate) enum GraphIntent {
         /// Initial input bindings seeded with the node, usually each input's func-declared
         /// default (`Binding::Const`), so one undo removes node and seeds together. They must be
         /// the new node's own inputs; wiring *into* an existing node is a separate
-        /// [`Self::SetInput`].
-        bindings: Vec<BindingEntry>,
+        /// [`Self::SetInput`]. No subscription: one is a [`Self::SetSubscription`].
+        bindings: Wiring,
     },
     RemoveNode {
         node_id: NodeId,
@@ -365,12 +365,13 @@ impl GraphIntent {
                     z: view.front_z(),
                 };
                 let mut node = node;
-                node.name = node_name::free(graph, &node.name);
+                node.name = node
+                    .name
+                    .map(|wanted| node_name::free(graph, scope, &wanted));
                 let detached = DetachedNode::new(DetachedNodeParts {
                     node_id,
                     node,
-                    bindings,
-                    subscriptions: Vec::new(),
+                    wiring: bindings,
                     ghost_wiring: GhostWiring::default(),
                 })
                 .map_err(MalformedIntent::from)?;
@@ -424,6 +425,10 @@ impl GraphIntent {
                 let Some(node) = validate::live_node(graph, node_id, Role::RenameNode)? else {
                     return Ok(None);
                 };
+                // An empty name, or the title an unnamed node already reads, leaves it reading its
+                // declaration's.
+                let to = (!to.is_empty() && (node.name.is_some() || to != scope.title(node)))
+                    .then_some(to);
                 GraphStep::NodeName(SetNodeName {
                     node_id,
                     name: Change {
@@ -440,25 +445,29 @@ impl GraphIntent {
                     if destination.is_none() {
                         return Ok(None);
                     }
-                    if let Binding::Wire(source) = &binding {
-                        // A wire held across frames can outlive its producer.
-                        if validate::live_node(graph, source.node_id, Role::SetInputProducer)?
+                    // A wire held across frames can outlive its producer.
+                    if let Binding::Wire(source) = &binding
+                        && validate::live_node(graph, source.node_id, Role::SetInputProducer)?
                             .is_none()
-                        {
-                            return Ok(None);
+                    {
+                        return Ok(None);
+                    }
+                    match graph.admit_bind(scope, input, &binding) {
+                        Ok(()) => {}
+                        // A compile refuses a cyclic graph. The canvas snap filter normally stops
+                        // it earlier; this guards every binding path.
+                        Err(BindRejection::Cycle) => return Ok(None),
+                        Err(BindRejection::Binding(rejection)) => {
+                            return Err(MalformedIntent::Rejected {
+                                port: input,
+                                rejection,
+                            }
+                            .into());
                         }
-                        // A compile refuses a cyclic graph. The canvas snap filter normally
-                        // stops it earlier; this guards every binding path.
-                        if graph.produces_cycle(source.node_id, input.node_id) {
-                            return Ok(None);
+                        Err(BindRejection::GhostNode { .. }) => {
+                            unreachable!("both ends are nodes, as read above")
                         }
                     }
-                    graph.admit(scope, input, &binding).map_err(|rejection| {
-                        MalformedIntent::Rejected {
-                            port: input,
-                            rejection,
-                        }
-                    })?;
                     InputState::Live(binding)
                 } else {
                     // Clearing removes what the input holds wherever it sits, a ghost on a
@@ -877,7 +886,7 @@ fn insert_routes(
 #[cfg(test)]
 pub(crate) mod internals {
     use glam::Vec2;
-    use scenarium::{GraphId, Library, Node, NodeId};
+    use scenarium::{GraphId, Library, Node, NodeId, Wiring};
 
     use crate::core::document::Document;
     use crate::core::edit::error::{IntentError, MalformedIntent};
@@ -901,12 +910,12 @@ pub(crate) mod internals {
         }
 
         /// An `AddNode` of `node` at `pos` under `node_id`, seeding no binding.
-        pub(crate) const fn add_node(pos: Vec2, node_id: NodeId, node: Node) -> Self {
+        pub(crate) fn add_node(pos: Vec2, node_id: NodeId, node: Node) -> Self {
             Self::AddNode {
                 pos,
                 node_id,
                 node,
-                bindings: Vec::new(),
+                bindings: Wiring::default(),
             }
         }
     }

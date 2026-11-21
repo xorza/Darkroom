@@ -38,9 +38,10 @@ use crate::graph::dfs::BackEdges;
 use crate::graph::error::{
     DetachReason, GraphSetValidationError, GraphValidationError, PlacementRejection,
 };
+use crate::graph::func::Func;
 use crate::graph::ghost_node::GhostNode;
 use crate::graph::ghost_wiring::GhostSource;
-use crate::graph::identity::{CompoundId, GraphId, NodeAddr, NodeId, PortId};
+use crate::graph::identity::{CompoundId, FuncId, GraphId, NodeAddr, NodeId, PortId};
 use crate::graph::instance_path::InstancePath;
 use crate::graph::interface::Interface;
 use crate::graph::manifest::Manifest;
@@ -48,7 +49,7 @@ use crate::graph::node::{Node, NodeKind};
 use crate::graph::node_decl::NodeDecl;
 use crate::graph::ports::PortList;
 use crate::graph::program_id::ProgramId;
-use crate::graph::reconciled::{GraphSetReconciled, Reconciled, Repair};
+use crate::graph::reconciled::{GraphSetReconciled, Repair};
 use crate::graph::saved_decl::SavedDecl;
 use crate::graph::scope::Scope;
 use crate::graph::type_names::{TypeNames, TypeRef};
@@ -466,19 +467,12 @@ impl GraphSet {
         }
         let shapes = self.shapes(&walk.post_order);
         for (graph, held) in self.graphs() {
-            let shape = shape_of(held, &shapes);
-            let error = if shape.levels > ProgramShape::MAX_LEVELS {
-                GraphValidationError::TooDeep {
-                    levels: shape.levels,
-                }
-            } else if shape.node_count > ProgramShape::MAX_NODES {
-                GraphValidationError::TooLarge {
-                    node_count: shape.node_count,
-                }
-            } else {
-                continue;
-            };
-            return Err(GraphSetValidationError { graph, error });
+            if let Some(rejection) = shape_of(held, &shapes).rejection(graph) {
+                return Err(GraphSetValidationError {
+                    graph,
+                    error: GraphValidationError::Placement(rejection),
+                });
+            }
         }
         Ok(())
     }
@@ -487,15 +481,20 @@ impl GraphSet {
     /// `library` gives it: what a save writes beside the set, and the next load reads to tell
     /// what changed. A ghost node holds its own.
     pub fn manifest(&self, library: &Library) -> Manifest {
-        let funcs: Manifest = self
+        // Each func once, however many nodes run it, before its declaration is saved.
+        let named: BTreeMap<FuncId, &Func> = self
             .graphs()
             .flat_map(|(graph, held)| {
                 let scope = self.scope(library, graph);
                 held.iter().filter_map(move |node| {
                     let func = scope.resolve(&node).ok()?.func()?;
-                    Some((func.id(), NodeDecl::Func(func).saved()))
+                    Some((func.id(), func))
                 })
             })
+            .collect();
+        let funcs: Manifest = named
+            .into_values()
+            .map(|func| (func.id(), NodeDecl::Func(func).saved()))
             .collect();
         let saved = funcs.iter().flat_map(|(_, decl)| decl_types(decl));
         let types = saved
@@ -580,7 +579,7 @@ impl GraphSet {
     pub fn reconcile(&mut self, library: &Library, manifest: &Manifest) -> GraphSetReconciled {
         self.learn_type_names(manifest.types(), library);
         let ids: Vec<GraphId> = self.graphs().map(|(graph, _)| graph).collect();
-        let mut reports: BTreeMap<GraphId, Reconciled> = BTreeMap::new();
+        let mut reports: BTreeMap<GraphId, Vec<Repair>> = BTreeMap::new();
         let mut reattached: Vec<(GraphId, NodeId, GhostNode)> = Vec::new();
 
         for &graph in &ids {
@@ -673,21 +672,12 @@ impl GraphSet {
                 reports
                     .get_mut(&graph)
                     .expect("a graph with a reattached ghost node has a report")
-                    .repairs
                     .retain(|repair| !reattaches(repair, node_id));
             }
         }
 
-        let mut report = GraphSetReconciled::default();
-        for (graph, reconciled) in reports {
-            match graph {
-                GraphId::Main => report.main = reconciled,
-                GraphId::Compound(id) if !reconciled.is_empty() => {
-                    report.compounds.insert(id, reconciled);
-                }
-                GraphId::Compound(_) => {}
-            }
-        }
+        reports.retain(|_, repairs| !repairs.is_empty());
+        let report = GraphSetReconciled { repairs: reports };
         debug_assert!(
             self.validate_with(library).is_ok(),
             "a reconciled set holds the load contract: {:?}",
@@ -703,7 +693,7 @@ impl GraphSet {
         manifest: &Manifest,
         graph: GraphId,
         refused: Vec<Refusal>,
-        reports: &mut BTreeMap<GraphId, Reconciled>,
+        reports: &mut BTreeMap<GraphId, Vec<Repair>>,
     ) {
         let scope = self.scope(library, graph);
         let detaching: Vec<Detaching> = refused

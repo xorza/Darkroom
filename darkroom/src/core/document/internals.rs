@@ -245,8 +245,7 @@ impl DocumentFixture {
         self.document
             .graphs
             .main_mut()
-            .bindings
-            .insert(input, Binding::Wire(output));
+            .set_input_binding(input, Binding::Wire(output));
         WireKey::Data(DataWire { output, input })
     }
 
