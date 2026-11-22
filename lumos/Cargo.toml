@@ -47,7 +47,6 @@ libraw = { workspace = true, features = ["internals"] }
 lumos = { workspace = true, features = ["internals"] }
 simd = { workspace = true, features = ["internals"] }
 statrs = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "std"] }
 
 [features]
 internals = ["common/internals", "dep:criterion", "simd/internals"]

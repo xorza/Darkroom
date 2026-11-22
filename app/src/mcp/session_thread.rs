@@ -10,9 +10,9 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::thread::{self, JoinHandle, ThreadId};
 
+use common::LogRing;
 use common::{ErrorChain, thread as threads};
 use darkroom::driver::error::DriverError;
-use darkroom::driver::log_ring::LogRing;
 use darkroom::driver::{Driver, OpenMode, SessionConfig};
 use rmcp::model::{CallToolResult, ContentBlock};
 use tokio::sync::{mpsc, oneshot};

@@ -2,7 +2,7 @@ use palantir::ColorScheme;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use common::{TempDir, fs};
+use common::{LogRing, TempDir, fs};
 use glam::{UVec2, Vec2};
 use palantir::Action as PalantirAction;
 use palantir::{
@@ -12,7 +12,6 @@ use scenarium::{
     Binding, ConstValue, GraphId, InputPort, InstancePath, Library, NodeId, PortId, ProgramId,
 };
 use tracing::{callsite, subscriber};
-use tracing_subscriber::layer::SubscriberExt as _;
 
 use lens::DisplayStretch;
 
@@ -23,7 +22,6 @@ use crate::core::io::preferences::run_mode::RunMode;
 use crate::driver::action::{Action, Play};
 use crate::driver::error::{ActFailure, DriverError};
 use crate::driver::locator::{EditorTarget, Locator, Side};
-use crate::driver::log_ring::LogRing;
 use crate::driver::offscreen;
 use crate::driver::shot::{NODE_MARGIN, Region, Shot};
 use crate::driver::state::{Detail, GhostNodeSummary, GraphSummary, State};
@@ -483,7 +481,7 @@ fn a_copied_session_leaves_the_source_alone() {
 #[test]
 fn a_failed_action_leaves_nothing_held_and_the_log_reaches_state() {
     let log = LogRing::default();
-    let _tracing = subscriber::set_default(tracing_subscriber::registry().with(log.layer()));
+    let _tracing = subscriber::set_default(log.logger());
     let mut driver = logged(log);
     let dir = TempDir::new("darkroom-driver-failed");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);

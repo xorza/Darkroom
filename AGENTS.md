@@ -9,7 +9,7 @@ Palantir.
 Workspace members, each after the crates it uses:
 
 - **`common`** — the shared base: ids, serialization, cancellation, the 2D
-  grid, and every I/O and thread call. A leaf: in-tree it uses
+  grid, the logger, and every I/O and thread call. A leaf: in-tree it uses
   only its own derive crate.
 - **`simd`** — every vector instruction of the workspace: the vector types,
   their ops specified to the bit, and the kernel dispatch. A leaf.
@@ -38,9 +38,12 @@ profiles. Run cargo for them from their own directory, and keep their
 `Cargo.toml` valid in a standalone checkout — never inherit from this
 workspace.
 
-`libraw/LibRaw` is upstream LibRaw at a release tag; never edit it.
-Bindgen needs libclang: Xcode tools on macOS, `winget install LLVM.LLVM` on
-Windows, `libclang-dev` on Linux.
+`libraw/LibRaw` is upstream LibRaw at a release tag; never edit it. Its FFI
+bindings are committed in `libraw/src/sys/bindings.rs`, so no build needs
+libclang; when the submodule moves, `cargo run --manifest-path
+libraw/bindgen/Cargo.toml` regenerates them, which needs libclang: Xcode
+tools on macOS, `winget install LLVM.LLVM` on Windows, `libclang-dev` on
+Linux.
 
 ## Verification
 

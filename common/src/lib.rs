@@ -71,6 +71,7 @@ mod float_ext;
 mod id;
 mod introspect;
 mod libm_ext;
+mod logging;
 mod mutex_ext;
 #[expect(unsafe_code, reason = "memory maps and the OS calls behind them")]
 mod platform;
@@ -93,6 +94,8 @@ pub use internals::temp_file::TempFile;
 #[cfg(feature = "internals")]
 pub use internals::unreadable::Unreadable;
 pub use libm_ext::{Libm, LibmVec2};
+pub use logging::log_ring::LogRing;
+pub use logging::logger::{LogOutput, Logger};
 pub use platform::{
     Eviction, FileSystem, MappedFile, ResidentMemory, ScratchFile, SystemMemory, UserCache,
 };

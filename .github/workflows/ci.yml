@@ -42,10 +42,10 @@ jobs:
           # palantir, fits-well and LibRaw. The action fetches the `git@github.com:` URLs over
           # HTTPS, as no ssh-key is given.
           submodules: true
-      # libclang for LibRaw's bindgen, OpenSSL for the ONNX Runtime download of `ort-sys`.
+      # OpenSSL for the ONNX Runtime download of `ort-sys`.
       - uses: xorza/rust-ci/setup@5c6e2c57d2c89c894225a4fd2ac61e9129e9e32b # v1
         with:
-          apt-packages: libclang-dev libssl-dev pkg-config
+          apt-packages: libssl-dev pkg-config
       # So imaginarium's GPU tests run on a runner with no GPU instead of skipping.
       - uses: xorza/rust-ci/lavapipe@5c6e2c57d2c89c894225a4fd2ac61e9129e9e32b # v1
       - uses: xorza/rust-ci/crash-capture@5c6e2c57d2c89c894225a4fd2ac61e9129e9e32b # v1

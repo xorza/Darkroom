@@ -8,17 +8,12 @@ pub mod driver;
 mod gui;
 mod platform;
 
-use std::io;
 use std::path::PathBuf;
 
+use common::{LogOutput, LogRing, Logger};
 use palantir::{DebugOverlayConfig, Image, WindowConfig, WinitHost, WinitHostError};
-use tracing_subscriber::Layer as _;
-use tracing_subscriber::layer::SubscriberExt as _;
-use tracing_subscriber::util::SubscriberInitExt as _;
-use tracing_subscriber::{EnvFilter, fmt};
 
 use crate::core::io::preferences::preferences_store::PreferencesStore;
-use crate::driver::log_ring::LogRing;
 use crate::driver::window_link::WindowLink;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::{App, LaunchInputs};
@@ -109,29 +104,14 @@ fn load_icon() -> Image {
     Image::from_png(ICON_PNG).expect("the embedded icon decodes, as a test holds")
 }
 
-/// The process's tracing: `RUST_LOG`-filtered lines on stderr (`info` without it), and the
-/// warnings and errors of every thread in `ring`, for a driver to report. `try_init` is a no-op
-/// if a subscriber is already installed. Stderr in every mode: MCP's stdio transport forbids any
-/// byte on stdout but its messages and allows logs on stderr
-/// (<https://modelcontextprotocol.io/specification/2025-06-18/basic/transports>). Then logs how
-/// LibRaw was built, which its build script leaves out of the build output.
+/// The process's logging: `RUST_LOG`-filtered lines on stderr, and the warnings and errors of
+/// every thread in `ring`, for a driver to report. Without `RUST_LOG`, `info` less `rmcp`'s,
+/// which logs each step of a session's handshake and close at `info`, and keeps its warnings. A
+/// second call leaves the first logger in place. Then logs how LibRaw was built, which its build
+/// script leaves out of the build output.
 pub fn init_tracing(ring: Option<&LogRing>) {
-    tracing_subscriber::registry()
-        .with(
-            fmt::layer()
-                .with_writer(io::stderr)
-                .with_filter(log_filter()),
-        )
-        .with(ring.map(LogRing::layer))
-        .try_init()
-        .ok();
+    Logger::install_from_env("info,rmcp=warn", LogOutput::Stderr, ring.cloned());
     tracing::info!(openmp = libraw::OPENMP, "libraw tiled decoders");
-}
-
-/// `RUST_LOG`, or `info` without it, less `rmcp`'s, which logs each step of a session's
-/// handshake and close at `info`, and keeps its warnings.
-fn log_filter() -> EnvFilter {
-    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,rmcp=warn"))
 }
 
 #[cfg(feature = "internals")]

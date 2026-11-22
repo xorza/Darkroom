@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use common::LogRing;
 use common::{TempDir, fs, task};
-use darkroom::driver::log_ring::LogRing;
 use darkroom::driver::{DisplayKind, SessionConfig};
 use darkroom::internals::fixture;
 use glam::UVec2;

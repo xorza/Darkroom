@@ -7,18 +7,14 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// One list for both the compiled library and the parsed headers, so the two cannot disagree.
-/// Static only, so `LIBRAW_NODLL` everywhere. Thread-safe (no `LIBRAW_NOTHREADS`): frames decode
-/// on concurrent rayon workers, each with its own `libraw_data_t`. `USE_ZLIB` for deflate DNG, as
-/// LibRaw's own `Makefile.dist` builds it, against the zlib `libz-sys` builds.
-const DEFINES: &[&str] = &["LIBRAW_NODLL", "USE_ZLIB"];
+include!("defines.rs");
 
 fn main() {
     let root = Path::new("LibRaw");
     compile(root);
-    generate_bindings(root);
 
     println!("cargo::rerun-if-changed=build.rs");
+    println!("cargo::rerun-if-changed=defines.rs");
     println!("cargo::rerun-if-changed=shim");
     for dir in ["src", "libraw", "internal"] {
         println!("cargo::rerun-if-changed={}", root.join(dir).display());
@@ -94,30 +90,6 @@ fn compile(root: &Path) {
             }
         }
     }
-}
-
-/// Bindings for the target being built: bindgen hands Cargo's `TARGET` to clang, so the struct
-/// layouts, and the layout assertions bindgen emits, are that target's own.
-fn generate_bindings(root: &Path) {
-    let header = root.join("libraw/libraw.h");
-    bindgen::Builder::default()
-        .header(header.to_str().expect("UTF-8 crate path"))
-        .clang_args(DEFINES.iter().map(|define| format!("-D{define}")))
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .use_core()
-        .ctypes_prefix("core::ffi")
-        .allowlist_function("libraw_.*")
-        .allowlist_type("libraw_.*")
-        .allowlist_type("LibRaw_errors")
-        .allowlist_var("LIBRAW_.*")
-        .derive_debug(true)
-        .derive_default(true)
-        .generate_comments(false)
-        .formatter(bindgen::Formatter::Prettyplease)
-        .generate()
-        .expect("LibRaw headers parse; bindgen needs libclang, see the root AGENTS.md")
-        .write_to_file(PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("bindings.rs"))
-        .expect("writable OUT_DIR");
 }
 
 /// How this toolchain compiles OpenMP, and the runtime the final link needs for it.

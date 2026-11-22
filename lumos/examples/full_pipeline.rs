@@ -22,7 +22,6 @@ use lumos::{
     AlignStackConfig, CalibratedLights, CalibrationMasters, CalibrationSet, IngestConfig,
     MastersConfig, ProgressMonitor,
 };
-use tracing_subscriber::EnvFilter;
 
 fn main() {
     init_tracing();
@@ -137,9 +136,5 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
 }
 
 fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .try_init()
-        .ok();
+    common::Logger::install_from_env("info", common::LogOutput::Stderr, None);
 }

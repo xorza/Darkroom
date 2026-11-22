@@ -31,10 +31,6 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing = { workspace = true, features = ["std"] }
 zip = { workspace = true, features = ["deflate"] }
 
-[dependencies.tracing-subscriber]
-features = ["ansi", "env-filter", "fmt", "std", "tracing-log"]
-workspace = true
-
 [dev-dependencies]
 common = { workspace = true, features = ["internals"] }
 darkroom = { workspace = true, features = ["internals"] }

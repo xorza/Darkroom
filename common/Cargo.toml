@@ -10,6 +10,7 @@ common-derive = { workspace = true, optional = true }
 criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
 glam = { workspace = true, features = ["serde", "std", "usize"] }
 libm = { workspace = true }
+log = { workspace = true }
 memmap2 = { workspace = true }
 notify = { workspace = true, features = ["macos_fsevent"] }
 rayon = { workspace = true }
@@ -18,6 +19,7 @@ serde = { workspace = true, features = ["derive", "std"] }
 sysinfo = { workspace = true, features = ["disk", "system"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+tracing = { workspace = true, features = ["std"] }
 uuid = { workspace = true, features = ["serde", "std", "v4"] }
 
 [dev-dependencies]

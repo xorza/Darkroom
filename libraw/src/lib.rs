@@ -18,8 +18,8 @@ mod sensor_layout;
 mod shim;
 #[expect(
     clippy::allow_attributes,
-    reason = "the lints the bindings trip change with the bindgen version and the target, so an \
-              `expect` there goes unfulfilled on some build"
+    reason = "the lints the bindings trip change with the bindgen version that regenerates them \
+              and with clippy's own, so an `expect` there goes unfulfilled on some regeneration"
 )]
 #[allow(
     warnings,

@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use common::LogRing;
 use common::{ErrorChain, thread as threads};
 use darkroom::RunConfig;
-use darkroom::driver::log_ring::LogRing;
 use darkroom::driver::{DisplayKind, Driver, SessionConfig};
 use glam::UVec2;
 use palantir::SystemScale;

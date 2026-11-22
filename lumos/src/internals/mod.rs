@@ -34,18 +34,11 @@ pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
         .expect("panic! carries a &str or a String")
 }
 
-/// Route the tests' tracing to the test writer, at `RUST_LOG`'s filter or `info`; a second call
-/// leaves the first subscriber in place.
+/// Route the tests' logs to the test harness's output, at `RUST_LOG`'s filter or `info`; a second
+/// call leaves the first logger in place.
 #[cfg(test)]
 pub(crate) fn init_tracing() {
-    use tracing_subscriber::EnvFilter;
     // `ort` (ONNX Runtime) logs its arena allocations at INFO — far too chatty; quiet it by
     // default.
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,ort=warn"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_test_writer()
-        .try_init()
-        .ok();
+    common::Logger::install_from_env("info,ort=warn", common::LogOutput::Test, None);
 }

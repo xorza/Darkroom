@@ -22,7 +22,6 @@ common = { workspace = true, features = ["internals"] }
 libraw = { workspace = true, features = ["internals"] }
 
 [build-dependencies]
-bindgen = { workspace = true, features = ["prettyplease", "runtime"] }
 cc = { workspace = true }
 
 [features]

@@ -1,6 +1,6 @@
 [workspace]
 default-members = ["app"]
-exclude = ["palantir", "fits-well"]
+exclude = ["fits-well", "palantir"]
 members = [
     "common",
     "common/common-derive",
@@ -21,7 +21,6 @@ version = "0.1.0"
 
 [workspace.dependencies]
 arrayvec = { version = "0.7", default-features = false }
-bindgen = { version = "0.73", default-features = false }
 bitcode = { version = "0.6", default-features = false }
 blake3 = { version = "1.8", default-features = false }
 bytemuck = { version = "1.25", default-features = false }
@@ -41,6 +40,7 @@ libc = { version = "0.2", default-features = false }
 libm = { version = "0.2", default-features = false, features = ["arch"] }
 libraw = { path = "libraw" }
 libz-sys = { version = "1.1", default-features = false }
+log = { version = "0.4", default-features = false }
 lumos = { path = "lumos" }
 memmap2 = { version = "0.9", default-features = false }
 nalgebra = { version = "0.35", default-features = false }
@@ -71,7 +71,6 @@ tiff = { version = "0.11", default-features = false }
 tokio = { version = "1.54", default-features = false }
 tokio-util = { version = "0.7", default-features = false }
 tracing = { version = "0.1", default-features = false }
-tracing-subscriber = { version = "0.3", default-features = false }
 uuid = { version = "1.29", default-features = false }
 wgpu = { version = "30.0", default-features = false }
 windows = { version = "0.62", default-features = false }

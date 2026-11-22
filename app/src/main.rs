@@ -14,8 +14,8 @@ mod mcp;
 use std::env;
 use std::process::ExitCode;
 
+use common::LogRing;
 use common::{ErrorChain, process};
-use darkroom::driver::log_ring::LogRing;
 
 use crate::cli::{Command, HELP, Launch};
 
