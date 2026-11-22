@@ -2,61 +2,59 @@
 name = "lumos"
 version.workspace = true
 edition.workspace = true
-description = "Astronomical image-processing pipeline: RAW/FITS decode, calibration, star detection, registration, stacking, and drizzle."
 exclude = ["AGENTS.md", "CLAUDE.md"]
-
-[lints]
-workspace = true
-
-[features]
-real-data = []
-ml = ["dep:ort"]
-internals = ["common/internals", "dep:criterion", "simd/internals"]
-
-[dependencies]
-simd = { workspace = true }
-common = { workspace = true, features = ["introspect-derive"] }
-imaginarium = { workspace = true }
-
-ort = { workspace = true, optional = true, features = [
-    "api-28",
-    "download-binaries",
-    "std",
-    "tls-native",
-    "tracing",
-] }
-
-fits-well = { workspace = true }
-libraw = { workspace = true }
-
-thiserror = { workspace = true }
-bytemuck = { workspace = true, features = ["derive"] }
-rayon = { workspace = true }
-tracing = { workspace = true, features = ["std"] }
-glam = { workspace = true, features = ["f64", "i32", "serde", "std", "u32", "usize"] }
-serde = { workspace = true, features = ["derive", "std"] }
-rand = { workspace = true }
-rand_chacha = { workspace = true }
-nalgebra = { workspace = true, features = ["libm-force", "std"] }
-arrayvec = { workspace = true, features = ["serde"] }
-blake3 = { workspace = true, features = ["std"] }
-criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
-
-[dev-dependencies]
-statrs = { workspace = true }
-simd = { workspace = true, features = ["internals"] }
-fits-well = { workspace = true, features = ["internals"] }
-libraw = { workspace = true, features = ["internals"] }
-imaginarium = { workspace = true, features = ["internals"] }
-common = { workspace = true, features = ["internals"] }
-image = { workspace = true, features = ["png"] }
-lumos = { workspace = true, features = ["internals"] }
-tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "std"] }
+description = """
+Astronomical image-processing pipeline: RAW/FITS decode, calibration, star
+detection, registration, stacking, and drizzle.
+"""
 
 [lib]
 bench = false
 
 [[bench]]
-name = "lumos"
 harness = false
+name = "lumos"
 required-features = ["internals"]
+
+[dependencies]
+arrayvec = { workspace = true, features = ["serde"] }
+blake3 = { workspace = true, features = ["std"] }
+bytemuck = { workspace = true, features = ["derive"] }
+common = { workspace = true, features = ["introspect-derive"] }
+criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
+fits-well = { workspace = true }
+glam = { workspace = true, features = ["f64", "i32", "serde", "std", "u32", "usize"] }
+imaginarium = { workspace = true }
+libraw = { workspace = true }
+nalgebra = { workspace = true, features = ["libm-force", "std"] }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+simd = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true, features = ["std"] }
+
+[dependencies.ort]
+features = ["api-28", "download-binaries", "std", "tls-native", "tracing"]
+optional = true
+workspace = true
+
+[dev-dependencies]
+common = { workspace = true, features = ["internals"] }
+fits-well = { workspace = true, features = ["internals"] }
+image = { workspace = true, features = ["png"] }
+imaginarium = { workspace = true, features = ["internals"] }
+libraw = { workspace = true, features = ["internals"] }
+lumos = { workspace = true, features = ["internals"] }
+simd = { workspace = true, features = ["internals"] }
+statrs = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "std"] }
+
+[features]
+internals = ["common/internals", "dep:criterion", "simd/internals"]
+ml = ["dep:ort"]
+real-data = []
+
+[lints]
+workspace = true

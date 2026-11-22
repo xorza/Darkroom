@@ -4,16 +4,8 @@ version.workspace = true
 edition.workspace = true
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
-[lints]
-workspace = true
-
-[features]
-# `libc` drops a file's pages from the page cache, for the benches of cold reads on Linux;
-# `criterion` is the bench policy's, which every crate's benches share.
-internals = ["dep:criterion", "dep:libc"]
-introspect-derive = ["dep:common-derive"]
-
 [dependencies]
+bitcode = { workspace = true, features = ["serde", "std"] }
 common-derive = { workspace = true, optional = true }
 criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
 glam = { workspace = true, features = ["serde", "std", "usize"] }
@@ -21,19 +13,22 @@ libm = { workspace = true }
 memmap2 = { workspace = true }
 notify = { workspace = true, features = ["macos_fsevent"] }
 rayon = { workspace = true }
+ron = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
 sysinfo = { workspace = true, features = ["disk", "system"] }
 thiserror = { workspace = true }
-serde = { workspace = true, features = ["derive", "std"] }
-ron = { workspace = true }
-bitcode = { workspace = true, features = ["serde", "std"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 uuid = { workspace = true, features = ["serde", "std", "v4"] }
+
+[dev-dependencies]
+common = { workspace = true, features = ["internals", "introspect-derive"] }
+tokio = { workspace = true, features = ["macros"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true, optional = true }
 
-[target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = [
+[target.'cfg(windows)'.dependencies.windows]
+features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
@@ -43,8 +38,14 @@ windows = { workspace = true, features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
     "std",
-] }
+]
+workspace = true
 
-[dev-dependencies]
-common = { workspace = true, features = ["internals", "introspect-derive"] }
-tokio = { workspace = true, features = ["macros"] }
+[features]
+# `libc` drops a file's pages from the page cache, for the benches of cold reads on Linux;
+# `criterion` is the bench policy's, which every crate's benches share.
+internals = ["dep:criterion", "dep:libc"]
+introspect-derive = ["dep:common-derive"]
+
+[lints]
+workspace = true

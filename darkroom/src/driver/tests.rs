@@ -6,7 +6,7 @@ use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
 use palantir::Action as PalantirAction;
 use palantir::{
-    LocateError, PlayError, PointerButton, Rect, ShortcutMods, SystemScale, WheelDelta,
+    Image, LocateError, PlayError, PointerButton, Rect, ShortcutMods, SystemScale, WheelDelta,
 };
 use scenarium::{
     Binding, ConstValue, GraphId, InputPort, InstancePath, Library, NodeId, PortId, ProgramId,
@@ -86,13 +86,8 @@ fn sized(display: DisplayKind, size: UVec2) -> Driver {
     .unwrap()
 }
 
-fn decode(png: &[u8]) -> image::RgbaImage {
-    image::load_from_memory(png).unwrap().to_rgba8()
-}
-
-fn srgb(color: palantir::RgbaF32) -> [u8; 4] {
-    let bytes = color.to_srgba8();
-    [bytes.r, bytes.g, bytes.b, bytes.a]
+fn decode(png: &[u8]) -> Image {
+    Image::from_png(png).unwrap()
 }
 
 fn click(at: Locator) -> Action {
@@ -602,13 +597,13 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     assert_eq!(whole.legend[0].rect, screen);
     let pixels = decode(&whole.png);
     assert_eq!(
-        pixels.get_pixel(380, 130).0,
-        srgb(theme.canvas.bg),
+        pixels.texel(UVec2::new(380, 130)),
+        theme.canvas.bg.to_srgba8(),
         "the canvas"
     );
     assert_eq!(
-        pixels.get_pixel(250, 240).0,
-        srgb(theme.card.fill),
+        pixels.texel(UVec2::new(250, 240)),
+        theme.card.fill.to_srgba8(),
         "the body"
     );
     assert_eq!(fs::read(&whole.path).unwrap(), whole.png);
@@ -622,7 +617,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         .shot(&Region::Window, NonZeroU32::new(100).unwrap())
         .unwrap();
     assert_eq!(quarter.size, UVec2::new(100, 95));
-    assert_eq!(decode(&quarter.png).dimensions(), (100, 95));
+    assert_eq!(decode(&quarter.png).size(), UVec2::new(100, 95));
     assert_eq!(quarter.legend[0].rect, screen.map(|v| v / 4.0));
     let ports = |shot: &Shot| {
         shot.legend[0]

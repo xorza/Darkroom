@@ -1,9 +1,9 @@
 //! Why a dialog's pick could not become an edit, why an image of the window went nowhere, and
 //! why a driver's open left the editor as it was.
 
+use std::io;
 use std::path::PathBuf;
 
-use image::ImageError;
 use palantir::ScreenshotRefusal;
 
 /// A picked path that is not valid Unicode. A node's path input holds a
@@ -21,7 +21,7 @@ pub(crate) enum ViewCaptureError {
     Save {
         path: PathBuf,
         #[source]
-        source: ImageError,
+        source: io::Error,
     },
 }
 

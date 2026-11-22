@@ -2,43 +2,15 @@
 name = "imaginarium"
 version.workspace = true
 edition.workspace = true
-description = "Image processing with CPU (SIMD) and GPU (wgpu compute) backends: interleaved images in nine pixel formats, and f32 planes."
-license = "MIT OR Apache-2.0"
 exclude = ["AGENTS.md", "CLAUDE.md"]
+license = "MIT OR Apache-2.0"
+description = """
+Image processing with CPU (SIMD) and GPU (wgpu compute) backends: interleaved
+images in nine pixel formats, and f32 planes.
+"""
 
-[lints]
-workspace = true
-
-[features]
-default = []
-wgpu = ["dep:wgpu", "dep:pollster", "dep:tokio"]
-internals = ["common/internals", "dep:criterion", "simd/internals"]
-
-[dependencies]
-simd = { workspace = true }
-common = { workspace = true }
-wgpu = { workspace = true, optional = true, features = [
-    "metal",
-    "parking_lot",
-    "std",
-    "vulkan",
-    "wgsl",
-] }
-pollster = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true, features = ["sync"] }
-thiserror = { workspace = true, features = ["std"] }
-bytemuck = { workspace = true, features = ["derive", "extern_crate_std", "min_const_generics"] }
-glam = { workspace = true, features = ["bytemuck", "std", "u32", "usize"] }
-rayon = { workspace = true }
-serde = { workspace = true, features = ["derive", "std"] }
-strum = { workspace = true, features = ["derive", "std"] }
-tiff = { workspace = true, features = ["deflate", "fax", "jpeg", "lzw"] }
-image = { workspace = true, features = ["jpeg", "png", "tiff"] }
-criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
-
-[dev-dependencies]
-common = { workspace = true, features = ["internals"] }
-imaginarium = { workspace = true, features = ["internals"] }
+[lib]
+bench = false
 
 [[example]]
 name = "affine_warp"
@@ -48,10 +20,38 @@ required-features = ["wgpu"]
 name = "pipeline"
 required-features = ["wgpu"]
 
-[lib]
-bench = false
-
 [[bench]]
-name = "imaginarium"
 harness = false
+name = "imaginarium"
 required-features = ["internals"]
+
+[dependencies]
+bytemuck = { workspace = true, features = ["derive", "extern_crate_std", "min_const_generics"] }
+common = { workspace = true }
+criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
+glam = { workspace = true, features = ["bytemuck", "std", "u32", "usize"] }
+image = { workspace = true, features = ["jpeg", "png", "tiff"] }
+pollster = { workspace = true, optional = true }
+rayon = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+simd = { workspace = true }
+strum = { workspace = true, features = ["derive", "std"] }
+thiserror = { workspace = true, features = ["std"] }
+tiff = { workspace = true, features = ["deflate", "fax", "jpeg", "lzw"] }
+tokio = { workspace = true, optional = true, features = ["sync"] }
+
+[dependencies.wgpu]
+features = ["metal", "parking_lot", "std", "vulkan", "wgsl"]
+optional = true
+workspace = true
+
+[dev-dependencies]
+common = { workspace = true, features = ["internals"] }
+imaginarium = { workspace = true, features = ["internals"] }
+
+[features]
+internals = ["common/internals", "dep:criterion", "simd/internals"]
+wgpu = ["dep:wgpu", "dep:pollster", "dep:tokio"]
+
+[lints]
+workspace = true

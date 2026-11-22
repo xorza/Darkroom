@@ -4,21 +4,17 @@ version.workspace = true
 edition.workspace = true
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
-[lints]
-workspace = true
-
 [lib]
 proc-macro = true
 
 [dependencies]
 proc-macro2 = { workspace = true, features = ["proc-macro"] }
 quote = { workspace = true, features = ["proc-macro"] }
-syn = { workspace = true, features = [
-    "clone-impls",
-    "derive",
-    "extra-traits",
-    "parsing",
-    "printing",
-    "proc-macro",
-] }
 uuid = { workspace = true }
+
+[dependencies.syn]
+features = ["clone-impls", "derive", "extra-traits", "parsing", "printing", "proc-macro"]
+workspace = true
+
+[lints]
+workspace = true

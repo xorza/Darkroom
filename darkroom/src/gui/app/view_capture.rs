@@ -1,13 +1,11 @@
 //! [`ViewCapture`]: an image of the window the user asked for, from the command to the frame its
 //! screenshot lands in.
 
-use std::io::{BufWriter, Write};
+use std::io::BufWriter;
 use std::path::PathBuf;
 
 use common::fs::{self, PublicationMode};
-use image::codecs::png::PngEncoder;
-use image::{ExtendedColorType, ImageEncoder, ImageError};
-use palantir::{Clipboard, Image, Ui};
+use palantir::{Clipboard, Ui};
 
 use crate::gui::app::error::ViewCaptureError;
 use crate::gui::app::screenshot_ask::{Landed, ScreenshotAsk};
@@ -64,18 +62,9 @@ impl ViewCapture {
                 Ok(())
             }
             CaptureTarget::Png(path) => fs::publish(&path, PublicationMode::Durable, |file| {
-                let mut out = BufWriter::new(file);
-                write_png(image, &mut out)?;
-                out.flush()?;
-                Ok::<_, ImageError>(())
+                image.write_png(BufWriter::new(file))
             })
             .map_err(|source| ViewCaptureError::Save { path, source }),
         }
     }
-}
-
-/// Encode `image` as a PNG into `out`, straight from its bytes.
-pub(crate) fn write_png(image: &Image, out: impl Write) -> Result<(), ImageError> {
-    let size = image.size();
-    PngEncoder::new(out).write_image(image.as_srgba8(), size.x, size.y, ExtendedColorType::Rgba8)
 }

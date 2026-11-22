@@ -2,17 +2,20 @@
 name = "simd"
 version.workspace = true
 edition.workspace = true
-description = "Vector kernels written once, for every CPU: every SIMD instruction of the workspace."
 exclude = ["AGENTS.md", "CLAUDE.md"]
+description = """
+Vector kernels written once, for every CPU: every SIMD instruction of the
+workspace.
+"""
 
-[lints]
-workspace = true
+[dev-dependencies]
+libm = { workspace = true }
+simd = { workspace = true, features = ["internals"] }
 
 [features]
 # The portable backend on aarch64, which never dispatches to it, and the tier walk the tests and
 # benches of other crates take.
 internals = []
 
-[dev-dependencies]
-libm = { workspace = true }
-simd = { workspace = true, features = ["internals"] }
+[lints]
+workspace = true

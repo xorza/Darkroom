@@ -1,4 +1,6 @@
 [workspace]
+default-members = ["app"]
+exclude = ["palantir", "fits-well"]
 members = [
     "common",
     "common/common-derive",
@@ -11,131 +13,82 @@ members = [
     "darkroom",
     "app",
 ]
-default-members = ["app"]
-exclude = ["palantir", "fits-well"]
-
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
 edition = "2024"
+version = "0.1.0"
 
 [workspace.dependencies]
-common = { path = "common" }
-common-derive = { path = "common/common-derive" }
-scenarium = { path = "scenarium" }
-simd = { path = "simd" }
-lumos = { path = "lumos" }
-lens = { path = "lens" }
-darkroom = { path = "darkroom" }
-palantir = { path = "palantir" }
-imaginarium = { path = "imaginarium" }
-fits-well = { path = "fits-well" }
-libraw = { path = "libraw" }
-
-serde = { version = "1.0", default-features = false }
-uuid = { version = "1.29", default-features = false }
-thiserror = { version = "2.0", default-features = false }
-bytemuck = { version = "1.25", default-features = false }
-glam = { version = "0.34", default-features = false }
-libm = { version = "0.2", default-features = false, features = ["arch"] }
-strum = { version = "0.28", default-features = false }
-rand = { version = "0.10", default-features = false }
-tokio = { version = "1.54", default-features = false }
-tokio-util = { version = "0.7", default-features = false }
-futures-util = { version = "0.3", default-features = false }
-tracing = { version = "0.1", default-features = false }
-tracing-subscriber = { version = "0.3", default-features = false }
-rayon = { version = "1.12", default-features = false }
-ron = { version = "0.12", default-features = false }
-notify = { version = "8", default-features = false }
-hashbrown = { version = "0.17", default-features = false }
-quote = { version = "1.0", default-features = false }
-proc-macro2 = { version = "1.0", default-features = false }
-syn = { version = "3.0", default-features = false }
-memmap2 = { version = "0.9", default-features = false }
-image = { version = "0.25", default-features = false }
-sysinfo = { version = "0.40", default-features = false }
+arrayvec = { version = "0.7", default-features = false }
+bindgen = { version = "0.73", default-features = false }
 bitcode = { version = "0.6", default-features = false }
 blake3 = { version = "1.8", default-features = false }
-windows = { version = "0.62", default-features = false }
+bytemuck = { version = "1.25", default-features = false }
+cc = { version = "1.11", default-features = false }
+clap = { version = "4.6", default-features = false }
+common = { path = "common" }
+common-derive = { path = "common/common-derive" }
+criterion = { version = "0.8", default-features = false }
+darkroom = { path = "darkroom" }
+fits-well = { path = "fits-well" }
+futures-util = { version = "0.3", default-features = false }
+glam = { version = "0.34", default-features = false }
+hashbrown = { version = "0.17", default-features = false }
+image = { version = "0.25", default-features = false }
+imaginarium = { path = "imaginarium" }
+lens = { path = "lens" }
 libc = { version = "0.2", default-features = false }
+libm = { version = "0.2", default-features = false, features = ["arch"] }
+libraw = { path = "libraw" }
+libz-sys = { version = "1.1", default-features = false }
+lumos = { path = "lumos" }
+memmap2 = { version = "0.9", default-features = false }
+nalgebra = { version = "0.35", default-features = false }
+notify = { version = "8", default-features = false }
 objc2 = { version = "0.6", default-features = false }
 objc2-app-kit = { version = "0.3", default-features = false }
 objc2-foundation = { version = "0.3", default-features = false }
-rfd = { version = "0.18", default-features = false }
-zip = { version = "9.6", default-features = false }
-arrayvec = { version = "0.7", default-features = false }
-static_assertions = { version = "1.1", default-features = false }
-rand_chacha = { version = "0.10", default-features = false }
-nalgebra = { version = "0.35", default-features = false }
-criterion = { version = "0.8", default-features = false }
-statrs = { version = "0.19", default-features = false }
-clap = { version = "4.6", default-features = false }
-winresource = { version = "0.1", default-features = false }
 # Exact: rc.14 and rc.15 ship CoreML objects that reference `___isPlatformVersionAtLeast`, which
 # LTO drops, so no LTO build links on macOS; a caret requirement would let `cargo update` take them.
 ort = { version = "=2.0.0-rc.13", default-features = false }
-cc = { version = "1.11", default-features = false }
-libz-sys = { version = "1.1", default-features = false }
-bindgen = { version = "0.73", default-features = false }
-wgpu = { version = "30.0", default-features = false }
+palantir = { path = "palantir" }
 pollster = { version = "1.0", default-features = false }
-tiff = { version = "0.11", default-features = false }
+proc-macro2 = { version = "1.0", default-features = false }
+quote = { version = "1.0", default-features = false }
+rand = { version = "0.10", default-features = false }
+rand_chacha = { version = "0.10", default-features = false }
+rayon = { version = "1.12", default-features = false }
+rfd = { version = "0.18", default-features = false }
 rmcp = { version = "3.10", default-features = false }
-
-[profile.dev]
-opt-level = 1
-debug = "line-tables-only"
-lto = "off"
-
-[profile.dev.package."*"]
-opt-level = 3
-debug = false
-
-[profile.dev.package.palantir]
-opt-level = 1
-debug = "line-tables-only"
-[profile.dev.package.fits-well]
-opt-level = 1
-debug = "line-tables-only"
-
-# `objc2` debug assertions allocate on every Metal message send.
-[profile.dev.package.objc2]
-debug-assertions = false
-
-[profile.release]
-lto = "thin"
-codegen-units = 1
-panic = "abort"
-debug = "full"
-split-debuginfo = "off"
-
-[profile.bench]
-debug = "line-tables-only"
-strip = "none"
-
-[profile.release-dev]
-inherits = "release"
-codegen-units = 16
-incremental = true
-debug = "line-tables-only"
-
-# The MCP server catches a panic at its harness thread's edge, so a logic error reaches the client
-# as an error that names it before the server ends with the session (`darkroom/AGENTS.md`, "The
-# process is the session"); `release` aborts, which cuts the client off with no word of why. A
-# profile of its own, as `panic` is not set per package.
-[profile.mcp]
-inherits = "dev"
-panic = "unwind"
+ron = { version = "0.12", default-features = false }
+scenarium = { path = "scenarium" }
+serde = { version = "1.0", default-features = false }
+simd = { path = "simd" }
+static_assertions = { version = "1.1", default-features = false }
+statrs = { version = "0.19", default-features = false }
+strum = { version = "0.28", default-features = false }
+syn = { version = "3.0", default-features = false }
+sysinfo = { version = "0.40", default-features = false }
+thiserror = { version = "2.0", default-features = false }
+tiff = { version = "0.11", default-features = false }
+tokio = { version = "1.54", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false }
+uuid = { version = "1.29", default-features = false }
+wgpu = { version = "30.0", default-features = false }
+windows = { version = "0.62", default-features = false }
+winresource = { version = "0.1", default-features = false }
+zip = { version = "9.6", default-features = false }
 
 [workspace.lints.rust]
-rust_2018_idioms = { level = "warn", priority = -1 }
 meta_variable_misuse = "warn"
 missing_debug_implementations = "warn"
 non_ascii_idents = "warn"
 redundant_imports = "warn"
 redundant_lifetimes = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
 trivial_casts = "warn"
 trivial_numeric_casts = "warn"
 unit_bindings = "warn"
@@ -147,32 +100,15 @@ unused_macro_rules = "warn"
 unused_qualifications = "warn"
 
 [workspace.lints.clippy]
-pedantic = { level = "warn", priority = -1 }
-missing_errors_doc = "allow"
-missing_panics_doc = "allow"
-must_use_candidate = "allow"
-assert_is_empty = "allow"
-cast_precision_loss = "allow"
-cast_possible_truncation = "allow"
-similar_names = "allow"
-many_single_char_names = "allow"
-too_many_lines = "allow"
-inline_always = "allow"
-float_cmp = "allow"
-cast_possible_wrap = "allow"
-doc_markdown = "allow"
-unreadable_literal = "allow"
-struct_excessive_bools = "allow"
-wildcard_imports = "allow"
-unchecked_time_subtraction = "allow"
-struct_field_names = "allow"
-match_same_arms = "allow"
-unused_self = "allow"
 absolute_paths = "warn"
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
 as_underscore = "warn"
+assert_is_empty = "allow"
 branches_sharing_code = "warn"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
 clear_with_drain = "warn"
 clone_on_ref_ptr = "warn"
 collection_is_never_read = "warn"
@@ -180,25 +116,33 @@ dbg_macro = "warn"
 debug_assert_with_mut_call = "warn"
 deref_by_slicing = "warn"
 derive_partial_eq_without_eq = "warn"
+doc_markdown = "allow"
 empty_enum_variants_with_brackets = "warn"
 empty_structs_with_brackets = "warn"
 equatable_if_let = "warn"
 exit = "warn"
 filetype_is_file = "warn"
+float_cmp = "allow"
 fn_to_numeric_cast_any = "warn"
 get_unwrap = "warn"
 if_then_some_else_none = "warn"
 imprecise_flops = "warn"
 infinite_loop = "warn"
+inline_always = "allow"
 iter_over_hash_type = "warn"
 iter_with_drain = "warn"
 large_include_file = "warn"
 literal_string_with_formatting_args = "warn"
 lossy_float_literal = "warn"
+many_single_char_names = "allow"
+match_same_arms = "allow"
 mem_forget = "warn"
 missing_const_for_fn = "warn"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
 mixed_read_write_in_expression = "warn"
 module_name_repetitions = "warn"
+must_use_candidate = "allow"
 mutex_atomic = "warn"
 needless_collect = "warn"
 needless_pass_by_ref_mut = "warn"
@@ -207,6 +151,7 @@ negative_feature_names = "warn"
 non_zero_suggestions = "warn"
 or_fun_call = "warn"
 pathbuf_init_then_push = "warn"
+pedantic = { level = "warn", priority = -1 }
 precedence_bits = "warn"
 print_stderr = "warn"
 print_stdout = "warn"
@@ -218,22 +163,76 @@ redundant_type_annotations = "warn"
 rest_pat_in_fully_bound_structs = "warn"
 return_and_then = "warn"
 self_named_module_files = "warn"
+similar_names = "allow"
 string_lit_chars_any = "warn"
+struct_excessive_bools = "allow"
+struct_field_names = "allow"
 todo = "warn"
+too_many_lines = "allow"
 trait_duplication_in_bounds = "warn"
 try_err = "warn"
 type_repetition_in_bounds = "warn"
+unchecked_time_subtraction = "allow"
 unimplemented = "warn"
 unnecessary_safety_comment = "warn"
 unnecessary_safety_doc = "warn"
 unnecessary_self_imports = "warn"
+unreadable_literal = "allow"
+unused_self = "allow"
 use_self = "warn"
 useless_let_if_seq = "warn"
 verbose_file_reads = "warn"
 wildcard_dependencies = "warn"
+wildcard_imports = "allow"
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "warn"
 private_intra_doc_links = "warn"
 redundant_explicit_links = "warn"
 unescaped_backticks = "warn"
+
+[profile.dev]
+debug = "line-tables-only"
+lto = "off"
+opt-level = 1
+
+[profile.dev.package."*"]
+debug = false
+opt-level = 3
+
+[profile.dev.package.palantir]
+debug = "line-tables-only"
+opt-level = 1
+
+[profile.dev.package.fits-well]
+debug = "line-tables-only"
+opt-level = 1
+
+# `objc2` debug assertions allocate on every Metal message send.
+[profile.dev.package.objc2]
+debug-assertions = false
+
+[profile.release]
+codegen-units = 1
+debug = "full"
+lto = "thin"
+panic = "abort"
+split-debuginfo = "off"
+
+[profile.bench]
+debug = "line-tables-only"
+strip = "none"
+
+[profile.release-dev]
+codegen-units = 16
+debug = "line-tables-only"
+incremental = true
+inherits = "release"
+
+# The MCP server catches a panic at its harness thread's edge, so a logic error reaches the client
+# as an error that names it before the server ends with the session (`darkroom/AGENTS.md`, "The
+# process is the session"); `release` aborts, which cuts the client off with no word of why. A
+# profile of its own, as `panic` is not set per package.
+[profile.mcp]
+inherits = "dev"
+panic = "unwind"

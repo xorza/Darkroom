@@ -4,27 +4,27 @@ version.workspace = true
 edition.workspace = true
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
-[lints]
-workspace = true
-
 [dependencies]
+blake3 = { workspace = true, features = ["std"] }
 common = { workspace = true, features = ["introspect-derive"] }
-scenarium = { workspace = true }
+glam = { workspace = true, features = ["std"] }
 imaginarium = { workspace = true }
 lumos = { workspace = true, features = ["ml"] }
-glam = { workspace = true, features = ["std"] }
-thiserror = { workspace = true }
-strum = { workspace = true }
-tracing = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["rt", "sync", "time"] }
 notify = { workspace = true }
 rand = { workspace = true, features = ["std_rng", "thread_rng"] }
-blake3 = { workspace = true, features = ["std"] }
+scenarium = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
+strum = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tracing = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+common = { workspace = true, features = ["internals"] }
 imaginarium = { workspace = true, features = ["internals"] }
 lumos = { workspace = true, features = ["internals"] }
-common = { workspace = true, features = ["internals"] }
 scenarium = { workspace = true, features = ["internals"] }
 tokio = { workspace = true, features = ["macros", "test-util"] }
+
+[lints]
+workspace = true

@@ -198,6 +198,14 @@ arguments after a `--`; each submodule runs its own.
   binary layout does not move. Refused: serde's own form, a tuple of numbers
   four times as long in a document; base64, a third shorter, which mixes case
   and reads worse.
+- **A manifest follows the Rust style guide's
+  [Cargo.toml conventions](https://doc.rust-lang.org/nightly/style-guide/cargo.html)**: keys
+  version-sorted in each section, `[package]`'s `name` and `version` first and `description` last,
+  no blank line inside a section, and an array or inline table on its key's line when it fits in
+  100 columns, else an array one item a line and a table a section of its own. Sections run in the
+  [Cargo reference](https://doc.rust-lang.org/cargo/reference/manifest.html)'s order, `[workspace]`
+  leading a virtual manifest as `[package]` leads the rest. Refused: dependencies grouped by blank
+  lines or by origin, an order no tool holds and each edit drifts from.
 
 ## Names
 

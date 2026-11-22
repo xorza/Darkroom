@@ -11,7 +11,6 @@ use crate::core::document::tab_ref::TabRef;
 use crate::driver::error::DriverError;
 use crate::driver::locator::{EditorTarget, Locator};
 use crate::gui::app::App;
-use crate::gui::app::view_capture;
 use crate::gui::main_window::MainWindow;
 use crate::gui::main_window::dock_panes;
 use crate::gui::pane::graph_ui::wid;
@@ -210,7 +209,10 @@ impl Shot {
     pub(crate) fn new(capture: Capture, path: PathBuf) -> Self {
         let size = capture.picture.size();
         let mut png = Vec::new();
-        view_capture::write_png(&capture.picture, &mut png).expect("a PNG encodes into memory");
+        capture
+            .picture
+            .write_png(&mut png)
+            .expect("a PNG encodes into memory");
         Self {
             png,
             path,

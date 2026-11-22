@@ -11,7 +11,6 @@ mod platform;
 use std::io;
 use std::path::PathBuf;
 
-use glam::UVec2;
 use palantir::{DebugOverlayConfig, Image, WindowConfig, WinitHost, WinitHostError};
 use tracing_subscriber::Layer as _;
 use tracing_subscriber::layer::SubscriberExt as _;
@@ -107,11 +106,7 @@ fn run_with(
 /// bundle (`[package.metadata.bundle]` in `Cargo.toml`).
 fn load_icon() -> Image {
     static ICON_PNG: &[u8] = include_bytes!("../assets/icons/darkroom-256.png");
-    let rgba = image::load_from_memory(ICON_PNG)
-        .expect("the embedded icon decodes, as a test holds")
-        .to_rgba8();
-    let (w, h) = rgba.dimensions();
-    Image::from_srgba8(UVec2::new(w, h), rgba.into_raw()).expect("the embedded icon is RGBA8")
+    Image::from_png(ICON_PNG).expect("the embedded icon decodes, as a test holds")
 }
 
 /// The process's tracing: `RUST_LOG`-filtered lines on stderr (`info` without it), and the
