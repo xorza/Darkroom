@@ -3011,17 +3011,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "padding-struct"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58209c5739149c742a36d77ebfff339c35269cf014df9560b03974e37bdee6bf"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "page_size"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3039,27 +3028,23 @@ dependencies = [
  "bytemuck",
  "cosmic-text",
  "criterion",
- "fixedbitset",
  "foldhash 0.2.0",
  "glam 0.34.3",
  "half",
  "hashbrown 0.17.1",
  "image",
  "libm",
+ "log",
  "mundy",
  "naga",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
- "padding-struct",
  "palantir-derive",
- "pollster",
  "resvg",
  "rustc-hash 2.1.3",
  "serde",
- "strum",
  "swash",
  "tinyvec",
- "tracing",
  "tracy-client",
  "unicode-linebreak",
  "unicode-segmentation",
