@@ -45,7 +45,7 @@ libz-sys = { version = "1.1", default-features = false }
 lumos = { path = "lumos" }
 memmap2 = { version = "0.9", default-features = false }
 nalgebra = { version = "0.35", default-features = false }
-notify = { version = "8", default-features = false }
+notify = { version = "9", default-features = false }
 objc2 = { version = "0.6", default-features = false }
 objc2-app-kit = { version = "0.3", default-features = false }
 objc2-foundation = { version = "0.3", default-features = false }
@@ -60,7 +60,7 @@ rand = { version = "0.10", default-features = false }
 rand_chacha = { version = "0.10", default-features = false }
 rayon = { version = "1.12", default-features = false }
 rfd = { version = "0.18", default-features = false }
-rmcp = { version = "3.10", default-features = false }
+rmcp = { version = "3.11", default-features = false }
 ron = { version = "0.12", default-features = false }
 scenarium = { path = "scenarium" }
 serde = { version = "1.0", default-features = false }
@@ -80,7 +80,7 @@ uuid = { version = "1.29", default-features = false }
 wgpu = { version = "30.0", default-features = false }
 windows = { version = "0.62", default-features = false }
 winresource = { version = "0.1", default-features = false }
-zip = { version = "9.6", default-features = false }
+zip = { version = "9.8", default-features = false }
 
 [workspace.lints.rust]
 meta_variable_misuse = "warn"
