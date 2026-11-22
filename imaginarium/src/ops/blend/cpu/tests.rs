@@ -1,6 +1,5 @@
 use common::USize2;
 use simd::IsaTier;
-use strum::IntoEnumIterator;
 
 use crate::color::color_format::{ColorFormat, SampleType};
 use crate::interleaved::interleaved_desc::InterleavedDesc;
@@ -160,8 +159,9 @@ fn every_tier_matches_the_scalar_reference() {
                     }
                 }
 
-                for (mode, clamp) in
-                    BlendMode::iter().flat_map(|mode| Clamp::iter().map(move |clamp| (mode, clamp)))
+                for (mode, clamp) in BlendMode::ALL
+                    .into_iter()
+                    .flat_map(|mode| Clamp::ALL.into_iter().map(move |clamp| (mode, clamp)))
                 {
                     for alpha in [0.0, 0.35, 1.0, f32::NAN] {
                         let params = Blend::new(mode, alpha).clamp(clamp);
@@ -187,7 +187,7 @@ fn every_tier_matches_the_scalar_reference() {
 /// `−0 · 1 + (−0) · 0 = −0`, and `Black` leaves it `−0`; −0.25 it holds at `+0`.
 #[test]
 fn the_hold_keeps_nan_and_negative_zero() {
-    for clamp in Clamp::iter() {
+    for clamp in Clamp::ALL {
         assert!(
             hold(f32::NAN, clamp.low(), clamp.high(1.0)).is_nan(),
             "{clamp:?}"

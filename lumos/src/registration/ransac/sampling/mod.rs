@@ -12,8 +12,7 @@
 //! would never be drawn.
 
 use common::Libm;
-use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
+use common::Rng;
 
 use crate::registration::ransac::ransac_config::RansacConfig;
 
@@ -34,7 +33,7 @@ struct GuidedPhase {
 /// Draws one estimation's minimal samples: the guided phases first, then uniform ones.
 #[derive(Debug)]
 pub(super) struct Sampler {
-    rng: ChaCha8Rng,
+    rng: Rng,
     sample_size: usize,
     /// Each guided phase's pool, and its iterations: the configured length, held to the distinct
     /// samples the pool holds, as more would draw a sample again.
@@ -72,7 +71,7 @@ impl Sampler {
             }
         });
         Self {
-            rng: ChaCha8Rng::seed_from_u64(config.seed),
+            rng: Rng::seeded(config.seed),
             sample_size,
             phases,
             by_confidence,
@@ -117,7 +116,7 @@ impl Sampler {
         }
         self.keys.clear();
         self.keys.extend(pool.iter().map(|&idx| {
-            let u: f64 = self.rng.random();
+            let u = self.rng.unit_f64();
             (idx, u.libm_powf(1.0 / self.weights[idx]))
         }));
         self.keys
@@ -139,7 +138,7 @@ impl Sampler {
         sample.clear();
         let mut swap_targets = [0usize; MAX_SAMPLE_SIZE];
         for (i, target) in swap_targets[..k].iter_mut().enumerate() {
-            let j = self.rng.random_range(i..n);
+            let j = self.rng.index(i..n);
             self.shuffle.swap(i, j);
             *target = j;
             sample.push(self.shuffle[i]);

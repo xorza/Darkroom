@@ -3,7 +3,7 @@
 use std::str::FromStr;
 
 use lumos::{ColorMode, FrameDescError, OpError, Stretch, StretchMethod};
-use scenarium::{DataType, EnumId, EnumVariants};
+use scenarium::{DataType, EnumId};
 
 /// The id of [`DisplayStretch`]'s enum type, which saved documents name: fixed for the life of
 /// the type.
@@ -54,12 +54,6 @@ impl DisplayStretch {
     }
 }
 
-impl EnumVariants for DisplayStretch {
-    fn variant_names() -> Vec<String> {
-        Self::ALL.map(|stretch| stretch.name().to_owned()).to_vec()
-    }
-}
-
 /// A name that is no stretch's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("no display stretch has this name")]
@@ -90,14 +84,15 @@ pub enum DisplayStretchError {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::EnumVariants;
-
     use crate::image::display_stretch::{DisplayStretch, UnknownDisplayStretch};
 
     /// Each stretch's name parses back to it, in the picker's order, and no other name parses.
     #[test]
     fn each_name_parses_back_to_its_stretch() {
-        assert_eq!(DisplayStretch::variant_names(), ["Linear", "Auto"]);
+        assert_eq!(
+            DisplayStretch::ALL.map(DisplayStretch::name),
+            ["Linear", "Auto"]
+        );
         for stretch in DisplayStretch::ALL {
             assert_eq!(stretch.name().parse(), Ok(stretch));
         }

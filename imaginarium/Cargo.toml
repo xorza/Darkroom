@@ -35,7 +35,6 @@ pollster = { workspace = true, optional = true }
 rayon = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 simd = { workspace = true }
-strum = { workspace = true, features = ["derive", "std"] }
 thiserror = { workspace = true, features = ["std"] }
 tiff = { workspace = true, features = ["deflate", "fax", "jpeg", "lzw"] }
 tokio = { workspace = true, optional = true, features = ["sync"] }

@@ -4,14 +4,13 @@ use common::Libm;
 use std::f32::consts::{LN_2, TAU};
 use std::path::{Path, PathBuf};
 
+use common::Rng;
 use common::{Buffer2, TempDir, fs};
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::{Image as FitsImage, Scaling};
 use imaginarium::{ChannelLayout, PlanarDesc};
 use lumos::{BayerPattern, CfaImage, CfaType, ImageMetadata, LinearImage, Mosaic};
-use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
 
 /// The sky every exposure sits on.
 const SKY: f32 = 0.1;
@@ -40,14 +39,14 @@ pub(crate) enum Layout {
 impl StarField {
     /// `stars` stars at places and peaks drawn from `seed`; none leaves a frame of sky.
     pub(crate) fn new(side: usize, stars: usize, seed: u64) -> Self {
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let mut rng = Rng::seeded(seed);
         let span = side as f32 - 2.0 * MARGIN;
         let stars = (0..stars)
             .map(|_| {
                 [
-                    MARGIN + span * rng.random::<f32>(),
-                    MARGIN + span * rng.random::<f32>(),
-                    0.1 + 0.5 * rng.random::<f32>(),
+                    MARGIN + span * rng.unit_f32(),
+                    MARGIN + span * rng.unit_f32(),
+                    0.1 + 0.5 * rng.unit_f32(),
                 ]
             })
             .collect();
@@ -113,7 +112,7 @@ impl StarField {
     fn render(&self, idx: usize) -> Vec<f32> {
         let side = self.side;
         let shift = Self::dither(idx);
-        let mut rng = ChaCha8Rng::seed_from_u64(idx as u64);
+        let mut rng = Rng::seeded(idx as u64);
         let mut pixels = vec![SKY; side * side];
         // A Gaussian's FWHM is 2·√(2·ln 2) of its σ.
         let sigma = FWHM / (8.0 * LN_2).sqrt();
@@ -134,7 +133,7 @@ impl StarField {
         }
         for sample in &mut pixels {
             // Box–Muller.
-            let (u, v) = (1.0 - rng.random::<f32>(), rng.random::<f32>());
+            let (u, v) = (1.0 - rng.unit_f32(), rng.unit_f32());
             *sample += NOISE * (-2.0 * u.libm_ln()).sqrt() * (TAU * v).libm_cos();
         }
         pixels

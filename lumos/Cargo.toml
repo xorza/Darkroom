@@ -27,8 +27,6 @@ glam = { workspace = true, features = ["f64", "i32", "serde", "std", "u32", "usi
 imaginarium = { workspace = true }
 libraw = { workspace = true }
 nalgebra = { workspace = true, features = ["libm-force", "std"] }
-rand = { workspace = true }
-rand_chacha = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 simd = { workspace = true }

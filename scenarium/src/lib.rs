@@ -20,7 +20,7 @@ pub use data::codec::CustomValueCodec;
 pub use data::codec::error::CodecError;
 pub use data::const_value::{ConstValue, ValueText};
 pub use data::data_type::custom_type::{CustomType, CustomTypeId};
-pub use data::data_type::enum_type::{EnumId, EnumType, EnumVariants};
+pub use data::data_type::enum_type::{EnumId, EnumType};
 pub use data::data_type::file_kind::{FileKind, FileKindId};
 pub use data::data_type::type_ref::TypeRef;
 pub use data::data_type::{DataType, FileMode};

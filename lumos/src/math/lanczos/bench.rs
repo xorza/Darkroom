@@ -2,10 +2,9 @@
 
 use std::hint::black_box;
 
+use common::Rng;
 use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
-use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
 
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 
@@ -19,9 +18,9 @@ pub(crate) fn atomic(c: &mut Criterion) {
             BenchmarkId::new(format!("lut_at/a{}", order.a()), READS),
             |b| {
                 let lut = order.lut();
-                let mut rng = ChaCha8Rng::seed_from_u64(7);
+                let mut rng = Rng::seeded(7);
                 let reach = (order.a() * LANCZOS_LUT_RESOLUTION) as f32;
-                let distances: Vec<f32> = (0..READS).map(|_| rng.random::<f32>() * reach).collect();
+                let distances: Vec<f32> = (0..READS).map(|_| rng.unit_f32() * reach).collect();
                 b.iter(|| {
                     black_box(&distances)
                         .iter()

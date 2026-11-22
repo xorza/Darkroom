@@ -4,7 +4,7 @@ mod gpu;
 #[cfg(feature = "wgpu")]
 mod pipeline;
 
-use strum::{EnumIter, EnumString, VariantNames};
+use std::str::FromStr;
 
 #[cfg(feature = "wgpu")]
 use crate::gpu::Gpu;
@@ -19,7 +19,7 @@ use crate::ops::clamp::Clamp;
 /// `Subtract` takes `src` *from* `dst`, and `Overlay` switches formula on the
 /// destination rather than the source. `BlendMode::blend` is the one
 /// definition every backend — scalar, SIMD and the GPU shader — evaluates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumIter, EnumString, VariantNames)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum BlendMode {
     /// `src` — the destination shows through only via the alpha mix.
@@ -35,6 +35,47 @@ pub enum BlendMode {
     Screen,
     /// Multiply where `dst < 0.5`, Screen above it.
     Overlay,
+}
+
+impl BlendMode {
+    /// Every mode, in the picker's order.
+    pub const ALL: [Self; 6] = [
+        Self::Normal,
+        Self::Add,
+        Self::Subtract,
+        Self::Multiply,
+        Self::Screen,
+        Self::Overlay,
+    ];
+
+    /// The name a document saves and a picker shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Normal => "Normal",
+            Self::Add => "Add",
+            Self::Subtract => "Subtract",
+            Self::Multiply => "Multiply",
+            Self::Screen => "Screen",
+            Self::Overlay => "Overlay",
+        }
+    }
+}
+
+/// A name that is no blend mode's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no blend mode has this name")]
+pub struct UnknownBlendMode;
+
+impl FromStr for BlendMode {
+    type Err = UnknownBlendMode;
+
+    /// One of [`BlendMode::name`]'s names.
+    fn from_str(name: &str) -> Result<Self, UnknownBlendMode> {
+        Self::ALL
+            .into_iter()
+            .find(|mode| mode.name() == name)
+            .ok_or(UnknownBlendMode)
+    }
 }
 
 /// Parameters for image blending.
@@ -141,5 +182,24 @@ pub(crate) mod internals {
             };
             blended * alpha + dst * (1.0 - alpha)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ops::blend::{BlendMode, UnknownBlendMode};
+
+    /// The names documents hold, each parsing back to its mode, in the picker's order; another
+    /// name, a case changed, is refused.
+    #[test]
+    fn each_name_parses_back_to_its_mode() {
+        assert_eq!(
+            BlendMode::ALL.map(BlendMode::name),
+            ["Normal", "Add", "Subtract", "Multiply", "Screen", "Overlay"]
+        );
+        for mode in BlendMode::ALL {
+            assert_eq!(mode.name().parse(), Ok(mode));
+        }
+        assert_eq!("normal".parse::<BlendMode>(), Err(UnknownBlendMode));
     }
 }

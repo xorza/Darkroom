@@ -1,21 +1,6 @@
 //! [`EnumType`]: a registered enum, its name and its variants.
 
 use common::Id;
-use strum::VariantNames;
-
-/// The variant names of a Rust enum, as [`EnumType::of`] reads them.
-pub trait EnumVariants {
-    fn variant_names() -> Vec<String>;
-}
-
-impl<T: VariantNames> EnumVariants for T {
-    fn variant_names() -> Vec<String> {
-        T::VARIANTS
-            .iter()
-            .map(|variant| (*variant).to_string())
-            .collect()
-    }
-}
 
 /// The id of an enum a [`DataType::Enum`](crate::DataType::Enum) names.
 pub type EnumId = Id<EnumType>;
@@ -50,11 +35,6 @@ impl EnumType {
             );
         }
         Self { name, variants }
-    }
-
-    /// An enum named `name` of `E`'s variant names (via strum).
-    pub fn of<E: EnumVariants>(name: impl Into<String>) -> Self {
-        Self::new(name, E::variant_names())
     }
 
     pub fn name(&self) -> &str {

@@ -6,7 +6,6 @@ use crate::internals::image_diff::assert_matches_cpu;
 use crate::ops::clamp::Clamp;
 use crate::ops::contrast_brightness::ContrastBrightness;
 use common::USize2;
-use strum::IntoEnumIterator;
 
 /// Every format under the identity, a contrast and brightness that saturate part of the
 /// range, and a pure brightness shift, each under every clamp, against the CPU reference, each in
@@ -24,7 +23,7 @@ fn gpu_matches_cpu() {
             ContrastBrightness::new(0.6, 0.2),
         ]
         .into_iter()
-        .flat_map(|params| Clamp::iter().map(move |clamp| params.clamp(clamp)))
+        .flat_map(|params| Clamp::ALL.into_iter().map(move |clamp| params.clamp(clamp)))
         {
             let mut output = GpuImage::from_image(gpu, &image).unwrap();
             params.apply_gpu(gpu, &mut output);

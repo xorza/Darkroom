@@ -74,6 +74,7 @@ mod libm_ext;
 mod mutex_ext;
 #[expect(unsafe_code, reason = "memory maps and the OS calls behind them")]
 mod platform;
+mod rng;
 mod serde;
 mod usize2;
 mod usize_rect2;
@@ -106,6 +107,7 @@ pub use mutex_ext::{CondvarExt, MutexExt};
 pub use par::per_worker::PerWorker;
 #[cfg(feature = "internals")]
 pub use par::worker_pool::WorkerPool;
+pub use rng::Rng;
 pub use serde::hex_bytes;
 pub use serde::serde_format::SerdeFormat;
 pub use serde::{DeserializeError, SerializeError};

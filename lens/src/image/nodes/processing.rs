@@ -7,7 +7,6 @@ use scenarium::Invocation;
 use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, DynamicValue, InvokeError, LibraryBuilder};
 use scenarium::{FloatSpan, Func, InputDecl, OutputDecl};
-use strum::VariantNames;
 
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
 use crate::image::nodes::{BLENDMODE_DATATYPE, CLAMP_DATATYPE};
@@ -80,9 +79,7 @@ fn register_brightness(library: &mut LibraryBuilder) {
 /// The `Clamp` input both color ops take, at [`Clamp::DEFAULT`].
 fn clamp_input() -> InputDecl {
     InputDecl::required("Clamp", CLAMP_DATATYPE)
-        .default(ConstValue::Enum(
-            Clamp::VARIANTS[Clamp::DEFAULT as usize].to_owned(),
-        ))
+        .default(ConstValue::Enum(Clamp::DEFAULT.name().to_owned()))
         .description(
             "The ends of [0, 1] a float result is held to. An integer image saturates to its \
              range whatever this is.",
@@ -189,9 +186,7 @@ fn register_blend(library: &mut LibraryBuilder) {
         .input(
             3,
             InputDecl::required("Mode", BLENDMODE_DATATYPE)
-                .default(ConstValue::Enum(
-                    BlendMode::VARIANTS[BlendMode::default() as usize].to_owned(),
-                ))
+                .default(ConstValue::Enum(BlendMode::default().name().to_owned()))
                 .description("Blend mode."),
         )
         .input(

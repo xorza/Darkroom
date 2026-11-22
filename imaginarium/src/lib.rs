@@ -24,8 +24,8 @@ pub use crate::planar::planar_desc::PlanarDesc;
 pub use crate::planar::planar_image::PlanarImage;
 
 pub use crate::ops::affine_warp::{AffineWarp, FilterMode};
-pub use crate::ops::blend::{Blend, BlendMode};
-pub use crate::ops::clamp::Clamp;
+pub use crate::ops::blend::{Blend, BlendMode, UnknownBlendMode};
+pub use crate::ops::clamp::{Clamp, UnknownClamp};
 pub use crate::ops::contrast_brightness::ContrastBrightness;
 pub use crate::ops::preview::Preview;
 

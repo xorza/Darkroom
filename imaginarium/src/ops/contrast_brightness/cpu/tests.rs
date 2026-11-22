@@ -9,7 +9,6 @@ use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
 use common::USize2;
 use simd::IsaTier;
-use strum::IntoEnumIterator;
 
 /// Builds a single-row image from raw channel bytes.
 fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> InterleavedImage {
@@ -195,7 +194,7 @@ fn alpha_survives_every_alpha_format() {
 fn extreme_brightness_saturates_integers_and_moves_floats() {
     for (format, clamp) in ColorFormat::ALL
         .into_iter()
-        .flat_map(|format| Clamp::iter().map(move |clamp| (format, clamp)))
+        .flat_map(|format| Clamp::ALL.into_iter().map(move |clamp| (format, clamp)))
     {
         let input = create_test_image(format, USize2::new(4, 2), 0);
         let affine_max = ChannelAffine::new(ContrastBrightness::default(), format).max;
@@ -269,7 +268,7 @@ fn every_tier_matches_the_scalar_reference() {
                 }
                 for ((contrast, brightness), clamp) in PARAM_SWEEP
                     .into_iter()
-                    .flat_map(|params| Clamp::iter().map(move |clamp| (params, clamp)))
+                    .flat_map(|params| Clamp::ALL.into_iter().map(move |clamp| (params, clamp)))
                 {
                     let op = ContrastBrightness::new(contrast, brightness).clamp(clamp);
 

@@ -11,17 +11,40 @@
 mod cli;
 mod mcp;
 
+use std::env;
 use std::process::ExitCode;
 
-use clap::Parser;
 use common::{ErrorChain, process};
 use darkroom::driver::log_ring::LogRing;
 
-use crate::cli::{Cli, Launch};
+use crate::cli::{Command, HELP, Launch};
 
+/// What a usage error exits with, as clap's and the POSIX utilities' do.
+const USAGE_ERROR: u8 = 2;
+
+#[expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "help and the version answer on stdout and a usage error on stderr, before any log"
+)]
 fn main() -> ExitCode {
     process::attach_parent_console();
-    match Cli::parse().launch() {
+    let launch = match cli::parse(env::args_os().skip(1)) {
+        Ok(Command::Launch(launch)) => launch,
+        Ok(Command::Help) => {
+            print!("{HELP}");
+            return ExitCode::SUCCESS;
+        }
+        Ok(Command::Version) => {
+            println!("darkroom {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        Err(error) => {
+            eprintln!("error: {error}\n\nFor more information, try '--help'.");
+            return ExitCode::from(USAGE_ERROR);
+        }
+    };
+    match launch {
         Launch::Window(config) => {
             darkroom::init_tracing(None);
             match darkroom::run(config) {

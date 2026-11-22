@@ -21,11 +21,17 @@ pub fn image_library() -> LibraryBuilder {
     io::register(&mut library);
     processing::register(&mut library);
     library.add_custom_type(IMAGE_TYPE_ID, image_type());
-    library.add_enum(BLENDMODE_TYPE_ID, EnumType::of::<BlendMode>("Blend Mode"));
-    library.add_enum(CLAMP_TYPE_ID, EnumType::of::<Clamp>("Clamp"));
+    library.add_enum(
+        BLENDMODE_TYPE_ID,
+        EnumType::new("Blend Mode", BlendMode::ALL.map(BlendMode::name)),
+    );
+    library.add_enum(
+        CLAMP_TYPE_ID,
+        EnumType::new("Clamp", Clamp::ALL.map(Clamp::name)),
+    );
     library.add_enum(
         CONVERSION_FORMAT_TYPE_ID,
-        EnumType::of::<ConversionFormat>("Conversion Format"),
+        EnumType::new("Conversion Format", ConversionFormat::NAMES),
     );
     library
 }

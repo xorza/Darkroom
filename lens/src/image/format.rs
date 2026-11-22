@@ -1,21 +1,10 @@
 use std::str::FromStr;
 
 use imaginarium::ColorFormat;
-use scenarium::{DataType, EnumId, EnumVariants};
+use scenarium::{DataType, EnumId};
 
 /// The `Format` variant that keeps the image's color format.
 pub(super) const AS_IS: &str = "As Is";
-
-/// The `Format` port's variants: [`AS_IS`], then every color format by name.
-const VARIANTS: [&str; ColorFormat::ALL.len() + 1] = {
-    let mut variants = [AS_IS; ColorFormat::ALL.len() + 1];
-    let mut idx = 0;
-    while idx < ColorFormat::ALL.len() {
-        variants[idx + 1] = ColorFormat::ALL[idx].name();
-        idx += 1;
-    }
-    variants
-};
 
 /// What a `Format` port picks: keep the image's color format, or convert to
 /// one.
@@ -26,6 +15,17 @@ pub(super) enum ConversionFormat {
 }
 
 impl ConversionFormat {
+    /// The names a document saves and the picker shows: [`AS_IS`], then every color format's.
+    pub(super) const NAMES: [&str; ColorFormat::ALL.len() + 1] = {
+        let mut variants = [AS_IS; ColorFormat::ALL.len() + 1];
+        let mut idx = 0;
+        while idx < ColorFormat::ALL.len() {
+            variants[idx + 1] = ColorFormat::ALL[idx].name();
+            idx += 1;
+        }
+        variants
+    };
+
     /// The format to convert an image in `cur` to, or `None` when it
     /// stays as it is.
     pub(super) fn target(self, cur: ColorFormat) -> Option<ColorFormat> {
@@ -57,12 +57,6 @@ impl FromStr for ConversionFormat {
     }
 }
 
-impl EnumVariants for ConversionFormat {
-    fn variant_names() -> Vec<String> {
-        VARIANTS.map(String::from).to_vec()
-    }
-}
-
 pub(super) const CONVERSION_FORMAT_TYPE_ID: EnumId =
     EnumId::literal("6d9db73e-5c92-4332-af0d-b2eb7c95acd0");
 
@@ -71,7 +65,6 @@ pub(super) const CONVERSION_FORMAT_DATATYPE: DataType = DataType::Enum(CONVERSIO
 #[cfg(test)]
 mod tests {
     use imaginarium::ColorFormat;
-    use scenarium::EnumVariants;
 
     use crate::image::format::{AS_IS, ConversionFormat, UnknownConversionFormat};
 
@@ -79,13 +72,13 @@ mod tests {
     /// back to what it names.
     #[test]
     fn as_is_leads_every_format_name() {
-        let names = ConversionFormat::variant_names();
+        let names = ConversionFormat::NAMES;
         assert_eq!(names[0], AS_IS);
         assert_eq!(names[0], "As Is");
         assert_eq!(names.len(), 10);
         assert_eq!(names[0].parse(), Ok(ConversionFormat::AsIs));
         for (name, format) in names[1..].iter().zip(ColorFormat::ALL) {
-            assert_eq!(name, &format.to_string());
+            assert_eq!(*name, format.to_string());
             assert_eq!(name.parse(), Ok(ConversionFormat::To(format)));
         }
         assert_eq!(

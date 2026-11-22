@@ -213,9 +213,10 @@ fn a_model_that_fit_survives_another_failing() {
         model: TransformModel::WithSip(ModelChoice::Auto, SipConfig::default()),
         matching: helpers::matching_config(6),
         // The fixture is deliberately marginal — 1.4 px of noise against a scorer scale of 0.67 px —
-        // so which models fit hangs on the samples drawn and the matches made.
+        // so which models fit hangs on the samples drawn and the matches made; seed 2 draws the
+        // samples that leave the affine map short of SIP's pairs.
         ransac: RansacConfig {
-            seed: 1,
+            seed: 2,
             ..Default::default()
         },
         ..Default::default()

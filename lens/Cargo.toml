@@ -11,10 +11,8 @@ glam = { workspace = true, features = ["std"] }
 imaginarium = { workspace = true }
 lumos = { workspace = true, features = ["ml"] }
 notify = { workspace = true }
-rand = { workspace = true, features = ["std_rng", "thread_rng"] }
 scenarium = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
-strum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tracing = { workspace = true, features = ["std"] }

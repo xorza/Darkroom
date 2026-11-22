@@ -1,8 +1,7 @@
 use common::Libm;
 use std::f64::consts::TAU;
 
-use rand::{RngExt, SeedableRng};
-use rand_chacha::ChaCha8Rng;
+use common::Rng;
 
 use crate::combine::reducer::combined_sample::CombinedSample;
 use crate::combine::reducer::pixel_samples::PixelSamples;
@@ -90,9 +89,9 @@ fn mean(
     .reducer()
 }
 
-fn standard_normal(rng: &mut ChaCha8Rng) -> f32 {
-    let u1 = rng.random::<f64>().max(f64::MIN_POSITIVE);
-    let u2 = rng.random::<f64>();
+fn standard_normal(rng: &mut Rng) -> f32 {
+    let u1 = rng.unit_f64().max(f64::MIN_POSITIVE);
+    let u2 = rng.unit_f64();
     ((-2.0 * u1.libm_ln()).sqrt() * (TAU * u2).libm_cos()) as f32
 }
 
@@ -225,7 +224,7 @@ fn sigma_clip_keeps_exactly_the_samples_its_bands_hold() {
         .chain([11.0; 47])
         .chain([100.0, 200.0, 500.0, 600.0, 700.0, 800.0])
         .collect();
-    let mut rng = ChaCha8Rng::seed_from_u64(3);
+    let mut rng = Rng::seeded(3);
     let mut hot: Vec<f32> = (0..19)
         .map(|_| 0.5 + 1e-3 * standard_normal(&mut rng))
         .collect();
@@ -590,7 +589,7 @@ fn the_fit_reads_the_centre_and_sigma_off_the_normal_scores() {
 /// errors of the difference between that reference and this run.
 #[test]
 fn linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count() {
-    let mut rng = ChaCha8Rng::seed_from_u64(0x51ed_270b_9a4c_33e1);
+    let mut rng = Rng::seeded(0x51ed_270b_9a4c_33e1);
     let mut scratch = ScratchBuffers::default();
     let mut prev = f64::INFINITY;
     for (count, trials, reference, per_trial_sd, reference_trials) in [
@@ -637,7 +636,7 @@ fn linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count() {
 /// that reference and this run.
 #[test]
 fn sigma_clip_and_winsorized_reject_clean_data_at_their_reference_rates() {
-    let mut rng = ChaCha8Rng::seed_from_u64(0xc11d_ea7a);
+    let mut rng = Rng::seeded(0xc11d_ea7a);
     let mut scratch = ScratchBuffers::default();
     let unit = [1.0f32; 50];
     let zeros = [0.0f32; 50];
@@ -1096,7 +1095,7 @@ fn gesd_gaussian_false_positive_rate_matches_alpha() {
     // Not `TestRng`: it is an LCG, and Box-Muller over consecutive LCG outputs lays the pairs on a
     // handful of spirals rather than filling the plane. That distorts the tails, which is exactly
     // what an outlier test measures.
-    let mut rng = ChaCha8Rng::seed_from_u64(0x947e_4d3a_7c16_b205);
+    let mut rng = Rng::seeded(0x947e_4d3a_7c16_b205);
     let mut scratch = ScratchBuffers::default();
     for count in [15, 25, 50, 100] {
         let rejection = Rejection::Gesd(GesdConfig {
@@ -1168,7 +1167,7 @@ fn the_driver_keeps_the_minimum_nearest_the_centre() {
     assert_eq!(nearest(&[1.0, 2.0, 3.0, 4.0], 2.5, 3), 0..3);
     assert_eq!(nearest(&[1.0, 2.0, 3.0, 4.0, 10.0], 3.0, 3), 1..4);
 
-    let mut rng = ChaCha8Rng::seed_from_u64(17);
+    let mut rng = Rng::seeded(17);
     for minimum in 1..=6 {
         for rejection in [
             Rejection::sigma_clip(0.5),

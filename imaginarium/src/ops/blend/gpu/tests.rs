@@ -1,5 +1,4 @@
 use common::USize2;
-use strum::IntoEnumIterator;
 
 use crate::color::color_format::ColorFormat;
 use crate::gpu::gpu_image::GpuImage;
@@ -23,8 +22,9 @@ fn gpu_matches_cpu() {
         let dst_cpu = create_test_image(format, USize2::new(13, 5), 100);
         let src = GpuImage::from_image(gpu, &src_cpu).unwrap();
         let dst = GpuImage::from_image(gpu, &dst_cpu).unwrap();
-        for (mode, clamp) in
-            BlendMode::iter().flat_map(|mode| Clamp::iter().map(move |clamp| (mode, clamp)))
+        for (mode, clamp) in BlendMode::ALL
+            .into_iter()
+            .flat_map(|mode| Clamp::ALL.into_iter().map(move |clamp| (mode, clamp)))
         {
             for alpha in [0.0, 0.35, 1.0] {
                 let params = Blend::new(mode, alpha).clamp(clamp);

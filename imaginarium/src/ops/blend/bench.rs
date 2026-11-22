@@ -6,7 +6,6 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion};
-use strum::IntoEnumIterator;
 
 use common::USize2;
 use common::bench::{Kind, Scale};
@@ -40,7 +39,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             InterleavedImage::new_zeroed(InterleavedDesc::new(USize2::new(FRAME.width, 1), format));
         group.throughput(fixture::throughput(FRAME.width, 2 * format.byte_len()));
         let kernel = BlendKernel::of(format);
-        for mode in BlendMode::iter() {
+        for mode in BlendMode::ALL {
             let params = Blend::new(mode, ALPHA);
             for variant in Variant::all(Some(kernel)) {
                 let input = format!(

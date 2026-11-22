@@ -33,10 +33,6 @@ serde = { workspace = true, features = ["derive", "std"] }
 tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 tracing = { workspace = true, features = ["std"] }
 
-[dependencies.clap]
-features = ["derive", "error-context", "help", "std", "suggestions", "usage"]
-workspace = true
-
 [dev-dependencies]
 common = { workspace = true, features = ["internals"] }
 darkroom = { workspace = true, features = ["internals"] }

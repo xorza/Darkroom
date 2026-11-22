@@ -1,5 +1,4 @@
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
+use common::Rng;
 use scenarium::FuncId;
 use scenarium::Invocation;
 use scenarium::async_lambda;
@@ -23,10 +22,10 @@ fn random_func() -> Func {
                             }| {
             debug_assert_eq!(inputs.len(), 2);
             debug_assert_eq!(outputs.len(), 1);
-            let rng = cache.get_or_insert_with(|| StdRng::from_rng(&mut rand::rng()));
+            let rng = cache.get_or_insert_with(Rng::from_entropy);
             let min = inputs[0].required_f64();
             let max = inputs[1].required_f64();
-            outputs[0] = scale_random(rng.random::<f64>(), min, max).into();
+            outputs[0] = scale_random(rng.unit_f64(), min, max).into();
             Ok(())
         }),
     )
